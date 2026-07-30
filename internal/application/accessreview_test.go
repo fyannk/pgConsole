@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/config"
-	"github.com/fyannk/pgconsole/internal/kube"
-	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/config"
+	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // panicReviewWriter fails the test if the read-only assembly ever reaches

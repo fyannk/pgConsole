@@ -175,7 +175,8 @@ scans, and the tests. In short:
 |---|---|
 | Product, in prose and headings | **pgConsole** |
 | Kubernetes kind | **`PgConsole`**, group `pgtoolbox.fyannk.dev` |
-| Repository, module, image, directory | `pgconsole` |
+| Repository and Go module | `pgConsole` |
+| Container image and directory | `pgconsole` |
 
 This mirrors the family: the product is `pgAdmin`, the kind is `PgAdmin`.
 

@@ -34,8 +34,8 @@ import (
 
 	rbacv1 "k8s.io/api/rbac/v1"
 
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // integrationEnv is the shared test API server of this file.

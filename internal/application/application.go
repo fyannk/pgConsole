@@ -28,14 +28,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/config"
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/identity"
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/ops"
-	"github.com/fyannk/pgconsole/internal/redact"
-	"github.com/fyannk/pgconsole/internal/review"
-	"github.com/fyannk/pgconsole/internal/web"
+	"github.com/fyannk/pgConsole/internal/config"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/ops"
+	"github.com/fyannk/pgConsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/review"
+	"github.com/fyannk/pgConsole/internal/web"
 )
 
 // HTTP server hardening values, shared with the family so both consoles

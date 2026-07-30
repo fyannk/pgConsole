@@ -31,7 +31,7 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 func rawBackup(name, cluster, method, phase string) *unstructured.Unstructured {

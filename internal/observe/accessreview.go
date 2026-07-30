@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Access-review bounds. One extra request is retained internally as a

@@ -1,0 +1,94 @@
+name: Bug report
+description: Something pgConsole renders or does is wrong or unexpected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. pgConsole is an observer of reported state: a
+        panel it cannot observe is meant to render `unknown`, and a source
+        that lost contact is meant to render **stale**. Please note the panel
+        state you saw so we can tell an honest degradation from a real bug.
+
+        **Never paste ServiceAccount tokens, `Authorization` headers, or other
+        secrets.** For a suspected vulnerability, use private reporting instead
+        of this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Deploy with ...
+        2. Open the ... panel
+        3. Observe ...
+    validations:
+      required: true
+  - type: dropdown
+    id: panel-state
+    attributes:
+      label: Observed panel state
+      description: What did the affected section show?
+      options:
+        - A concrete value (a real bug in the value)
+        - "unknown (expected something concrete)"
+        - "stale (expected current)"
+        - A denial page (403 / not authorized / identity required)
+        - A 404 / missing route
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: pgconsole-version
+    attributes:
+      label: pgConsole version or commit
+      placeholder: "e.g. v0.1.0, ghcr.io digest, or a commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: cnpg-version
+    attributes:
+      label: CloudNativePG version
+      placeholder: "e.g. 1.30.0"
+    validations:
+      required: true
+  - type: input
+    id: k8s-version
+    attributes:
+      label: Kubernetes / OpenShift version
+      placeholder: "e.g. Kubernetes 1.34.1, OpenShift 4.16"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - pgToolBox operator
+        - Standalone (example manifests + own proxy)
+        - Local dev (hack/dev-up.sh / kind)
+    validations:
+      required: true
+  - type: checkboxes
+    id: capabilities
+    attributes:
+      label: Enabled capabilities
+      options:
+        - label: "ALLOW_OPERATIONS=true"
+        - label: "ALLOW_ACCESS_REVIEW=true"
+        - label: "ALLOW_LOGS=true (default)"
+        - label: Repository evidence sidecar configured
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant redacted logs
+      description: >
+        pgConsole logs are structured and already redacted (category, never a
+        URL/token). Paste the relevant lines. Double-check for secrets first.
+      render: shell

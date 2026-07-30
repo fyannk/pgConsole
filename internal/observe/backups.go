@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Backup catalog bounds. One extra item is retained internally as a

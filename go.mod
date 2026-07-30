@@ -1,4 +1,4 @@
-module github.com/fyannk/pgconsole
+module github.com/fyannk/pgConsole
 
 go 1.26.4
 

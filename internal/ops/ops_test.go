@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // recordingWriter records every mutation the executor performs.

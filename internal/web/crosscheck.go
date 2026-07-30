@@ -17,8 +17,8 @@ package web
 import (
 	"sort"
 
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // Correlation contract constants.

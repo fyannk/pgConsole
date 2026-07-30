@@ -25,12 +25,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/fyannk/pgconsole/internal/application"
-	"github.com/fyannk/pgconsole/internal/config"
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/kube"
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/application"
+	"github.com/fyannk/pgConsole/internal/config"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 func main() {

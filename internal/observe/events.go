@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Event bounds. The rendered list and the retained state are both

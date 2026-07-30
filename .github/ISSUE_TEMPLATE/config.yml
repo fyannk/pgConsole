@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/fyannk/pgConsole/security/advisories/new
+    about: Report a suspected vulnerability privately — never in a public issue.
+  - name: Documentation
+    url: https://fyannk.github.io/pgConsole/
+    about: Deploy, configuration, architecture, and troubleshooting guides.

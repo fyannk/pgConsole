@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // MaxPods bounds the retained and rendered instance pods. A CloudNativePG

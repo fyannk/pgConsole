@@ -6,16 +6,16 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'pgConsole',
-  tagline: 'A read-only operational console for one CloudNativePG cluster',
+  tagline: 'An operational console for one CloudNativePG cluster, read-only by default',
   favicon: 'img/favicon.svg',
 
-  // GitHub Pages for fyannk/pgconsole.
+  // GitHub Pages for fyannk/pgConsole.
   url: 'https://fyannk.github.io',
-  baseUrl: '/pgconsole/',
+  baseUrl: '/pgConsole/',
   trailingSlash: true,
 
   organizationName: 'fyannk',
-  projectName: 'pgconsole',
+  projectName: 'pgConsole',
 
   onBrokenLinks: 'throw',
 

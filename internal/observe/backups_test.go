@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 type backupStep struct {
