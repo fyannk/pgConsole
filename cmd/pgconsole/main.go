@@ -1,0 +1,120 @@
+// Copyright 2026 The pgConsole Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Command pgconsole serves the per-cluster operational console for one
+// CloudNativePG Cluster. It validates its environment completely before
+// opening the listener and shuts down gracefully on SIGTERM.
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/fyannk/pgconsole/internal/application"
+	"github.com/fyannk/pgconsole/internal/config"
+	"github.com/fyannk/pgconsole/internal/evidence"
+	"github.com/fyannk/pgconsole/internal/kube"
+	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgconsole/internal/redact"
+)
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// run performs the whole lifecycle: validate, assemble, listen, serve.
+// Configuration errors are printed as variable names and constraints;
+// values never reach any output.
+func run() error {
+	cfg, err := config.Load(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	// Without in-cluster credentials the console still serves: the page
+	// stays the explicit unknown shell and readiness reports 503, which
+	// is the honest degraded state rather than a crash loop.
+	deps := application.Deps{Prober: kube.UnavailableProber{}, Clock: observe.RealClock{}}
+	client, err := kube.InClusterClient(kube.Options{
+		Namespace:       cfg.Namespace,
+		ClusterName:     cfg.ClusterName,
+		RequestTimeout:  cfg.APIRequestTimeout,
+		LogTailLines:    cfg.LogTailLines,
+		LogTailMaxBytes: cfg.LogTailMaxBytes,
+	}, logger)
+	if err != nil {
+		logger.Warn("kubernetes access unavailable",
+			slog.String("category", redact.Safe(err)))
+	} else {
+		deps.Source = client
+		deps.PodSource = client
+		deps.EventSource = client
+		deps.BackupSource = client
+		deps.LogTailer = client
+		deps.Prober = client.NewProber()
+		// The writer is passed only when operations are enabled: in
+		// read-only mode the client's mutation methods are never handed
+		// to any consumer.
+		if cfg.AllowOperations {
+			deps.Writer = client
+		}
+		// The access-review source and decision writer are passed only
+		// when the review panel is enabled: otherwise neither the client's
+		// request reads nor its status write reach any consumer.
+		if cfg.AllowAccessReview {
+			deps.AccessReviewSource = client
+			deps.AccessReviewWriter = client
+		}
+	}
+
+	// The evidence consumer follows fail-before-listen: with repository
+	// evidence configured, an unreadable or malformed pod-local token is
+	// a startup refusal, not a degraded panel — the operator mounted the
+	// contract wrong, and half a contract must not half-work.
+	if cfg.RepositoryEvidenceEnabled() {
+		evidenceClient, err := evidence.NewClient(
+			evidence.SocketPathFromURL(cfg.RepositoryEvidenceURL),
+			cfg.RepositoryEvidenceTokenFile,
+			evidence.Expectation{
+				Fingerprint:  cfg.RepositoryExpectedFingerprint,
+				BarmanServer: cfg.RepositoryBarmanServer,
+				Namespace:    cfg.Namespace,
+			})
+		if err != nil {
+			return err
+		}
+		deps.EvidenceFetcher = evidenceClient
+	}
+
+	app, err := application.New(cfg, deps, logger)
+	if err != nil {
+		return err
+	}
+	if err := app.Listen(); err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	return app.Serve(ctx)
+}

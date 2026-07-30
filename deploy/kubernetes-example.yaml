@@ -1,0 +1,187 @@
+# Example manifests for a read-only pgConsole observing the CloudNativePG
+# Cluster "orders" in namespace "payments". They mirror what the pgtoolbox
+# operator generates. The operator additionally deploys the authentication
+# proxy in front of this Service and owns the exposure (Route, Ingress,
+# HTTPRoute, or ClusterIP); nothing here is reachable without it.
+#
+# The Role below is the application's entire authority: read-only, nothing
+# on the secret resource, no mutating verb. RBAC cannot pin list/watch by
+# resourceNames, so the namespace plus application-side selection is the
+# honest scope for listing; the cluster "get" is pinned by name.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pgconsole-orders
+  namespace: payments
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pgconsole-orders-read
+  namespace: payments
+rules:
+  # Cluster status: get pinned to the one target cluster.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get"]
+    resourceNames: ["orders"]
+  # Cluster watch: RBAC cannot pin watch by resourceNames; the
+  # application watches with a metadata.name field selector.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["watch"]
+  # Backups: namespace-scoped, application-side selection.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups", "scheduledbackups"]
+    verbs: ["get", "list", "watch"]
+  # Instance pods: selected by the cluster's labels.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Bounded log tail: only pods proven to belong to the cluster. Omit
+  # this rule when deploying with ALLOW_LOGS=false.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Events: namespace-scoped, filtered to the cluster's objects.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch"]
+  # Optional: which repository backs the cluster. Missing permission
+  # degrades to an unknown panel.
+  - apiGroups: ["barmancloud.cnpg.io"]
+    resources: ["objectstores"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pgconsole-orders-read
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pgconsole-orders-read
+subjects:
+  - kind: ServiceAccount
+    name: pgconsole-orders
+    namespace: payments
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgconsole-orders
+  namespace: payments
+spec:
+  selector:
+    app.kubernetes.io/name: pgconsole
+    app.kubernetes.io/instance: orders
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+# Default-deny NetworkPolicy. The operator generates the ingress
+# exception for its authentication proxy and the egress exception for the
+# Kubernetes API server of the concrete cluster; both are intentionally
+# absent from this example because their selectors are deployment
+# specific.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pgconsole-orders-default-deny
+  namespace: payments
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: pgconsole
+      app.kubernetes.io/instance: orders
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgconsole-orders
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: pgconsole
+    app.kubernetes.io/instance: orders
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pgconsole
+      app.kubernetes.io/instance: orders
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pgconsole
+        app.kubernetes.io/instance: orders
+    spec:
+      serviceAccountName: pgconsole-orders
+      # The token is a projected volume mounted only into the console
+      # container, never a pod-wide automount.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pgconsole
+          image: pgconsole:dev
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: CLUSTER_NAME
+              value: orders
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kube-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: kube-api-access
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace

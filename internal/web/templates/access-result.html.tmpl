@@ -1,0 +1,32 @@
+{{- /*
+  Access-request decision result. Renders web.AccessDecisionResultView:
+  the fire-and-observe outcome of one approve or deny. The console wrote
+  the request status; the operator's controller acts on an approval. The
+  list reflects the write once the informer catches up.
+*/ -}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pgConsole — access request {{.Action}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>pgConsole — decision recorded</h1>
+    <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
+    <nav class="links"><a href="/access-requests">back to access requests</a></nav>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>{{.Action}} — {{.Request}}</h2>
+      {{- if .Accepted}}
+      <p class="state">recorded: the decision was written to the request status. The operator's controller acts on an approval; this console does not create users.</p>
+      {{- else}}
+      <p class="state">not recorded: {{.Outcome}}. Nothing was changed by this console beyond the attempt.</p>
+      {{- end}}
+    </section>
+  </main>
+</body>
+</html>

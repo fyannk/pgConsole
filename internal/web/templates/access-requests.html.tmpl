@@ -1,0 +1,85 @@
+{{- /*
+  Access-request review panel. Renders web.AccessReviewView: the dba-only
+  list of pgToolBox access requests. Pending requests carry approve and
+  deny forms, each POSTing a CSRF token bound to the action and request;
+  decided requests are a read-only audit list. This console records the
+  reviewer's decision on the request status only — the operator's
+  controller materializes the user after an approval.
+*/ -}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pgConsole — access requests {{.ClusterName}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>pgConsole — access requests</h1>
+    <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
+    <nav class="links"><a href="/">back to the console</a></nav>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Pending requests</h2>
+      <p class="origin">source: Kubernetes ({{.Meta.State}}, observed {{.Meta.Age}} ago, generation {{.Meta.Generation}})</p>
+      {{- if not .HasSnapshot}}
+      <p class="state">unknown: no observation yet</p>
+      {{- else if .Truncated}}
+      <p class="state">the request list reached its safety or display bound; older requests are not shown</p>
+      {{- end}}
+      {{- if .Pending}}
+      <table>
+        <thead><tr><th>Subject</th><th>Message</th><th>Age</th><th>Decision</th></tr></thead>
+        <tbody>
+          {{- range .Pending}}
+          <tr>
+            <td>{{.Subject}}</td>
+            <td>{{.Message}}</td>
+            <td>{{.Age}}</td>
+            <td>
+              <form method="POST" action="/access-requests/{{.Name}}/approve">
+                <input type="hidden" name="csrf" value="{{.ApproveToken}}">
+                <label>Role
+                  <select name="role" required>
+                    <option value="" disabled selected>choose a role</option>
+                    {{- range $.Roles}}
+                    <option value="{{.}}">{{.}}</option>
+                    {{- end}}
+                  </select>
+                </label>
+                <button type="submit">Approve</button>
+              </form>
+              <form method="POST" action="/access-requests/{{.Name}}/deny">
+                <input type="hidden" name="csrf" value="{{.DenyToken}}">
+                <button type="submit">Deny</button>
+              </form>
+            </td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      {{- else if .HasSnapshot}}
+      <p class="state">no pending requests</p>
+      {{- end}}
+    </section>
+
+    <section class="panel">
+      <h2>Decided requests</h2>
+      {{- if .Decided}}
+      <table>
+        <thead><tr><th>Subject</th><th>State</th><th>Role</th><th>Decided by</th><th>Age</th></tr></thead>
+        <tbody>
+          {{- range .Decided}}
+          <tr><td>{{.Subject}}</td><td>{{.State}}</td><td>{{if .RequestedRole}}{{.RequestedRole}}{{else}}—{{end}}</td><td>{{.DecidedBy}}</td><td>{{.DecidedAge}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      {{- else}}
+      <p class="state">no decided requests</p>
+      {{- end}}
+    </section>
+  </main>
+</body>
+</html>

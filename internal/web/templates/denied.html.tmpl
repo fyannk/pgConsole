@@ -1,0 +1,22 @@
+{{- /*
+  Denial page. Renders web.DeniedView: a constant message stating why
+  the request was refused — never the identity, never probe detail.
+*/ -}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pgConsole — denied</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header><h1>pgConsole</h1></header>
+  <main>
+    <section class="panel">
+      <h2>Access denied</h2>
+      <p class="state">{{.Message}}</p>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,215 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
+
+# Publishing runs only for trusted tag pushes or maintainer dispatches and only
+# after ordinary CI succeeds for the exact annotated tag commit.
+permissions:
+  actions: read
+  artifact-metadata: write
+  attestations: write
+  contents: write
+  id-token: write
+  packages: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/fyannk/pgconsole
+
+jobs:
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${DISPATCH_TAG}"
+            expected_sha=""
+          else
+            [[ "${GITHUB_REF}" == refs/tags/v* ]]
+            tag="${GITHUB_REF_NAME}"
+            expected_sha="${GITHUB_SHA}"
+          fi
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must be semantic and start with v: ${tag}" >&2
+            exit 1
+          fi
+          prerelease=false
+          [[ "${tag}" != *-* ]] || prerelease=true
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "expected-sha=${expected_sha}" >> "${GITHUB_OUTPUT}"
+          echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: refs/tags/${{ steps.release.outputs.tag }}
+
+      - name: Verify tag and successful CI
+        id: verified
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.release.outputs.expected-sha }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$(git cat-file -t "refs/tags/${TAG}")" != "tag" ]]; then
+            echo "release tag must be annotated: ${TAG}" >&2
+            exit 1
+          fi
+          tag_sha="$(git rev-list -n 1 "refs/tags/${TAG}")"
+          if [[ -n "${EXPECTED_SHA}" ]] && [[ "${tag_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "tag moved after the release workflow started" >&2
+            exit 1
+          fi
+          successful_run=""
+          for attempt in {1..180}; do
+            run="$(
+              gh api --method GET \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+                -f branch="${TAG}" -f event=push -f per_page=100 \
+                --jq "[.workflow_runs[] | select(.head_sha == \"${tag_sha}\")][0] | [.id, .status, (.conclusion // \"\")] | @tsv"
+            )"
+            if [[ -z "${run}" ]]; then
+              echo "waiting for CI to start for ${TAG} (${attempt}/180)"
+              sleep 10
+              continue
+            fi
+            IFS=$'\t' read -r run_id run_status run_conclusion <<< "${run}"
+            if [[ "${run_status}" != "completed" ]]; then
+              echo "waiting for CI run ${run_id} (${attempt}/180)"
+              sleep 10
+              continue
+            fi
+            if [[ "${run_conclusion}" != "success" ]]; then
+              echo "CI run ${run_id} completed with ${run_conclusion}" >&2
+              exit 1
+            fi
+            successful_run="${run_id}"
+            break
+          done
+          if [[ -z "${successful_run}" ]]; then
+            echo "CI did not complete for ${TAG} within 30 minutes" >&2
+            exit 1
+          fi
+          echo "sha=${tag_sha}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build release assets and supply-chain reports
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: make package supply-chain VERSION="${TAG}" IMAGE="pgconsole:${TAG}"
+
+      - name: Attest release binaries
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/pgconsole-linux-amd64
+            dist/pgconsole-linux-arm64
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare container metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.release.outputs.tag }}
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ steps.release.outputs.prerelease == 'false' }}
+          labels: |
+            org.opencontainers.image.title=pgConsole
+            org.opencontainers.image.description=Operational console for one CloudNativePG cluster
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.documentation=https://fyannk.github.io/pgconsole/
+            org.opencontainers.image.version=${{ steps.release.outputs.tag }}
+            org.opencontainers.image.revision=${{ steps.verified.outputs.sha }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and publish container image
+        id: image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest container image
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          printf '%s@%s\n' "${IMAGE_NAME}" "${DIGEST}" > artifacts/release/container-image.txt
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "release ${TAG} is already published"
+            exit 0
+          fi
+          flags=(--verify-tag --generate-notes)
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            flags+=(--prerelease --latest=false)
+          else
+            flags+=(--prerelease=false --latest)
+          fi
+          gh release create "${TAG}" \
+            dist/pgconsole-linux-amd64 \
+            dist/pgconsole-linux-arm64 \
+            dist/SHA256SUMS \
+            dist/VERSION \
+            artifacts/release/container-image.txt \
+            artifacts/release/image-digest.json \
+            artifacts/release/licenses.csv \
+            artifacts/release/sbom.spdx.json \
+            artifacts/release/vulnerability.json \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "pgConsole ${TAG}" \
+            "${flags[@]}"
