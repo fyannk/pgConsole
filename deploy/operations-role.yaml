@@ -1,0 +1,49 @@
+# Additional Role for ALLOW_OPERATIONS=true, bound to the same
+# ServiceAccount as the read-only Role. Apply this only when operations
+# are enabled; the default deployment never has it, so RBAC alone denies
+# every mutation regardless of the flag.
+#
+# The write surface is exactly the four enumerated operations, pinned by
+# resourceNames where the verb allows:
+#   - request on-demand backup  -> create backups
+#   - reload / rolling restart  -> patch clusters (annotation)
+#   - promote (switchover)      -> patch clusters/status
+#
+# There is no delete, no deletecollection, no spec-replace path, and
+# nothing on secrets. Single-instance replica restart (a pod deletion in
+# the plugin) is deliberately not enabled here: it would require a delete
+# verb and carries its own risk review.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pgconsole-orders-operate
+  namespace: payments
+rules:
+  # Request on-demand backup.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["create"]
+  # Reload and rolling restart: annotation patches on the one cluster.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["patch"]
+    resourceNames: ["orders"]
+  # Promote (switchover): status subresource patch on the one cluster.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters/status"]
+    verbs: ["patch"]
+    resourceNames: ["orders"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pgconsole-orders-operate
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pgconsole-orders-operate
+subjects:
+  - kind: ServiceAccount
+    name: pgconsole-orders
+    namespace: payments

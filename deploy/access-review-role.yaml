@@ -1,0 +1,47 @@
+# Additional Role for ALLOW_ACCESS_REVIEW=true, bound to the same
+# ServiceAccount as the read-only Role. Apply this only when the dba
+# access-request review panel is enabled; the default deployment never
+# has it, so RBAC alone denies the one decision write regardless of the
+# flag. In the pgToolBox deployment the operator adds these rules to the
+# console's generated Role instead.
+#
+# The write surface is exactly one verb on one subresource: recording a
+# reviewer's decision on a request status. The console reads requests and
+# role names to render the panel; it never creates or modifies users,
+# roles, proxy configuration, or the request spec.
+#
+# There is no create, delete, deletecollection, spec-write, or
+# cluster-scoped grant, and nothing on secrets. The operator's controller
+# materializes the PgToolBoxUser after an approval.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pgconsole-orders-access-review
+  namespace: payments
+rules:
+  # Read the pending and decided access requests to render the panel.
+  - apiGroups: ["pgtoolbox.fyannk.dev"]
+    resources: ["pgtoolboxaccessrequests"]
+    verbs: ["get", "list", "watch"]
+  # Record the reviewer's decision on the request status subresource.
+  - apiGroups: ["pgtoolbox.fyannk.dev"]
+    resources: ["pgtoolboxaccessrequests/status"]
+    verbs: ["update"]
+  # Read the role names to populate the approval picker.
+  - apiGroups: ["pgtoolbox.fyannk.dev"]
+    resources: ["pgtoolboxroles"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pgconsole-orders-access-review
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pgconsole-orders-access-review
+subjects:
+  - kind: ServiceAccount
+    name: pgconsole-orders
+    namespace: payments

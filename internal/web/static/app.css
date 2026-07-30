@@ -1,0 +1,43 @@
+/* Embedded stylesheet. Status is conveyed through text and structure;
+   color is never the only signal. */
+:root { color-scheme: light dark; }
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem auto;
+  max-width: 60rem;
+  padding: 0 1rem;
+  line-height: 1.5;
+}
+header h1 { margin-bottom: 0.25rem; }
+dl.target { display: flex; gap: 0.5rem 1.5rem; flex-wrap: wrap; }
+dl.target dt { font-weight: 600; }
+dl.target dt::after { content: ":"; }
+dl.target dd { margin: 0; }
+section.panel {
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 0.5rem;
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+}
+section.panel h2 { margin: 0.25rem 0; font-size: 1.1rem; }
+p.state { margin: 0.25rem 0; }
+p.meta { margin: 0.25rem 0; font-size: 0.85rem; opacity: 0.75; }
+p.origin, span.origin { margin: 0.25rem 0; font-size: 0.85rem; opacity: 0.75; }
+div.finding {
+  border-left: 3px solid currentColor;
+  margin: 0.5rem 0;
+  padding: 0.25rem 0.75rem;
+}
+table { border-collapse: collapse; margin: 0.5rem 0; width: 100%; }
+pre.logs {
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+th, td { text-align: left; padding: 0.25rem 0.5rem; }
+thead tr { border-bottom: 1px solid color-mix(in srgb, currentColor 40%, transparent); }

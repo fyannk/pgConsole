@@ -1,0 +1,36 @@
+{{- /*
+  Operation confirmation. Renders web.ConfirmView: one explicit
+  confirmation step for a state-changing operation. The form POSTs the
+  CSRF token; the route is never GET. For instance operations the
+  chosen instance is submitted with the confirmation.
+*/ -}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pgConsole — confirm {{.Op.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>pgConsole — confirm operation</h1>
+    <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
+    <nav class="links"><a href="/operations">back to operations</a></nav>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>{{.Op.Title}}</h2>
+      <p class="state">{{.Op.Summary}}</p>
+      <form method="POST" action="/operations/{{.Op.ID}}">
+        <input type="hidden" name="csrf" value="{{.CSRFToken}}">
+        {{- if .Op.NeedsInstance}}
+        <p><label>Instance <input type="text" name="instance" value="{{.Target}}" required pattern="[a-z0-9][-a-z0-9.]*"></label></p>
+        {{- end}}
+        <p><button type="submit">Confirm and request</button></p>
+      </form>
+      <p class="origin">This requests the operation; the operator reports its progress on the console.</p>
+    </section>
+  </main>
+</body>
+</html>

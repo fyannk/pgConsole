@@ -1,0 +1,1071 @@
+// Copyright 2026 The pgConsole Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package web
+
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/fyannk/pgconsole/internal/evidence"
+	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgconsole/internal/ops"
+)
+
+// Origin identifies which observer a rendered claim comes from.
+// Attribution is a type, not a convention: a template receives claims
+// only inside view models that carry their Origin, so a claim cannot be
+// rendered without its source, and the vocabularies never blend.
+type Origin string
+
+// The three claim origins of the product.
+const (
+	// OriginOperator marks state reported by the CloudNativePG operator.
+	OriginOperator Origin = "operator-reported"
+	// OriginKubernetes marks state observed from the Kubernetes API.
+	OriginKubernetes Origin = "kubernetes-observed"
+	// OriginRepository marks independent repository evidence.
+	OriginRepository Origin = "repository-evidence"
+)
+
+// Label returns the origin text rendered next to a claim.
+func (o Origin) Label() string {
+	return string(o)
+}
+
+// unknown is the explicit rendering of any fact the sources did not
+// report. Absence of data is never an empty cell and never a value.
+const unknown = "unknown"
+
+// maxDisplayMessage bounds rendered operator messages in runes.
+const maxDisplayMessage = 512
+
+// Panel is one attributed region of the console page. Every panel names
+// its claim origin and an explicit state; absence of data is the state
+// "unknown", never an empty healthy panel.
+type Panel struct {
+	// Title names the panel.
+	Title string
+	// Origin attributes every claim the panel shows.
+	Origin Origin
+	// State is the explicit panel state, such as "unknown".
+	State string
+	// Detail explains the state in one short sentence.
+	Detail string
+}
+
+// ConditionView is one operator-reported condition prepared for
+// rendering: bounded, with empty facts already replaced by "unknown".
+type ConditionView struct {
+	// Type is the condition type.
+	Type string
+	// Status is the reported status.
+	Status string
+	// Reason is the machine reason or "unknown".
+	Reason string
+	// Message is the bounded human message, possibly empty.
+	Message string
+}
+
+// ClusterView is the operator-reported cluster section. All fields are
+// display strings: a fact the operator did not report is "unknown".
+type ClusterView struct {
+	// Origin attributes the whole section.
+	Origin Origin
+	// Absent reports that the API server confirmed the cluster does not
+	// exist; the fact fields are meaningless then.
+	Absent bool
+	// Phase is the operator-reported phase.
+	Phase string
+	// PhaseReason is the operator-reported phase reason.
+	PhaseReason string
+	// CurrentPrimary is the current primary instance.
+	CurrentPrimary string
+	// TargetPrimary is the target primary instance.
+	TargetPrimary string
+	// Instances is "ready/desired" or "unknown".
+	Instances string
+	// Timeline is the PostgreSQL timeline or "unknown".
+	Timeline string
+	// Image is the reported container image or "unknown".
+	Image string
+	// PostgresVersion is the reported major version or "unknown".
+	PostgresVersion string
+	// Conditions are the bounded operator conditions.
+	Conditions []ConditionView
+}
+
+// Link is one operator-configured link-out, rendered as a plain anchor.
+type Link struct {
+	// Label names the destination.
+	Label string
+	// URL is the validated link-out base URL.
+	URL string
+}
+
+// SectionMeta is the per-section snapshot line: sources fail
+// independently, so each section states its own freshness.
+type SectionMeta struct {
+	// State is "current" or "stale".
+	State string
+	// Age is the snapshot age.
+	Age string
+	// Generation is the snapshot generation.
+	Generation string
+}
+
+// PodRowView is one instance pod prepared for rendering; unreported
+// facts are "unknown".
+type PodRowView struct {
+	// Name is the pod name.
+	Name string
+	// Role is the observed instance role or "unknown".
+	Role string
+	// Phase is the pod phase, suffixed when the pod is deleting.
+	Phase string
+	// Ready is "true", "false", or "unknown".
+	Ready string
+	// Restarts is the restart count or "unknown".
+	Restarts string
+	// Node is the assigned node or "unknown".
+	Node string
+	// Image is the PostgreSQL container image or "unknown".
+	Image string
+	// LogsURL links the pod's bounded log tail; empty renders no link.
+	LogsURL string
+}
+
+// DisagreementView renders a primary-role disagreement between the two
+// observers. Both claims keep their origins; the console never resolves
+// the conflict silently.
+type DisagreementView struct {
+	// OperatorClaim states the operator's primary claim.
+	OperatorClaim string
+	// OperatorOrigin attributes it.
+	OperatorOrigin Origin
+	// ObservedClaim states what the pod labels report.
+	ObservedClaim string
+	// ObservedOrigin attributes it.
+	ObservedOrigin Origin
+}
+
+// EventRowView is one rendered event; unreported facts are "unknown".
+type EventRowView struct {
+	// Type is the event type, such as "Warning".
+	Type string
+	// Reason is the machine reason or "unknown".
+	Reason string
+	// Object is "kind/name" of the involved object.
+	Object string
+	// Message is the bounded human message, possibly empty.
+	Message string
+	// Count is the delivery count.
+	Count string
+	// Age is the time since the last occurrence.
+	Age string
+}
+
+// EventsView is the Kubernetes-observed event section.
+type EventsView struct {
+	// Origin attributes the whole section.
+	Origin Origin
+	// Meta is the section's own snapshot line.
+	Meta SectionMeta
+	// Window states the configured age window.
+	Window string
+	// Rows are the bounded, newest-first events.
+	Rows []EventRowView
+	// Truncated reports that more candidates existed than the bound.
+	Truncated bool
+	// PodEventsWithheld reports that pod events exist but membership is
+	// unknown, so they are withheld rather than guessed.
+	PodEventsWithheld bool
+}
+
+// BackupRowView is one operator-reported Backup. A completed phase remains an
+// attributed operator claim; it is never presented as repository evidence.
+type BackupRowView struct {
+	// Name is the Backup resource name.
+	Name string
+	// Phase is the attributed phase display.
+	Phase string
+	// Method is the reported backup method.
+	Method string
+	// Started is the UTC start time or unknown.
+	Started string
+	// Stopped is the UTC stop time or unknown.
+	Stopped string
+	// Age is relative to stop time, falling back to creation time.
+	Age string
+	// SnapshotState is explicitly unknown for volume snapshots.
+	SnapshotState string
+}
+
+// ScheduledBackupRowView is one operator-reported ScheduledBackup.
+type ScheduledBackupRowView struct {
+	// Name is the ScheduledBackup resource name.
+	Name string
+	// Method is the configured backup method.
+	Method string
+	// Schedule is the reported six-field cron expression.
+	Schedule string
+	// Suspended is true, false, or unknown.
+	Suspended string
+	// LastSchedule is the reported UTC time or unknown.
+	LastSchedule string
+	// NextSchedule is the reported UTC time or unknown.
+	NextSchedule string
+}
+
+// BackupsView is the bounded Backup and ScheduledBackup section.
+type BackupsView struct {
+	// Origin attributes all Backup and ScheduledBackup claims.
+	Origin Origin
+	// Meta is this catalog's own freshness line.
+	Meta SectionMeta
+	// LastCompletedAge is derived from the latest completed stop time.
+	LastCompletedAge string
+	// Rows are the bounded Backup rows.
+	Rows []BackupRowView
+	// ScheduledRows are the bounded ScheduledBackup rows.
+	ScheduledRows []ScheduledBackupRowView
+	// BackupsTruncated reports a Backup safety ceiling.
+	BackupsTruncated bool
+	// SchedulesTruncated reports a ScheduledBackup safety ceiling.
+	SchedulesTruncated bool
+	// EvidenceLink is the optional ObjectStoreViewer link.
+	EvidenceLink *Link
+}
+
+// ObjectStoreView separates the operator-reported reference from the
+// Kubernetes-observed metadata lookup.
+type ObjectStoreView struct {
+	// Name is the configured reference name or unknown.
+	Name string
+	// ReferenceState is the cluster configuration claim.
+	ReferenceState string
+	// ReferenceOrigin attributes the cluster configuration claim.
+	ReferenceOrigin Origin
+	// ObservationState is the metadata lookup outcome.
+	ObservationState string
+	// ObservationOrigin attributes the API lookup claim.
+	ObservationOrigin Origin
+}
+
+// StateLineView is one repository semantic result: the four-state
+// value plus the stable reason code. Producer messages never reach
+// this type.
+type StateLineView struct {
+	// State is healthy, warning, unhealthy, or unknown.
+	State string
+	// Code is the stable reason code.
+	Code string
+}
+
+// Display returns "state (code)" or "unknown".
+func (s StateLineView) Display() string {
+	if s.State == "" {
+		return unknown
+	}
+	if s.Code == "" {
+		return s.State
+	}
+	return s.State + " (" + s.Code + ")"
+}
+
+// CapabilityRowView is one repository capability row.
+type CapabilityRowView struct {
+	// ID identifies the evidence operation.
+	ID string
+	// Support states whether the format proves the capability.
+	Support string
+	// State is the capability's result display.
+	State string
+}
+
+// BarmanSummaryView is the recognized barman-cloud summary block.
+type BarmanSummaryView struct {
+	// Backups is the backup evidence count display.
+	Backups string
+	// BackupStates summarizes backups per evidence state.
+	BackupStates string
+	// WAL is the WAL continuity result.
+	WAL StateLineView
+	// WALCounts summarizes WAL objects per class.
+	WALCounts string
+	// Timeline is the timeline traversal result.
+	Timeline StateLineView
+	// Coverage is the observed recovery coverage result.
+	Coverage StateLineView
+	// Retention is the retention comparison result.
+	Retention StateLineView
+	// RetentionBackups is the visible/usable backup count display.
+	RetentionBackups string
+	// RetentionWindow is the oldest-to-newest completion window.
+	RetentionWindow string
+	// RetentionMinimum is the configured redundancy expectation display.
+	RetentionMinimum string
+	// LatestArchiveAge is the newest WAL receipt age.
+	LatestArchiveAge string
+	// Truncated reports a producer safety ceiling on ranges or
+	// diagnostics; the affected conclusions are already unknown.
+	Truncated bool
+}
+
+// RepositoryView is the repository-evidence section: the independent
+// observer's claims, re-rendered from the validated projection, never
+// blended with operator or Kubernetes vocabulary.
+type RepositoryView struct {
+	// Origin attributes the whole section.
+	Origin Origin
+	// Meta is the console's own sidecar-contact line.
+	Meta SectionMeta
+	// ContactFailure is the latest poll failure kind, empty while
+	// contact holds.
+	ContactFailure string
+	// Fingerprint is the redacted repository destination identity.
+	Fingerprint string
+	// Scope is the format-owned scope display.
+	Scope string
+	// Repository is the provider and format display.
+	Repository string
+	// ProducerVersion is the emitting sidecar build version.
+	ProducerVersion string
+	// ClusterIdentity states how the evidence's cluster binding relates
+	// to the console's own observed cluster UID.
+	ClusterIdentity string
+	// Revision is the sidecar's publication revision.
+	Revision string
+	// EvidenceGeneration is the sidecar's complete-evidence generation.
+	EvidenceGeneration string
+	// Completeness is the sidecar's completeness claim.
+	Completeness string
+	// SourceStale reports the sidecar's own staleness claim against
+	// the repository — distinct from the console's contact staleness.
+	SourceStale bool
+	// Overall is the snapshot state and reason code.
+	Overall StateLineView
+	// ScanCompleted is the evidence scan completion time or unknown.
+	ScanCompleted string
+	// LastAttempt is the last refresh attempt time or unknown.
+	LastAttempt string
+	// Inventory is the provider-neutral inventory display.
+	Inventory string
+	// InventoryFailure is the producer's redacted failure category of
+	// a failed latest attempt, empty otherwise.
+	InventoryFailure string
+	// Capabilities are the complete capability rows.
+	Capabilities []CapabilityRowView
+	// DetailsUnknown reports an unrecognized details variant; the
+	// bounded tag is shown, the payload was discarded by the consumer.
+	DetailsUnknown bool
+	// DetailsType is the tagged-union type display.
+	DetailsType string
+	// Barman is the recognized barman-cloud summary, nil otherwise.
+	Barman *BarmanSummaryView
+}
+
+// PodsView is the Kubernetes-observed instance pod section.
+type PodsView struct {
+	// Origin attributes the whole section.
+	Origin Origin
+	// Meta is the section's own snapshot line.
+	Meta SectionMeta
+	// Rows are the bounded, sorted pods.
+	Rows []PodRowView
+	// Truncated reports that the member set exceeded the bound and was
+	// cut, visibly.
+	Truncated bool
+	// Disagreement is non-nil when the operator-reported primary and
+	// the observed role labels conflict.
+	Disagreement *DisagreementView
+	// LogsEnabled reports that the log tail affordance exists.
+	LogsEnabled bool
+}
+
+// LogsView is the log tail page's view model.
+type LogsView struct {
+	// ClusterName is the configured target cluster.
+	ClusterName string
+	// Pod is the requested member pod.
+	Pod string
+	// Origin attributes the content.
+	Origin Origin
+	// State carries the refusal or unavailability text; empty on
+	// success.
+	State string
+	// Bounds states the applied line and byte limits.
+	Bounds string
+	// Content is the tail content, rendered as escaped text only.
+	Content string
+	// Truncated reports the byte ceiling cut this tail.
+	Truncated bool
+}
+
+// IdentityView is the display-only identity line. Both the user and the
+// level are proxy-asserted — trustworthy under the deployment's
+// ingress-confinement invariant, never the user's own RBAC. It is never
+// used for authorization decisions here — those happen before rendering.
+type IdentityView struct {
+	// User is the forwarded username, escaped by the template.
+	User string
+	// Level is the proxy-asserted authorization level (view, poweruser,
+	// dba, or none when unrecognized).
+	Level string
+	// Label states the value's worth: "proxy-asserted".
+	Label string
+}
+
+// DeniedView is the constant denial page's view model.
+type DeniedView struct {
+	// Message is the constant denial text; it carries no identity and
+	// no probe detail.
+	Message string
+}
+
+// OperationsView lists the enumerated operations.
+type OperationsView struct {
+	// ClusterName is the target cluster.
+	ClusterName string
+	// Operations is the closed catalog.
+	Operations []ops.Descriptor
+}
+
+// ConfirmView renders one operation's confirmation form.
+type ConfirmView struct {
+	// ClusterName is the target cluster.
+	ClusterName string
+	// Op is the operation being confirmed.
+	Op ops.Descriptor
+	// Target is the chosen instance, for instance operations.
+	Target string
+	// CSRFToken is the confirmation token bound to Op and Target.
+	CSRFToken string
+}
+
+// ResultView renders the fire-and-observe outcome.
+type ResultView struct {
+	// ClusterName is the target cluster.
+	ClusterName string
+	// Op is the requested operation.
+	Op ops.Descriptor
+	// Target is the chosen instance, for instance operations.
+	Target string
+	// Accepted reports the operator accepted the request.
+	Accepted bool
+	// Outcome is the outcome category, safe to display.
+	Outcome string
+}
+
+// Page is the view model of the console page.
+type Page struct {
+	// ClusterName is the configured target cluster.
+	ClusterName string
+	// Namespace is the configured target namespace.
+	Namespace string
+	// SnapshotState is "none", "current", or "stale".
+	SnapshotState string
+	// SnapshotAge is the age of the snapshot, empty without one.
+	SnapshotAge string
+	// Generation is the snapshot generation, empty without one.
+	Generation string
+	// Cluster is the operator-reported section, nil without a snapshot.
+	Cluster *ClusterView
+	// Pods is the Kubernetes-observed section, nil without a snapshot.
+	Pods *PodsView
+	// Events is the Kubernetes-observed event section, nil without a
+	// snapshot.
+	Events *EventsView
+	// Backups is the operator-reported backup catalog.
+	Backups *BackupsView
+	// ObjectStore is the optional plugin reference lookup.
+	ObjectStore *ObjectStoreView
+	// Repository is the repository-evidence section, nil when the
+	// consumer is disabled or has no report yet.
+	Repository *RepositoryView
+	// CrossCheck is the composed backup cross-check, nil unless the
+	// evidence consumer is enabled and an operator catalog exists.
+	CrossCheck *CrossCheckView
+	// Panels are the attributed regions in render order.
+	Panels []Panel
+	// Links are the configured link-outs, possibly empty.
+	Links []Link
+	// Identity is the display-only identity line, nil when no identity
+	// was forwarded or display is disabled.
+	Identity *IdentityView
+	// OperationsEnabled reports that the operations entry link renders.
+	OperationsEnabled bool
+}
+
+// Links are the operator-configured link-out URLs; empty entries hide
+// the corresponding anchor.
+type Links struct {
+	// ObjectStoreViewer is the repository evidence link-out.
+	ObjectStoreViewer string
+	// PgAdmin is the SQL console link-out.
+	PgAdmin string
+	// Monitoring is the metrics dashboard link-out.
+	Monitoring string
+}
+
+// noSnapshot is the placeholder detail of an absent section snapshot.
+const noSnapshot = "no snapshot"
+
+// snapshots bundles what buildPage renders from.
+type snapshots struct {
+	cluster         observe.Snapshot
+	ok              bool
+	pods            observe.PodsSnapshot
+	podsOK          bool
+	events          observe.EventsSnapshot
+	eventsOK        bool
+	backups         observe.BackupsSnapshot
+	backupsOK       bool
+	evidence        evidence.Status
+	evidenceEnabled bool
+	window          time.Duration
+	allowLogs       bool
+}
+
+// buildPage assembles the page from the current snapshots. Handlers
+// call this and the template; nothing here touches any API.
+func buildPage(clusterName, namespace string, s snapshots, now time.Time, links Links) Page {
+	page := Page{
+		ClusterName:   clusterName,
+		Namespace:     namespace,
+		SnapshotState: "none",
+		Links:         buildLinks(links),
+	}
+	if s.evidenceEnabled {
+		if s.evidence.HasReport {
+			page.Repository = buildRepositoryView(s.evidence, s.cluster, s.ok, now)
+		} else {
+			detail := "no successful sidecar contact yet"
+			if s.evidence.Failure != evidence.FailureNone {
+				detail += " (" + string(s.evidence.Failure) + ")"
+			}
+			page.Panels = append(page.Panels,
+				Panel{Title: "Repository evidence", Origin: OriginRepository, State: unknown, Detail: detail})
+		}
+		if s.backupsOK {
+			page.CrossCheck = buildCrossCheckView(crossCheckInputs{
+				backups:   s.backups,
+				evidence:  s.evidence,
+				cluster:   s.cluster,
+				clusterOK: s.ok,
+			})
+		}
+	}
+	if s.backupsOK {
+		page.Backups = buildBackupsView(s.backups, now, links.ObjectStoreViewer)
+		page.ObjectStore = buildObjectStoreView(s.backups.ObjectStore)
+	} else {
+		page.Panels = append(page.Panels,
+			Panel{Title: "Backups", Origin: OriginOperator, State: unknown, Detail: noSnapshot},
+			Panel{Title: "ObjectStore reference", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot},
+		)
+	}
+	if s.eventsOK {
+		page.Events = buildEventsView(s.events, s.pods, s.podsOK, s.window, now)
+	} else {
+		page.Panels = append([]Panel{{
+			Title: "Events", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot,
+		}}, page.Panels...)
+	}
+	if s.podsOK {
+		page.Pods = buildPodsView(s.pods, now, s.allowLogs)
+	} else {
+		page.Panels = append([]Panel{{
+			Title: "Instance pods", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot,
+		}}, page.Panels...)
+	}
+	snap, ok := s.cluster, s.ok
+	if !ok {
+		page.Panels = append([]Panel{{
+			Title: "Cluster status", Origin: OriginOperator, State: unknown, Detail: noSnapshot,
+		}}, page.Panels...)
+		return page
+	}
+
+	page.SnapshotState = "current"
+	if snap.Stale {
+		page.SnapshotState = "stale"
+	}
+	page.SnapshotAge = formatAge(now.Sub(snap.ObservedAt))
+	page.Generation = strconv.FormatUint(snap.Generation, 10)
+	page.Cluster = buildClusterView(snap.Cluster)
+	if page.Pods != nil && snap.Cluster.Present {
+		page.Pods.Disagreement = buildDisagreement(snap.Cluster, s.pods)
+	}
+	return page
+}
+
+// buildBackupsView converts a catalog snapshot into explicitly attributed
+// display values and derives last-completed age from the injected clock.
+func buildBackupsView(snap observe.BackupsSnapshot, now time.Time, evidenceURL string) *BackupsView {
+	view := &BackupsView{
+		Origin:             OriginOperator,
+		Meta:               buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+		LastCompletedAge:   unknown,
+		BackupsTruncated:   snap.BackupsTruncated,
+		SchedulesTruncated: snap.SchedulesTruncated,
+	}
+	if evidenceURL != "" {
+		view.EvidenceLink = &Link{Label: "Inspect repository structure in ObjectStoreViewer", URL: evidenceURL}
+	}
+	var latestCompleted *time.Time
+	for _, backup := range snap.Backups {
+		phase := orUnknown(backup.Phase)
+		if backup.Phase == "completed" {
+			phase += " — operator-reported claim"
+			if backup.StoppedAt != nil && (latestCompleted == nil || backup.StoppedAt.After(*latestCompleted)) {
+				t := *backup.StoppedAt
+				latestCompleted = &t
+			}
+		}
+		snapshotState := "not applicable"
+		if backup.Method == "volumeSnapshot" {
+			snapshotState = "unknown (not collected)"
+		}
+		view.Rows = append(view.Rows, BackupRowView{
+			Name: orUnknown(backup.Name), Phase: phase, Method: orUnknown(backup.Method),
+			Started: formatTime(backup.StartedAt), Stopped: formatTime(backup.StoppedAt),
+			Age: formatTimeAge(backup.StoppedAt, backup.CreatedAt, now), SnapshotState: snapshotState,
+		})
+	}
+	if latestCompleted != nil {
+		view.LastCompletedAge = formatAge(now.Sub(*latestCompleted))
+	}
+	for _, schedule := range snap.ScheduledBackups {
+		suspended := unknown
+		if schedule.Suspended != nil {
+			suspended = strconv.FormatBool(*schedule.Suspended)
+		}
+		view.ScheduledRows = append(view.ScheduledRows, ScheduledBackupRowView{
+			Name: orUnknown(schedule.Name), Method: orUnknown(schedule.Method),
+			Schedule: orUnknown(schedule.Schedule), Suspended: suspended,
+			LastSchedule: formatTime(schedule.LastScheduleTime), NextSchedule: formatTime(schedule.NextScheduleTime),
+		})
+	}
+	return view
+}
+
+// buildRepositoryView re-renders the validated evidence projection into
+// attributed display values. The sidecar's own staleness and the
+// console's contact staleness stay separate lines; the cluster identity
+// line compares the evidence's bound UID against the console's observed
+// UID only — a stale observation supports historical display but never
+// current agreement, and injected configuration is never a substitute.
+func buildRepositoryView(status evidence.Status, cluster observe.Snapshot, clusterOK bool, now time.Time) *RepositoryView {
+	report := status.Snapshot.Report
+	view := &RepositoryView{
+		Origin:             OriginRepository,
+		Meta:               buildMeta(status.Snapshot.Generation, status.Snapshot.ObservedAt, status.Snapshot.Stale, now),
+		ContactFailure:     string(status.Failure),
+		Fingerprint:        orUnknown(report.Fingerprint),
+		Scope:              orUnknown(report.ScopeKind) + " " + orUnknown(report.ScopeName),
+		Repository:         orUnknown(report.Provider) + " " + orUnknown(report.Format),
+		ProducerVersion:    orUnknown(report.ProducerVersion),
+		ClusterIdentity:    repositoryClusterIdentity(report.ClusterUID, cluster, clusterOK),
+		Revision:           strconv.FormatUint(report.Revision, 10),
+		EvidenceGeneration: strconv.FormatUint(report.EvidenceGeneration, 10),
+		Completeness:       orUnknown(report.Completeness),
+		SourceStale:        report.SourceStale,
+		Overall:            StateLineView{State: report.Overall.State, Code: report.Overall.Code},
+		ScanCompleted:      formatTime(report.CompletedAt),
+		LastAttempt:        formatTime(report.LastAttemptAt),
+		Inventory:          repositoryInventory(report.Inventory),
+		InventoryFailure:   report.Inventory.LastFailureCategory,
+		DetailsType:        orUnknown(report.DetailsType),
+	}
+	for _, capability := range report.Capabilities {
+		view.Capabilities = append(view.Capabilities, CapabilityRowView{
+			ID:      orUnknown(capability.ID),
+			Support: orUnknown(capability.Support),
+			State:   StateLineView{State: capability.State, Code: capability.Code}.Display(),
+		})
+	}
+	if report.Barman == nil {
+		view.DetailsUnknown = true
+		return view
+	}
+	view.Barman = buildBarmanSummaryView(*report.Barman, now)
+	return view
+}
+
+// repositoryClusterIdentity states the observed-UID-only comparison.
+func repositoryClusterIdentity(evidenceUID string, cluster observe.Snapshot, clusterOK bool) string {
+	switch clusterIdentityMatch(evidenceUID, cluster, clusterOK) {
+	case identityMatchCurrent:
+		return "matches the observed cluster UID (current observation)"
+	case identityMatchStale:
+		return "matches a stale cluster observation — not current agreement"
+	case identityMismatch:
+		return "mismatch: evidence is bound to a different cluster incarnation"
+	default:
+		return "unknown: no observed cluster identity to compare against"
+	}
+}
+
+// identityMatch is the typed observed-UID comparison outcome.
+type identityMatch int
+
+const (
+	// identityUnknown means no observed cluster identity exists.
+	identityUnknown identityMatch = iota
+	// identityMatchCurrent means the evidence binds to the currently
+	// observed cluster UID.
+	identityMatchCurrent
+	// identityMatchStale means the UIDs match but the observation is
+	// stale — historical display, never current agreement.
+	identityMatchStale
+	// identityMismatch means the evidence binds to a different cluster
+	// incarnation.
+	identityMismatch
+)
+
+// clusterIdentityMatch compares the evidence's bound cluster UID with
+// the console's own observation. Injected configuration is never a
+// substitute for the observed UID.
+func clusterIdentityMatch(evidenceUID string, cluster observe.Snapshot, clusterOK bool) identityMatch {
+	if !clusterOK || !cluster.Cluster.Present || cluster.Cluster.UID == "" {
+		return identityUnknown
+	}
+	if cluster.Cluster.UID != evidenceUID {
+		return identityMismatch
+	}
+	if cluster.Stale {
+		return identityMatchStale
+	}
+	return identityMatchCurrent
+}
+
+// repositoryInventory renders the allowlisted inventory counts.
+func repositoryInventory(inventory evidence.InventoryFacts) string {
+	if !inventory.Known {
+		return unknown
+	}
+	return fmt.Sprintf("%s objects, %s bytes stored, %s outside the scope",
+		formatCount(inventory.ObjectCount), formatCount(inventory.StoredBytes), formatCount(inventory.UnscopedObjectCount))
+}
+
+// buildBarmanSummaryView renders the recognized barman-cloud summary.
+func buildBarmanSummaryView(barman evidence.BarmanFacts, now time.Time) *BarmanSummaryView {
+	view := &BarmanSummaryView{
+		Backups:          formatCount(barman.BackupItems) + " (" + formatCount(barman.StructurallyUsableBackups) + " structurally usable)",
+		WAL:              StateLineView{State: barman.WAL.State, Code: barman.WAL.Code},
+		Timeline:         StateLineView{State: barman.Timeline.State, Code: barman.Timeline.Code},
+		Coverage:         StateLineView{State: barman.Coverage.State, Code: barman.Coverage.Code},
+		Retention:        StateLineView{State: barman.Retention.Result.State, Code: barman.Retention.Result.Code},
+		RetentionBackups: formatCount(barman.Retention.VisibleBackups) + " visible, " + formatCount(barman.Retention.StructurallyUsableBackups) + " structurally usable",
+		RetentionWindow:  formatTime(barman.Retention.OldestCompletionAt) + " to " + formatTime(barman.Retention.NewestCompletionAt),
+		RetentionMinimum: "not configured",
+		LatestArchiveAge: unknown,
+		Truncated:        barman.RangesTruncated || barman.DiagnosticsTruncated,
+	}
+	if barman.BackupStates != nil {
+		view.BackupStates = fmt.Sprintf("%d healthy, %d warning, %d unhealthy, %d unknown",
+			barman.BackupStates.Healthy, barman.BackupStates.Warning, barman.BackupStates.Unhealthy, barman.BackupStates.Unknown)
+	}
+	if barman.WALCounts != nil {
+		view.WALCounts = fmt.Sprintf("%d segments, %d partial, %d history, %d backup-history, %d unknown, %d duplicate",
+			barman.WALCounts.Segment, barman.WALCounts.Partial, barman.WALCounts.History,
+			barman.WALCounts.BackupHistory, barman.WALCounts.Unknown, barman.WALCounts.Duplicate)
+	}
+	if barman.Retention.MinimumConfigured && barman.Retention.MinimumRedundancy != nil {
+		view.RetentionMinimum = "minimum redundancy " + strconv.FormatUint(*barman.Retention.MinimumRedundancy, 10)
+	}
+	if barman.LatestArchiveReceiptAt != nil {
+		view.LatestArchiveAge = formatAge(now.Sub(*barman.LatestArchiveReceiptAt))
+	}
+	return view
+}
+
+// formatCount renders a nullable count: nil is unknown, never zero.
+func formatCount(value *uint64) string {
+	if value == nil {
+		return unknown
+	}
+	return strconv.FormatUint(*value, 10)
+}
+
+func buildObjectStoreView(ref observe.ObjectStoreReference) *ObjectStoreView {
+	view := &ObjectStoreView{
+		Name: orUnknown(ref.Name), ReferenceOrigin: OriginOperator,
+		ObservationOrigin: OriginKubernetes,
+	}
+	switch ref.State {
+	case observe.ObjectStorePresent:
+		view.ReferenceState = "referenced"
+		view.ObservationState = "object metadata observed"
+	case observe.ObjectStoreNotReferenced:
+		view.ReferenceState = "not referenced by the enabled Barman Cloud plugin"
+		view.ObservationState = "not applicable"
+	default:
+		view.ReferenceState = unknown
+		if ref.Name != "" {
+			view.ReferenceState = "referenced"
+		}
+		view.ObservationState = "unknown (permission, CRD, cluster, or object unavailable)"
+	}
+	return view
+}
+
+func formatTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return unknown
+	}
+	return value.UTC().Format("2006-01-02 15:04:05Z")
+}
+
+func formatTimeAge(preferred *time.Time, fallback time.Time, now time.Time) string {
+	if preferred != nil && !preferred.IsZero() {
+		return formatAge(now.Sub(*preferred))
+	}
+	if !fallback.IsZero() {
+		return formatAge(now.Sub(fallback))
+	}
+	return unknown
+}
+
+// buildEventsView converts the event snapshot into display rows. The
+// age window is re-applied against the rendering instant, and Pod-kind
+// events are admitted only for verified members: without a pods
+// snapshot they are withheld rather than guessed.
+func buildEventsView(snap observe.EventsSnapshot, pods observe.PodsSnapshot, podsOK bool, window time.Duration, now time.Time) *EventsView {
+	view := &EventsView{
+		Origin:    OriginKubernetes,
+		Meta:      buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+		Window:    window.String(),
+		Truncated: snap.Truncated,
+	}
+	members := make(map[string]bool, len(pods.Pods))
+	if podsOK {
+		for _, p := range pods.Pods {
+			members[p.Name] = true
+		}
+	}
+	cutoff := now.Add(-window)
+	for _, e := range snap.Events {
+		if e.LastSeen.Before(cutoff) {
+			continue
+		}
+		if e.Kind == "Pod" {
+			if !podsOK {
+				view.PodEventsWithheld = true
+				continue
+			}
+			if !members[e.Object] {
+				continue
+			}
+		}
+		view.Rows = append(view.Rows, EventRowView{
+			Type:    orUnknown(e.Type),
+			Reason:  orUnknown(e.Reason),
+			Object:  orUnknown(e.Kind) + "/" + orUnknown(e.Object),
+			Message: boundMessage(e.Message),
+			Count:   strconv.Itoa(e.Count),
+			Age:     formatAge(now.Sub(e.LastSeen)),
+		})
+	}
+	return view
+}
+
+// buildMeta renders a section's snapshot line.
+func buildMeta(generation uint64, observedAt time.Time, stale bool, now time.Time) SectionMeta {
+	state := "current"
+	if stale {
+		state = "stale"
+	}
+	return SectionMeta{
+		State:      state,
+		Age:        formatAge(now.Sub(observedAt)),
+		Generation: strconv.FormatUint(generation, 10),
+	}
+}
+
+// buildPodsView converts the pod snapshot into bounded display rows.
+// With logs allowed, each member row links its bounded tail; the link
+// is an affordance only — the fetch re-verifies membership live.
+func buildPodsView(snap observe.PodsSnapshot, now time.Time, allowLogs bool) *PodsView {
+	view := &PodsView{
+		Origin:      OriginKubernetes,
+		Meta:        buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+		Truncated:   snap.Truncated,
+		LogsEnabled: allowLogs,
+	}
+	for _, p := range snap.Pods {
+		phase := orUnknown(p.Phase)
+		if p.Deleting {
+			phase += " (deleting)"
+		}
+		ready := unknown
+		if p.Ready != nil {
+			ready = strconv.FormatBool(*p.Ready)
+		}
+		logsURL := ""
+		if allowLogs && p.Name != "" {
+			logsURL = "/logs/" + url.PathEscape(p.Name)
+		}
+		view.Rows = append(view.Rows, PodRowView{
+			Name:     orUnknown(p.Name),
+			Role:     orUnknown(p.Role),
+			Phase:    phase,
+			Ready:    ready,
+			Restarts: orUnknownInt(p.Restarts),
+			Node:     orUnknown(p.Node),
+			Image:    orUnknown(p.Image),
+			LogsURL:  logsURL,
+		})
+	}
+	return view
+}
+
+// primaryRole is the observed role label value of a primary instance.
+const primaryRole = "primary"
+
+// buildDisagreement cross-references the operator's primary claim with
+// the observed role labels. Both claims are rendered with their origins
+// when they conflict; agreement, or either side being unreported,
+// renders nothing.
+func buildDisagreement(facts observe.ClusterFacts, podsSnap observe.PodsSnapshot) *DisagreementView {
+	if facts.CurrentPrimary == "" {
+		return nil
+	}
+	var observed []string
+	for _, p := range podsSnap.Pods {
+		if p.Role == primaryRole && !p.Deleting {
+			observed = append(observed, p.Name)
+		}
+	}
+	if len(observed) == 1 && observed[0] == facts.CurrentPrimary {
+		return nil
+	}
+	if len(observed) == 0 {
+		return &DisagreementView{
+			OperatorClaim:  "current primary is " + facts.CurrentPrimary,
+			OperatorOrigin: OriginOperator,
+			ObservedClaim:  "no pod carries the primary role label",
+			ObservedOrigin: OriginKubernetes,
+		}
+	}
+	return &DisagreementView{
+		OperatorClaim:  "current primary is " + facts.CurrentPrimary,
+		OperatorOrigin: OriginOperator,
+		ObservedClaim:  "primary role label on " + strings.Join(observed, ", "),
+		ObservedOrigin: OriginKubernetes,
+	}
+}
+
+// buildClusterView converts facts into bounded display strings.
+func buildClusterView(facts observe.ClusterFacts) *ClusterView {
+	if !facts.Present {
+		return &ClusterView{Origin: OriginOperator, Absent: true}
+	}
+	view := &ClusterView{
+		Origin:          OriginOperator,
+		Phase:           orUnknown(facts.Phase),
+		PhaseReason:     facts.PhaseReason,
+		CurrentPrimary:  orUnknown(facts.CurrentPrimary),
+		TargetPrimary:   orUnknown(facts.TargetPrimary),
+		Instances:       formatInstances(facts.ReadyInstances, facts.DesiredInstances),
+		Timeline:        orUnknownInt(facts.TimelineID),
+		Image:           orUnknown(facts.Image),
+		PostgresVersion: orUnknownInt(facts.PostgresMajorVersion),
+	}
+	for _, c := range facts.Conditions {
+		view.Conditions = append(view.Conditions, ConditionView{
+			Type:    orUnknown(c.Type),
+			Status:  orUnknown(c.Status),
+			Reason:  orUnknown(c.Reason),
+			Message: boundMessage(c.Message),
+		})
+	}
+	return view
+}
+
+// buildLinks keeps only configured link-outs.
+func buildLinks(links Links) []Link {
+	var out []Link
+	for _, l := range []Link{
+		{Label: "Repository evidence (ObjectStoreViewer)", URL: links.ObjectStoreViewer},
+		{Label: "SQL console (pgAdmin)", URL: links.PgAdmin},
+		{Label: "Metrics history (monitoring)", URL: links.Monitoring},
+	} {
+		if l.URL != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// orUnknown renders an unreported string fact.
+func orUnknown(s string) string {
+	if s == "" {
+		return unknown
+	}
+	return s
+}
+
+// orUnknownInt renders an unreported numeric fact.
+func orUnknownInt(v *int) string {
+	if v == nil {
+		return unknown
+	}
+	return strconv.Itoa(*v)
+}
+
+// formatInstances renders "ready/desired", tolerating either side being
+// unreported.
+func formatInstances(ready, desired *int) string {
+	if ready == nil && desired == nil {
+		return unknown
+	}
+	r, d := unknown, unknown
+	if ready != nil {
+		r = strconv.Itoa(*ready)
+	}
+	if desired != nil {
+		d = strconv.Itoa(*desired)
+	}
+	return r + "/" + d + " ready"
+}
+
+// boundMessage truncates a message to the display bound, rune-safe.
+func boundMessage(s string) string {
+	runes := []rune(s)
+	if len(runes) <= maxDisplayMessage {
+		return s
+	}
+	return string(runes[:maxDisplayMessage]) + "…"
+}
+
+// formatAge renders a coarse, human age. Negative values — a clock skew
+// artifact — render as "0s" rather than a nonsense negative age.
+func formatAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+}

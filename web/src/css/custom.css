@@ -1,0 +1,25 @@
+/**
+ * pgConsole docs theme overrides. A teal accent distinguishes it from the
+ * blue pgToolBox operator site while staying in the same family.
+ */
+
+:root {
+  --ifm-color-primary: #0d9488;
+  --ifm-color-primary-dark: #0c8478;
+  --ifm-color-primary-darker: #0b7d71;
+  --ifm-color-primary-darkest: #09675d;
+  --ifm-color-primary-light: #0ea699;
+  --ifm-color-primary-lighter: #10b3a4;
+  --ifm-color-primary-lightest: #14c8b8;
+  --ifm-code-font-size: 95%;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #2dd4bf;
+  --ifm-color-primary-dark: #14c8b8;
+  --ifm-color-primary-darker: #0ea699;
+  --ifm-color-primary-darkest: #0d9488;
+  --ifm-color-primary-light: #5eead4;
+  --ifm-color-primary-lighter: #99f6e4;
+  --ifm-color-primary-lightest: #ccfbf1;
+}
