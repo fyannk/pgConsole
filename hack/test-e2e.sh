@@ -200,9 +200,20 @@ i=0
 until kubectl get --raw /healthz > /dev/null 2>&1; do
   i=$((i + 2)); [ "$i" -le 120 ] || { log "api server did not return"; exit 1; }; sleep 2
 done
-wait_page_contains "stale — age" 180 forbidden.html
+# Every section must cross into stale. They age past the staleness threshold
+# at slightly different moments, so wait until stale is visible AND no section
+# still reads "current" — asserting on the first stale section alone races.
+i=0
+while :; do
+  body=$(page)
+  if echo "$body" | grep -qF "stale — age" && ! echo "$body" | grep -qF "current — age"; then
+    echo "$body" > "$OUT/forbidden.html"; break
+  fi
+  i=$((i + 2))
+  [ "$i" -le 180 ] || { echo "$body" > "$OUT/forbidden.html"; log "sections did not all go stale under forbidden RBAC"; exit 1; }
+  sleep 2
+done
 grep -qF "Cluster in healthy state" "$OUT/forbidden.html" || { log "last-good content lost under forbidden RBAC"; exit 1; }
-grep -qF "current — age" "$OUT/forbidden.html" && { log "forbidden state rendered as current"; exit 1; }
 log "forbidden RBAC: retained last-good, visibly stale, never current"
 
 log "restoring RBAC recovers without restart"
@@ -316,14 +327,22 @@ log "operations ok (index 200, tokenless 403, RBAC-blocked refusal, granted+conf
 log "access-request review: dba-gated panel over the pgToolBox CRDs"
 # Stand in for the operator's CRDs and seed one pending request plus a
 # role picker, then enable the review panel and its Role.
-kubectl apply -f hack/testdata/pgtoolbox-crds.yaml > /dev/null
+kubectl apply -f hack/testdata/pgtoolbox-crds.yaml
 kubectl wait --for=condition=established --timeout=60s \
   crd/pgtoolboxroles.pgtoolbox.fyannk.dev \
-  crd/pgtoolboxaccessrequests.pgtoolbox.fyannk.dev > /dev/null
-kubectl apply -f hack/testdata/pgtoolbox-samples.yaml > /dev/null
-kubectl apply -f deploy/access-review-role.yaml > /dev/null
-kubectl -n payments set env deployment/pgconsole-orders ALLOW_ACCESS_REVIEW=true > /dev/null
-kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
+  crd/pgtoolboxaccessrequests.pgtoolbox.fyannk.dev
+# The Established condition can precede the API server actually serving the new
+# kinds, so retry the custom-resource apply until discovery catches up rather
+# than failing the run on that race. Output is not silenced, so a genuine
+# failure is visible in the log.
+j=0
+until kubectl apply -f hack/testdata/pgtoolbox-samples.yaml; do
+  j=$((j + 1)); [ "$j" -le 12 ] || { log "sample review objects never applied (CRD discovery lag)"; exit 1; }
+  sleep 5
+done
+kubectl apply -f deploy/access-review-role.yaml
+kubectl -n payments set env deployment/pgconsole-orders ALLOW_ACCESS_REVIEW=true
+kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s
 i=0
 until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
   i=$((i + 2)); [ "$i" -le 60 ] || { log "console unreachable after enabling review"; exit 1; }; sleep 2
