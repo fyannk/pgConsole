@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/ops"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/ops"
 )
 
 // Origin identifies which observer a rendered claim comes from.

@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // fakeClock advances one second per Now call and records waits without

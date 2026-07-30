@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/ops"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/ops"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // fixedClock is a non-sleeping clock at a fixed instant.

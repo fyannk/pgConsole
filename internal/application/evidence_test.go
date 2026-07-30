@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/kube"
 )
 
 // staticFetcher serves one fixed report or error, with an empty

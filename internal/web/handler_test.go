@@ -25,10 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/identity"
-	"github.com/fyannk/pgconsole/internal/kube"
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // testNow is the fixed rendering instant of all handler tests.

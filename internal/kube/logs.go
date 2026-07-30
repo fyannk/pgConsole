@@ -22,8 +22,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // TailLogs fetches a bounded tail of the member pod's PostgreSQL

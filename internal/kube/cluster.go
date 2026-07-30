@@ -27,8 +27,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // clusterGVR is the CloudNativePG Cluster resource.

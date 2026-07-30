@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fyannk/pgconsole/internal/config"
-	"github.com/fyannk/pgconsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/config"
+	"github.com/fyannk/pgConsole/internal/kube"
 )
 
 // testConfig returns a valid configuration bound to an ephemeral port.

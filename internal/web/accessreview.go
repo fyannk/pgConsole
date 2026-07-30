@@ -20,9 +20,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
-	"github.com/fyannk/pgconsole/internal/review"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/review"
 )
 
 // AccessReviewSource supplies the access-review snapshot. Nil means the

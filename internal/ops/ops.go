@@ -27,8 +27,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Writer is the narrow mutation transport. Its implementation lives in

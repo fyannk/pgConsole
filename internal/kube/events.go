@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 
-	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // eventGVR is the core events resource. The core v1 API is the recorded
