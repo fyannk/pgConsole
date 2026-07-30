@@ -20,7 +20,7 @@ import (
 
 	"context"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Backoff bounds of the collector's retry loop. Failures back off

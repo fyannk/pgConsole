@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // CSRFMaxAge bounds a confirmation token's lifetime. A restart mints a

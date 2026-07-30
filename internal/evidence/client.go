@@ -29,7 +29,7 @@ import (
 
 	v1alpha1 "github.com/fyannk/pgObjectStoreViewer/api/evidence/v1alpha1"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Contract constants of the evidence API channel.

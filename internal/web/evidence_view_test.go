@@ -22,10 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/identity"
-	"github.com/fyannk/pgconsole/internal/kube"
-	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // fakeEvidence serves a fixed evidence status.

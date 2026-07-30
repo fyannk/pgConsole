@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // operatorBackup builds one repository-backed operator Backup fact.

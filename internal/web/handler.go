@@ -30,12 +30,12 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/authz"
-	"github.com/fyannk/pgconsole/internal/evidence"
-	"github.com/fyannk/pgconsole/internal/identity"
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
-	reviewpkg "github.com/fyannk/pgconsole/internal/review"
+	"github.com/fyannk/pgConsole/internal/authz"
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
+	reviewpkg "github.com/fyannk/pgConsole/internal/review"
 )
 
 //go:embed templates static

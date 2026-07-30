@@ -21,8 +21,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Polling bounds. Successes wait the interval plus bounded jitter;

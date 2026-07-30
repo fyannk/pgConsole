@@ -22,7 +22,7 @@ package kube
 import (
 	"context"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // UnavailableProber reports readiness as unavailable. It is the wired

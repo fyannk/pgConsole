@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fyannk/pgconsole/actions/workflows/ci.yml"><img src="https://github.com/fyannk/pgconsole/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://github.com/fyannk/pgconsole/actions/workflows/docs.yml"><img src="https://github.com/fyannk/pgconsole/actions/workflows/docs.yml/badge.svg" alt="Documentation status"></a>
+  <a href="https://github.com/fyannk/pgConsole/actions/workflows/ci.yml"><img src="https://github.com/fyannk/pgConsole/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/fyannk/pgConsole/actions/workflows/docs.yml"><img src="https://github.com/fyannk/pgConsole/actions/workflows/docs.yml/badge.svg" alt="Documentation status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache-2.0 license"></a>
   <img src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white" alt="Go 1.26">
 </p>
@@ -59,7 +59,7 @@ path runs it inside a disposable kind cluster. You need Docker, kind, kubectl,
 Go 1.26+, and `make`:
 
 ```bash
-git clone https://github.com/fyannk/pgconsole.git
+git clone https://github.com/fyannk/pgConsole.git
 cd pgconsole
 make dev-up
 ```
@@ -94,7 +94,7 @@ proxy, exposure, default-deny NetworkPolicy, and exact namespaced RBAC.
 
 ## 📚 Documentation
 
-The details live in the **[documentation site](https://fyannk.github.io/pgconsole/)**:
+The details live in the **[documentation site](https://fyannk.github.io/pgConsole/)**:
 
 - [Overview](web/docs/overview/index.md)
 - [Installation](web/docs/deploy/installation.md)

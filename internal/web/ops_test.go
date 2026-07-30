@@ -26,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/identity"
-	"github.com/fyannk/pgconsole/internal/kube"
-	"github.com/fyannk/pgconsole/internal/ops"
+	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/ops"
 )
 
 // recordingExecutor records executed operations and issues real tokens.

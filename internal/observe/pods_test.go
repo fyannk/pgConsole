@@ -22,7 +22,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // podStep is one scripted pod-source interaction.

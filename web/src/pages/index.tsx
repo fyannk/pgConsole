@@ -6,15 +6,15 @@ export default function Home(): React.ReactElement {
   return (
     <Layout
       title="pgConsole"
-      description="A read-only operational console for one CloudNativePG cluster">
+      description="An operational console for one CloudNativePG cluster, read-only by default">
       <main style={{maxWidth: 'var(--ifm-container-width)', margin: '0 auto', padding: '4rem 1rem'}}>
         <h1>pgConsole</h1>
         <p>
-          A per-cluster, read-only operational console for one CloudNativePG
-          cluster. It renders what the operator and Kubernetes report —
-          status, pods, events, backups, and a bounded log tail — attributed
-          to its origin and honest about staleness, without giving anyone
-          <code> kubectl</code> access or a database connection.
+          A per-cluster operational console for one CloudNativePG cluster,
+          read-only by default. It renders what the operator and Kubernetes
+          report — status, pods, events, backups, and a bounded log tail —
+          attributed to its origin and honest about staleness, without giving
+          anyone <code>kubectl</code> access or a database connection.
         </p>
         <p>
           The console authenticates nobody: a trusted proxy asserts the

@@ -27,9 +27,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/observe"
-	"github.com/fyannk/pgconsole/internal/ops"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/ops"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // The review actions, the closed set the routes and CSRF bind to.

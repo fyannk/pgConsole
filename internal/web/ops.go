@@ -19,8 +19,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/fyannk/pgconsole/internal/ops"
-	"github.com/fyannk/pgconsole/internal/redact"
+	"github.com/fyannk/pgConsole/internal/ops"
+	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // OpsExecutor is the mutation origin the operation routes call into.

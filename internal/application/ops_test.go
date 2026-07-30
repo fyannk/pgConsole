@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fyannk/pgconsole/internal/config"
-	"github.com/fyannk/pgconsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/config"
+	"github.com/fyannk/pgConsole/internal/kube"
 )
 
 // panicWriter fails the test if any mutation is ever attempted. It

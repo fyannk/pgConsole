@@ -156,7 +156,7 @@ jobs:
             org.opencontainers.image.title=pgConsole
             org.opencontainers.image.description=Operational console for one CloudNativePG cluster
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.documentation=https://fyannk.github.io/pgconsole/
+            org.opencontainers.image.documentation=https://fyannk.github.io/pgConsole/
             org.opencontainers.image.version=${{ steps.release.outputs.tag }}
             org.opencontainers.image.revision=${{ steps.verified.outputs.sha }}
             org.opencontainers.image.licenses=Apache-2.0
