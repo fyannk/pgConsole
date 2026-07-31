@@ -1,0 +1,101 @@
+{{- /*
+  Cluster status. The verdict board answers first: the derived cluster
+  headline with the operator's phase quoted beneath it, and the four
+  identifying facts beside it. Topology restates the observed instance
+  pods as cards (the primary alone carries emphasis), and the details
+  panel keeps the full operator-reported facts and conditions. Every
+  claim keeps its origin; a missing fact is "unknown", never invented.
+*/ -}}
+{{template "page-head" "cluster status"}}
+{{template "shell-open" .Shell}}
+    {{- if .Cluster}}
+    {{- with .Cluster}}
+    <div class="statusboard">
+      <div class="statusboard-main">
+        <span class="label">Cluster</span>
+        {{- if .Absent}}
+        <p class="headline" data-state="degraded">Not in the namespace</p>
+        <p class="sub">The API server confirmed no cluster named {{$.ClusterName}} exists here.</p>
+        {{- else}}
+        <p class="headline" data-state="{{$.Summary.HeadlineState}}">{{$.Summary.Headline}}</p>
+        <p class="sub">Reported phase: {{.Phase}}{{if .PhaseReason}} — {{.PhaseReason}}{{end}}.</p>
+        {{- end}}
+      </div>
+      {{- if not .Absent}}
+      <dl class="statusboard-side">
+        <dt>Primary</dt><dd>{{.CurrentPrimary}}</dd>
+        <dt>Instances</dt><dd>{{.Instances}}</dd>
+        <dt>Timeline</dt><dd>{{.Timeline}}</dd>
+        <dt>PostgreSQL</dt><dd>{{.PostgresVersion}}</dd>
+      </dl>
+      {{- end}}
+    </div>
+    {{- end}}
+    {{- with .Pods}}
+    {{- if .Rows}}
+    <h2 class="section-title">Topology</h2>
+    {{- with .Disagreement}}
+    <div class="finding">
+      <p class="state">disagreement on the primary instance</p>
+      <p>{{.OperatorClaim}} <span class="origin">({{.OperatorOrigin.Label}})</span></p>
+      <p>{{.ObservedClaim}} <span class="origin">({{.ObservedOrigin.Label}})</span></p>
+    </div>
+    {{- end}}
+    <div class="topology">
+      {{- range .Rows}}
+      <div class="instance{{if eq .Role "primary"}} is-primary{{end}}">
+        <span class="role">{{.Role}}</span>
+        <span class="name">{{.Name}}</span>
+        <span class="line" data-state="{{if eq .Ready "true"}}current{{else if eq .Ready "false"}}degraded{{else}}unknown{{end}}">{{.Phase}} — {{if eq .Ready "true"}}ready{{else if eq .Ready "false"}}not ready{{else}}readiness {{.Ready}}{{end}}</span>
+        <span class="line muted">{{.Node}} · {{.Restarts}} restarts</span>
+      </div>
+      {{- end}}
+    </div>
+    {{- end}}
+    {{- end}}
+    <h2 class="section-title">Details</h2>
+    {{- with .Cluster}}
+    <section class="panel sectioned" x-data="panel" data-panel="cluster">
+      <div class="panel-head">
+        <h2>Cluster status</h2>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
+      {{- if .Absent}}
+      <p class="state" data-state="degraded">absent: cluster not found in the namespace</p>
+      {{- else}}
+      <dl class="facts">
+        <dt>Phase</dt><dd>{{.Phase}}{{if .PhaseReason}} — {{.PhaseReason}}{{end}}</dd>
+        <dt>Current primary</dt><dd>{{.CurrentPrimary}}</dd>
+        <dt>Target primary</dt><dd>{{.TargetPrimary}}</dd>
+        <dt>Instances</dt><dd>{{.Instances}}</dd>
+        <dt>Timeline</dt><dd>{{.Timeline}}</dd>
+        <dt>PostgreSQL major</dt><dd>{{.PostgresVersion}}</dd>
+        <dt>Image</dt><dd>{{.Image}}</dd>
+      </dl>
+      {{- if .Conditions}}
+      <div class="table-scroll">
+      <table class="conditions">
+        <caption>Conditions</caption>
+        <thead><tr><th>Type</th><th>Status</th><th>Reason</th><th>Message</th></tr></thead>
+        <tbody>
+          {{- range .Conditions}}
+          <tr><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.Reason}}</td><td>{{.Message}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- end}}
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- end}}
+    {{- else}}
+    <section class="panel">
+      <h2>Cluster status</h2>
+      <div class="empty"><strong>No cluster snapshot yet</strong>Nothing has been observed for this cluster, so the console cannot show its status.</div>
+      <p class="origin">source: operator-reported</p>
+    </section>
+    {{- end}}
+{{template "shell-close"}}

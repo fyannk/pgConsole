@@ -3,9 +3,9 @@
    and nothing here fetches, mutates, or interprets cluster state. These
    components only re-arrange and hide markup the server already sent.
 
-   Loaded before alpine.csp.js so the alpine:init registrations below
-   exist by the time Alpine starts. Both tags are deferred, which keeps
-   that order.
+   Loaded before the Alpine CSP build so the alpine:init registrations
+   below exist by the time Alpine starts. Both tags are deferred, which
+   keeps that order.
 
    The CSP build of Alpine parses a restricted expression grammar, so
    behaviour lives in registered component methods rather than inline
@@ -62,7 +62,7 @@ function panel() {
     storageKey: '',
 
     /**
-     * Restores the persisted state for this panel and wires the toggle.
+     * Restores the persisted state for this panel.
      * @returns {void}
      */
     init() {
@@ -79,9 +79,8 @@ function panel() {
 
     /**
      * Reflects the open state onto the DOM. Written imperatively for the
-     * same reason the click is: the markup then carries no colon-prefixed
-     * attribute name, which a strict XML serialiser would read as a
-     * namespace prefix and reject.
+     * same reason the click is: the markup then carries no attribute
+     * name a strict XML serialiser would reject.
      * @returns {void}
      */
     apply() {
@@ -123,10 +122,12 @@ function sidebar() {
     root: null,
 
     /**
-     * Restores the persisted width choice and wires the toggle.
+     * Restores the persisted width choice.
      * @returns {void}
      */
     init() {
+      /* Captured here: $el inside a handler method is the element the
+         directive sits on (the button), not the component root. */
       this.root = this.$el;
       const button = this.root.querySelector('.sidebar-toggle');
       if (button) button.addEventListener('click', () => this.toggle());
@@ -135,8 +136,9 @@ function sidebar() {
     },
 
     /**
-     * Reflects the current state onto the DOM, imperatively for the same
-     * reason as panel above.
+     * Reflects the current state onto the DOM. Written imperatively
+     * rather than through a colon-prefixed x-bind so the markup stays
+     * free of namespace-like attribute names.
      * @returns {void}
      */
     apply() {

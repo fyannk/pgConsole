@@ -1,0 +1,14 @@
+{{- /*
+  Poolers. This build ships no Pooler observer, so it makes no claim
+  about connection poolers — the screen says exactly that rather than
+  rendering an empty result that could be read as "no poolers exist".
+  One honest not-observed state serves the overview, pods, and logs
+  entries; the sidebar's current marker is the only thing that differs.
+*/ -}}
+{{template "page-head" "poolers"}}
+{{template "shell-open" .Shell}}
+    <section class="panel">
+      <h2>Poolers</h2>
+      <div class="empty"><strong>Poolers are not observed in this build</strong>This console has no PgBouncer <code>Pooler</code> observer, so it makes no claim about connection poolers for this cluster — neither that any exist nor that none do. Applications reach the database services directly unless a pooler is deployed and a future build observes it.</div>
+    </section>
+{{template "shell-close"}}

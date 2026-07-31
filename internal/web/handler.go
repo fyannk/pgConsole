@@ -187,8 +187,19 @@ func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	// The read-only status baseline is ungated: reaching the console means
 	// the proxy already authenticated the request, and the deployment
-	// confines ingress to that proxy.
+	// confines ingress to that proxy. Each section is its own screen; the
+	// Overview restates them in plain language.
 	mux.HandleFunc("GET /{$}", h.handleIndex)
+	mux.HandleFunc("GET /cluster/status", h.handleClusterStatus)
+	mux.HandleFunc("GET /cluster/pods", h.handleClusterPods)
+	mux.HandleFunc("GET /cluster/events", h.handleClusterEvents)
+	mux.HandleFunc("GET /cluster/logs", h.handleClusterLogs)
+	mux.HandleFunc("GET /backups", h.handleBackupsOverview)
+	mux.HandleFunc("GET /backups/objects", h.handleBackupsObjects)
+	mux.HandleFunc("GET /backups/evidence", h.handleBackupsEvidence)
+	mux.HandleFunc("GET /poolers", h.handlePoolers("poolers-overview"))
+	mux.HandleFunc("GET /poolers/pods", h.handlePoolers("poolers-pods"))
+	mux.HandleFunc("GET /poolers/logs", h.handlePoolers("poolers-logs"))
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
 	mux.HandleFunc("GET /readyz", h.handleReadyz)
 	// The instance log tail sits above the baseline: it requires the
@@ -243,9 +254,12 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// handleIndex renders the console page from the current snapshots. The
-// handler performs no API call: rendering is snapshots plus template.
-func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
+// assemble gathers the current snapshots and derives the page view once,
+// then sets the shared shell for the named section. Every screen renders
+// a slice of this same page: the build is snapshots plus derivation with
+// no API call, so a per-section handler costs nothing the full page did
+// not.
+func (h *Handler) assemble(r *http.Request, current string) Page {
 	// The log affordance follows the same poweruser gate as the route, so
 	// a viewer never sees a link that would deny.
 	logsVisible := h.cfg.AllowLogs && h.level(r) >= authz.TierPowerUser
@@ -261,17 +275,78 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	page := buildPage(h.cfg.ClusterName, h.cfg.Namespace, s, h.now(), h.cfg.Links)
 	page.Identity = h.buildIdentityView(r)
 	page.OperationsEnabled = h.cfg.AllowOperations && h.executor != nil
-	page.Shell = h.shell(r, "overview")
+	page.Shell = h.shell(r, current)
 	page.Shell.SnapshotState = page.SnapshotState
 	page.Shell.SnapshotAge = page.SnapshotAge
 	page.Shell.Generation = page.Generation
 	page.Shell.Identity = page.Identity
 	page.Shell.Links = page.Links
+	return page
+}
+
+// renderPage writes one screen template, logging a render failure as a
+// category only.
+func (h *Handler) renderPage(w http.ResponseWriter, route, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.tpl.ExecuteTemplate(w, "page.html.tmpl", page); err != nil {
+	if err := h.tpl.ExecuteTemplate(w, name, data); err != nil {
 		h.logger.Error("render failed",
-			slog.String("route", "index"),
+			slog.String("route", route),
 			slog.String("category", redact.Safe(err)))
+	}
+}
+
+// handleIndex renders the plain-language Overview: the derived summary
+// that opens the console, restating the attributed sections in one
+// screen. The detail lives on the section screens the sidebar maps.
+func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "index", "index.html.tmpl", h.assemble(r, "overview"))
+}
+
+// handleClusterStatus renders the operator-reported cluster verdict,
+// topology, and conditions.
+func (h *Handler) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "cluster-status", "cluster-status.html.tmpl", h.assemble(r, "cluster-status"))
+}
+
+// handleClusterPods renders the Kubernetes-observed instance pods.
+func (h *Handler) handleClusterPods(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "cluster-pods", "cluster-pods.html.tmpl", h.assemble(r, "cluster-pods"))
+}
+
+// handleClusterEvents renders the age-windowed cluster events.
+func (h *Handler) handleClusterEvents(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "cluster-events", "cluster-events.html.tmpl", h.assemble(r, "cluster-events"))
+}
+
+// handleClusterLogs renders the per-pod log-tail launch points; the tail
+// itself is the poweruser-gated /logs route.
+func (h *Handler) handleClusterLogs(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "cluster-logs", "cluster-logs.html.tmpl", h.assemble(r, "cluster-logs"))
+}
+
+// handleBackupsOverview renders the backup catalog verdict and the
+// operator-versus-repository cross-check.
+func (h *Handler) handleBackupsOverview(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "backups", "backups-overview.html.tmpl", h.assemble(r, "backups-overview"))
+}
+
+// handleBackupsObjects renders the Backup and ScheduledBackup catalogs
+// and the ObjectStore reference lookup.
+func (h *Handler) handleBackupsObjects(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "backups-objects", "backups-objects.html.tmpl", h.assemble(r, "backups-objects"))
+}
+
+// handleBackupsEvidence renders the repository-evidence section.
+func (h *Handler) handleBackupsEvidence(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "backups-evidence", "backups-evidence.html.tmpl", h.assemble(r, "backups-evidence"))
+}
+
+// handlePoolers renders the poolers section. This build has no Pooler
+// observer, so every poolers screen is the same honest not-observed
+// state; the named key only sets which sidebar entry reads as current.
+func (h *Handler) handlePoolers(current string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.renderPage(w, current, "poolers.html.tmpl", h.assemble(r, current))
 	}
 }
 

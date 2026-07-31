@@ -1,0 +1,53 @@
+{{- /*
+  Cluster events. The age-windowed, Kubernetes-observed events. Pod-kind
+  events are shown only for membership-verified pods; without a pods
+  snapshot they are withheld rather than guessed, and that withholding is
+  stated. The table filters and sorts through the enhancement layer.
+*/ -}}
+{{template "page-head" "events"}}
+{{template "shell-open" .Shell}}
+    {{- with .Events}}
+    <section class="panel sectioned" x-data="panel" data-panel="events">
+      <div class="panel-head">
+        <h2>Events</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}) — window {{.Window}}</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
+      {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter events" aria-label="Filter events">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
+      <table class="events">
+        <thead><tr><th>Type</th><th>Reason</th><th>Object</th><th>Message</th><th>Count</th><th>Age</th></tr></thead>
+        <tbody>
+          {{- range .Rows}}
+          <tr><td>{{.Type}}</td><td>{{.Reason}}</td><td>{{.Object}}</td><td>{{.Message}}</td><td>{{.Count}}</td><td>{{.Age}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+        </div>
+      </div>
+      {{- else}}
+      <p class="state">no events in the window</p>
+      {{- end}}
+      {{- if .Truncated}}
+      <p class="state">truncated: more events matched than the display bound</p>
+      {{- end}}
+      {{- if .PodEventsWithheld}}
+      <p class="state">pod events withheld: membership unknown without a pod snapshot</p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- else}}
+    <section class="panel">
+      <h2>Events</h2>
+      <div class="empty"><strong>No events snapshot yet</strong>The Kubernetes API has not been observed for this cluster's events.</div>
+      <p class="origin">source: kubernetes-observed</p>
+    </section>
+    {{- end}}
+{{template "shell-close"}}

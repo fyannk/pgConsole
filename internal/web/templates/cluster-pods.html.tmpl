@@ -1,0 +1,58 @@
+{{- /*
+  Cluster pods. The Kubernetes-observed instance pods, with the primary
+  disagreement finding surfaced first when the operator's primary claim
+  and the observed role labels conflict. The table filters and sorts
+  through the embedded enhancement layer; both are additive.
+*/ -}}
+{{template "page-head" "pods"}}
+{{template "shell-open" .Shell}}
+    {{- with .Pods}}
+    <section class="panel sectioned" x-data="panel" data-panel="pods">
+      <div class="panel-head">
+        <h2>Instance pods</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
+      {{- with .Disagreement}}
+      <div class="finding">
+        <p class="state">disagreement on the primary instance</p>
+        <p>{{.OperatorClaim}} <span class="origin">({{.OperatorOrigin.Label}})</span></p>
+        <p>{{.ObservedClaim}} <span class="origin">({{.ObservedOrigin.Label}})</span></p>
+      </div>
+      {{- end}}
+      {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter pods" aria-label="Filter pods">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
+      <table class="pods">
+        <thead><tr><th>Name</th><th>Role</th><th>Phase</th><th>Ready</th><th>Restarts</th><th>Node</th><th>Image</th>{{if .LogsEnabled}}<th>Logs</th>{{end}}</tr></thead>
+        <tbody>
+          {{- $logsEnabled := .LogsEnabled}}
+          {{- range .Rows}}
+          <tr><td>{{.Name}}</td><td>{{.Role}}</td><td>{{.Phase}}</td><td>{{.Ready}}</td><td>{{.Restarts}}</td><td>{{.Node}}</td><td>{{.Image}}</td>{{if $logsEnabled}}<td>{{if .LogsURL}}<a href="{{.LogsURL}}">tail</a>{{end}}</td>{{end}}</tr>
+          {{- end}}
+        </tbody>
+      </table>
+        </div>
+      </div>
+      {{- else}}
+      <p class="state">no member pods observed</p>
+      {{- end}}
+      {{- if .Truncated}}
+      <p class="state">truncated: more members matched than the display bound</p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- else}}
+    <section class="panel">
+      <h2>Instance pods</h2>
+      <div class="empty"><strong>No pods snapshot yet</strong>The Kubernetes API has not been observed for this cluster's instance pods.</div>
+      <p class="origin">source: kubernetes-observed</p>
+    </section>
+    {{- end}}
+{{template "shell-close"}}
