@@ -85,7 +85,7 @@ metadata:
   name: orders
   namespace: payments
 spec:
-  instances: 1
+  instances: 3
   storage:
     size: 1Gi
 YAML
