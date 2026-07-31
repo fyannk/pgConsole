@@ -105,6 +105,12 @@ body {
    flashes in and never lingers when the script fails to load. */
 [x-cloak] { display: none !important; }
 
+/* The inline icon sprite defines <symbol>s for <use>; it must render
+   nothing and take no flow space, or its line box pushes the shell down
+   below the fixed top bar. Kept referenceable (not display:none) so the
+   symbols still resolve. */
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
 /* -------------------------------------------------------------- Shell */
 
 .shell { display: flex; align-items: flex-start; min-height: 100vh; }
