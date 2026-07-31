@@ -147,7 +147,7 @@ func buildTopology(p *Page) *TopologyView {
 	// Assemble once, then take every anchor from the final slice so no
 	// pointer outlives a reallocation.
 	view.Nodes = append(head, serverNodes...)
-	var primary, storeN *TopoNode
+	var primary, storeN, snapshotN *TopoNode
 	var replicas []*TopoNode
 	for i := range view.Nodes {
 		switch view.Nodes[i].Kind {
@@ -157,6 +157,8 @@ func buildTopology(p *Page) *TopologyView {
 			replicas = append(replicas, &view.Nodes[i])
 		case "storage":
 			storeN = &view.Nodes[i]
+		case "snapshot":
+			snapshotN = &view.Nodes[i]
 		}
 	}
 	apps, rw, ro := view.Nodes[0], view.Nodes[1], view.Nodes[2]
@@ -178,6 +180,9 @@ func buildTopology(p *Page) *TopologyView {
 	}
 	if storeN != nil && primary != nil {
 		view.Edges = append(view.Edges, edge("archive", "continuous backup", *primary, *storeN))
+	}
+	if snapshotN != nil && primary != nil {
+		view.Edges = append(view.Edges, edge("archive", "snapshots", *primary, *snapshotN))
 	}
 
 	// The caption states what is observed versus fixed wiring, and only
