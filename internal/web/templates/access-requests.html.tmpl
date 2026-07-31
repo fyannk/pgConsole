@@ -12,13 +12,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pgConsole — access requests {{.ClusterName}}</title>
+  <link rel="icon" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  {{template "icons"}}
+  {{template "topbar" .Shell}}
+  <div class="shell">
+  {{template "sidebar" .Shell}}
+  <div class="content">
   <header>
-    <h1>pgConsole — access requests</h1>
+    <div class="header-bar">
+      <h1>pgConsole — access requests</h1>
     <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
-    <nav class="links"><a href="/">back to the console</a></nav>
+    </div>
   </header>
   <main>
     <section class="panel">
@@ -53,7 +60,7 @@
               </form>
               <form method="POST" action="/access-requests/{{.Name}}/deny">
                 <input type="hidden" name="csrf" value="{{.DenyToken}}">
-                <button type="submit">Deny</button>
+                <button type="submit" class="danger">Deny</button>
               </form>
             </td>
           </tr>
@@ -81,5 +88,7 @@
       {{- end}}
     </section>
   </main>
+  </div>
+  </div>
 </body>
 </html>

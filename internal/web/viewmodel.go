@@ -16,6 +16,7 @@ package web
 
 import (
 	"fmt"
+	"html/template"
 	"net/url"
 	"strconv"
 	"strings"
@@ -53,6 +54,29 @@ const unknown = "unknown"
 
 // maxDisplayMessage bounds rendered operator messages in runes.
 const maxDisplayMessage = 512
+
+// templateFuncs are the helpers the templates may call. They classify
+// text that is already rendered; none of them produce a fact, and none
+// may hide one.
+var templateFuncs = template.FuncMap{"stateToken": stateToken}
+
+// stateToken reduces a rendered state string to one of the four tokens
+// the stylesheet keys its status treatment on: current, stale, degraded
+// or unknown. It is presentation only — the state word stays in the
+// text, so a reader who never receives the stylesheet loses nothing.
+// Anything unrecognized classifies as unknown rather than as healthy.
+func stateToken(state string) string {
+	switch {
+	case state == "current":
+		return "current"
+	case state == "stale" || strings.HasPrefix(state, "stale"):
+		return "stale"
+	case strings.HasPrefix(state, "absent") || strings.HasPrefix(state, "degraded"):
+		return "degraded"
+	default:
+		return unknown
+	}
+}
 
 // Panel is one attributed region of the console page. Every panel names
 // its claim origin and an explicit state; absence of data is the state
@@ -399,6 +423,8 @@ type PodsView struct {
 
 // LogsView is the log tail page's view model.
 type LogsView struct {
+	// Shell is the shared chrome.
+	Shell ShellView
 	// ClusterName is the configured target cluster.
 	ClusterName string
 	// Pod is the requested member pod.
@@ -432,6 +458,8 @@ type IdentityView struct {
 
 // DeniedView is the constant denial page's view model.
 type DeniedView struct {
+	// Shell is the shared chrome.
+	Shell ShellView
 	// Message is the constant denial text; it carries no identity and
 	// no probe detail.
 	Message string
@@ -439,6 +467,8 @@ type DeniedView struct {
 
 // OperationsView lists the enumerated operations.
 type OperationsView struct {
+	// Shell is the shared chrome.
+	Shell ShellView
 	// ClusterName is the target cluster.
 	ClusterName string
 	// Operations is the closed catalog.
@@ -447,6 +477,8 @@ type OperationsView struct {
 
 // ConfirmView renders one operation's confirmation form.
 type ConfirmView struct {
+	// Shell is the shared chrome.
+	Shell ShellView
 	// ClusterName is the target cluster.
 	ClusterName string
 	// Op is the operation being confirmed.
@@ -459,6 +491,8 @@ type ConfirmView struct {
 
 // ResultView renders the fire-and-observe outcome.
 type ResultView struct {
+	// Shell is the shared chrome.
+	Shell ShellView
 	// ClusterName is the target cluster.
 	ClusterName string
 	// Op is the requested operation.
@@ -471,8 +505,182 @@ type ResultView struct {
 	Outcome string
 }
 
+// SummaryCard is one plain-language restatement on the overview.
+type SummaryCard struct {
+	// Label names what the card answers.
+	Label string
+	// Value is the short answer, already a display string.
+	Value string
+	// State is the presentation token, empty when the value carries no
+	// state of its own.
+	State string
+	// Note is one sentence of context in plain language.
+	Note string
+	// Origin attributes the card. Every card names exactly one source.
+	Origin Origin
+}
+
+// SummaryGroup is a titled run of cards drawn from a single source.
+type SummaryGroup struct {
+	// Title names the group in plain language.
+	Title string
+	// Origin attributes every card in the group.
+	Origin Origin
+	// Cards are the group's restatements.
+	Cards []SummaryCard
+}
+
+// SummaryView is the plain-language overview that opens the console
+// page. It is the one surface permitted to speak across the three claim
+// vocabularies — see AGENTS.md rule 8 — and it earns that only by being
+// derived: buildSummary reads nothing but the already-assembled Page, so
+// the summary cannot state a fact the attributed sections below do not
+// already carry, and every card still names its own single origin. The
+// headline paraphrases; the sub-line quotes the operator verbatim, so
+// the paraphrase is always anchored to the literal claim beneath it.
+type SummaryView struct {
+	// Headline is the one-line answer in plain language.
+	Headline string
+	// HeadlineState is the presentation token for the headline.
+	HeadlineState string
+	// Sub quotes the underlying claim the headline paraphrases.
+	Sub string
+	// Groups are the card runs in render order.
+	Groups []SummaryGroup
+}
+
+// buildSummary derives the overview from the assembled page. It reads
+// only p, never a snapshot, so it has no way to invent a fact; where the
+// page has nothing it says so rather than guessing.
+func buildSummary(p *Page) *SummaryView {
+	s := &SummaryView{}
+
+	switch {
+	case p.Cluster == nil:
+		s.Headline = "No cluster snapshot yet"
+		s.HeadlineState = unknown
+		s.Sub = "Nothing has been observed for this cluster, so the console cannot say anything about it."
+	case p.Cluster.Absent:
+		s.Headline = "This cluster is not in the namespace"
+		s.HeadlineState = "degraded"
+		s.Sub = "The API server confirmed no cluster by this name exists here."
+	case p.SnapshotState == "stale":
+		s.Headline = "Showing the last good view"
+		s.HeadlineState = "stale"
+		s.Sub = "The watch is broken, so what follows is retained from the last successful observation and may no longer be true. The operator last reported: " + p.Cluster.Phase + "."
+	default:
+		s.Headline = "The operator reports the cluster is healthy"
+		s.HeadlineState = "current"
+		s.Sub = "Reported phase: " + p.Cluster.Phase + "."
+		if !strings.Contains(strings.ToLower(p.Cluster.Phase), "healthy") {
+			s.Headline = "The operator reports a state that is not plain healthy"
+			s.HeadlineState = unknown
+		}
+	}
+
+	if p.Cluster != nil && !p.Cluster.Absent {
+		s.Groups = append(s.Groups, SummaryGroup{
+			Title: "The database", Origin: p.Cluster.Origin,
+			Cards: []SummaryCard{
+				{Label: "Servers", Value: p.Cluster.Instances,
+					Note:   "Ready instances against the number the cluster asks for.",
+					Origin: p.Cluster.Origin},
+				{Label: "Accepting writes", Value: p.Cluster.CurrentPrimary,
+					Note:   "The current primary. Replicas follow it and do not take writes.",
+					Origin: p.Cluster.Origin},
+				{Label: "PostgreSQL version", Value: p.Cluster.PostgresVersion,
+					Note:   "Major version reported by the operator.",
+					Origin: p.Cluster.Origin},
+				{Label: "Timeline", Value: p.Cluster.Timeline,
+					Note:   "Increments on every promotion or point-in-time restore.",
+					Origin: p.Cluster.Origin},
+			},
+		})
+	}
+
+	if p.Backups != nil {
+		schedule := unknown
+		if len(p.Backups.ScheduledRows) > 0 {
+			schedule = p.Backups.ScheduledRows[0].Schedule
+		}
+		s.Groups = append(s.Groups, SummaryGroup{
+			Title: "Backups the operator claims", Origin: p.Backups.Origin,
+			Cards: []SummaryCard{
+				{Label: "Most recent backup", Value: p.Backups.LastCompletedAge,
+					Note:   "Age of the newest Backup the operator marked completed. This is the operator's claim, not proof the data is in the repository.",
+					Origin: p.Backups.Origin},
+				{Label: "Schedule", Value: schedule,
+					Note:   "The first ScheduledBackup entry, in cron form.",
+					Origin: p.Backups.Origin},
+			},
+		})
+	}
+
+	if p.Repository != nil {
+		cards := []SummaryCard{
+			{Label: "Repository", Value: p.Repository.Overall.Display(),
+				Note:   "What the repository scan concluded about the stored evidence.",
+				Origin: p.Repository.Origin},
+			{Label: "Completeness", Value: p.Repository.Completeness,
+				Note:   "Whether the scan covered the whole repository.",
+				Origin: p.Repository.Origin},
+			{Label: "Stored", Value: p.Repository.Inventory,
+				Note:   "What the scan found in object storage.",
+				Origin: p.Repository.Origin},
+		}
+		if p.Repository.Barman != nil {
+			cards = append(cards, SummaryCard{
+				Label: "Last archive received", Value: p.Repository.Barman.LatestArchiveAge,
+				Note:   "Age of the newest write-ahead log segment to reach the repository.",
+				Origin: p.Repository.Origin,
+			})
+		}
+		s.Groups = append(s.Groups, SummaryGroup{
+			Title: "What the repository actually holds", Origin: p.Repository.Origin, Cards: cards,
+		})
+	}
+
+	return s
+}
+
+// ShellView is the chrome every page shares: the fixed top bar's target
+// identity and the section map in the sidebar. It introduces no fact of
+// its own — every value on it is one the page already carries — and the
+// map it renders is static, so a destination this build does not serve
+// is shown disabled rather than omitted.
+type ShellView struct {
+	// ClusterName is the configured target cluster.
+	ClusterName string
+	// Namespace is the configured target namespace.
+	Namespace string
+	// SnapshotState is "none", "current", or "stale"; empty on pages
+	// that render no snapshot at all.
+	SnapshotState string
+	// SnapshotAge is the age of the snapshot, empty without one.
+	SnapshotAge string
+	// Generation is the snapshot generation, empty without one.
+	Generation string
+	// Identity is the display-only identity line, nil when none was
+	// forwarded or display is disabled.
+	Identity *IdentityView
+	// Links are the configured link-outs, possibly empty.
+	Links []Link
+	// OperationsEnabled reports that the operations destination is live.
+	OperationsEnabled bool
+	// AccessReviewEnabled reports that the review destination is live.
+	AccessReviewEnabled bool
+	// Current is the key of the page being rendered, used for
+	// aria-current. Empty on pages outside the map.
+	Current string
+}
+
 // Page is the view model of the console page.
 type Page struct {
+	// Shell is the shared chrome.
+	Shell ShellView
+	// Summary is the plain-language overview, derived from this page's
+	// own sections. Nil when nothing has been observed.
+	Summary *SummaryView
 	// ClusterName is the configured target cluster.
 	ClusterName string
 	// Namespace is the configured target namespace.
@@ -598,6 +806,7 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 		page.Panels = append([]Panel{{
 			Title: "Cluster status", Origin: OriginOperator, State: unknown, Detail: noSnapshot,
 		}}, page.Panels...)
+		page.Summary = buildSummary(&page)
 		return page
 	}
 
@@ -611,6 +820,9 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 	if page.Pods != nil && snap.Cluster.Present {
 		page.Pods.Disagreement = buildDisagreement(snap.Cluster, s.pods)
 	}
+	// Derived last, so it reads the finished page and can restate only
+	// what the attributed sections above already carry.
+	page.Summary = buildSummary(&page)
 	return page
 }
 

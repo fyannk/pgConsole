@@ -5,6 +5,13 @@
   link-outs as plain anchors. Claims carry the origins operator-reported,
   kubernetes-observed, or repository-evidence; the template never mixes
   them.
+
+  Panels carry x-data="panel" and tables carry x-data="dataTable" for
+  the embedded enhancement layer. Every one of those is additive: the
+  document is complete before any script runs, controls that only exist
+  with the script are marked x-cloak, and no state word is ever replaced
+  by a colour or a mark. stateToken classifies text the server already
+  rendered; it never introduces or hides a fact.
 */ -}}
 <!DOCTYPE html>
 <html lang="en">
@@ -12,36 +19,55 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pgConsole — {{.ClusterName}}</title>
+  <link rel="icon" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/console.js" defer></script>
+  <script src="/static/alpine.csp.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1>pgConsole</h1>
-    <dl class="target">
-      <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
-      <dt>Namespace</dt><dd>{{.Namespace}}</dd>
-      <dt>Snapshot</dt><dd>{{.SnapshotState}}{{if .SnapshotAge}} — age {{.SnapshotAge}} (generation {{.Generation}}){{end}}</dd>
-      {{- with .Identity}}
-      <dt>Identity</dt><dd>{{.User}} — {{.Level}} ({{.Label}})</dd>
-      {{- end}}
-    </dl>
-    {{- if or .Links .OperationsEnabled}}
-    <nav class="links">
-      {{- if .OperationsEnabled}}
-      <a href="/operations">Day-2 operations</a>
-      {{- end}}
-      {{- range .Links}}
-      <a href="{{.URL}}" rel="noopener noreferrer">{{.Label}}</a>
-      {{- end}}
-    </nav>
-    {{- end}}
-  </header>
+  {{template "icons"}}
+  {{template "topbar" .Shell}}
+  <div class="shell">
+  {{template "sidebar" .Shell}}
+  <div class="content">
   <main>
+    {{- with .Summary}}
+    {{- /*
+      The summary is the one surface that speaks across the three claim
+      vocabularies — AGENTS.md rule 8 carves it out explicitly. It earns
+      that by restating only what the attributed sections below already
+      carry: the headline paraphrases while the sub-line quotes the
+      operator verbatim beneath it, and every card still names its own
+      single origin. Nothing here is a fact the page does not repeat.
+    */ -}}
+    <div class="verdict">
+      <p class="headline" data-state="{{.HeadlineState}}">{{.Headline}}</p>
+      <p class="sub">{{.Sub}}</p>
+    </div>
+    {{- range .Groups}}
+    <h2 class="section-title">{{.Title}}</h2>
+    <div class="cards">
+      {{- range .Cards}}
+      <div class="card">
+        <span class="label">{{.Label}}</span>
+        <span class="value"{{if .State}} data-state="{{.State}}"{{end}}>{{.Value}}</span>
+        <span class="note">{{.Note}}</span>
+        <span class="origin">source: {{.Origin.Label}}</span>
+      </div>
+      {{- end}}
+    </div>
+    {{- end}}
+    <h2 class="section-title">The reported detail</h2>
+    {{- end}}
     {{- with .Cluster}}
-    <section class="panel">
-      <h2>Cluster status</h2>
+    <section class="panel sectioned" x-data="panel" data-panel="cluster">
+      <div class="panel-head">
+        <h2>Cluster status</h2>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
       {{- if .Absent}}
-      <p class="state">absent: cluster not found in the namespace</p>
+      <p class="state" data-state="degraded">absent: cluster not found in the namespace</p>
       {{- else}}
       <dl class="facts">
         <dt>Phase</dt><dd>{{.Phase}}{{if .PhaseReason}} — {{.PhaseReason}}{{end}}</dd>
@@ -53,6 +79,7 @@
         <dt>Image</dt><dd>{{.Image}}</dd>
       </dl>
       {{- if .Conditions}}
+      <div class="table-scroll">
       <table class="conditions">
         <caption>Conditions</caption>
         <thead><tr><th>Type</th><th>Status</th><th>Reason</th><th>Message</th></tr></thead>
@@ -62,15 +89,21 @@
           {{- end}}
         </tbody>
       </table>
+      </div>
       {{- end}}
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
     </section>
     {{- end}}
     {{- with .Pods}}
-    <section class="panel">
-      <h2>Instance pods</h2>
-      <p class="meta">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+    <section class="panel sectioned" x-data="panel" data-panel="pods">
+      <div class="panel-head">
+        <h2>Instance pods</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
       {{- with .Disagreement}}
       <div class="finding">
         <p class="state">disagreement on the primary instance</p>
@@ -79,6 +112,12 @@
       </div>
       {{- end}}
       {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter pods" aria-label="Filter pods">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
       <table class="pods">
         <thead><tr><th>Name</th><th>Role</th><th>Phase</th><th>Ready</th><th>Restarts</th><th>Node</th><th>Image</th>{{if .LogsEnabled}}<th>Logs</th>{{end}}</tr></thead>
         <tbody>
@@ -88,6 +127,8 @@
           {{- end}}
         </tbody>
       </table>
+        </div>
+      </div>
       {{- else}}
       <p class="state">no member pods observed</p>
       {{- end}}
@@ -95,13 +136,24 @@
       <p class="state">truncated: more members matched than the display bound</p>
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
     </section>
     {{- end}}
     {{- with .Events}}
-    <section class="panel">
-      <h2>Events</h2>
-      <p class="meta">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}) — window {{.Window}}</p>
+    <section class="panel sectioned" x-data="panel" data-panel="events">
+      <div class="panel-head">
+        <h2>Events</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}) — window {{.Window}}</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
       {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter events" aria-label="Filter events">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
       <table class="events">
         <thead><tr><th>Type</th><th>Reason</th><th>Object</th><th>Message</th><th>Count</th><th>Age</th></tr></thead>
         <tbody>
@@ -110,6 +162,8 @@
           {{- end}}
         </tbody>
       </table>
+        </div>
+      </div>
       {{- else}}
       <p class="state">no events in the window</p>
       {{- end}}
@@ -120,17 +174,28 @@
       <p class="state">pod events withheld: membership unknown without a pod snapshot</p>
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
     </section>
     {{- end}}
     {{- with .Backups}}
-    <section class="panel">
-      <h2>Backups</h2>
-      <p class="meta">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+    <section class="panel sectioned" x-data="panel" data-panel="backups">
+      <div class="panel-head">
+        <h2>Backups</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
       <p>Last completed backup age: {{.LastCompletedAge}}</p>
       {{- with .EvidenceLink}}
       <p><a href="{{.URL}}" rel="noopener noreferrer">{{.Label}}</a></p>
       {{- end}}
       {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter backups" aria-label="Filter backups">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
       <table class="backups">
         <caption>Backup resources</caption>
         <thead><tr><th>Name</th><th>Phase</th><th>Method</th><th>Started (UTC)</th><th>Stopped (UTC)</th><th>Age</th><th>Snapshot state</th></tr></thead>
@@ -140,6 +205,8 @@
           {{- end}}
         </tbody>
       </table>
+        </div>
+      </div>
       {{- else}}
       <p class="state">no Backup resources observed for this cluster</p>
       {{- end}}
@@ -147,6 +214,7 @@
       <p class="state">truncated: the Backup catalog reached its safety or display bound</p>
       {{- end}}
       {{- if .ScheduledRows}}
+      <div class="table-scroll">
       <table class="scheduled-backups">
         <caption>ScheduledBackup resources</caption>
         <thead><tr><th>Name</th><th>Method</th><th>Schedule</th><th>Suspended</th><th>Last schedule (UTC)</th><th>Next schedule (UTC)</th></tr></thead>
@@ -156,6 +224,7 @@
           {{- end}}
         </tbody>
       </table>
+      </div>
       {{- else}}
       <p class="state">no ScheduledBackup resources observed for this cluster</p>
       {{- end}}
@@ -163,24 +232,34 @@
       <p class="state">truncated: the ScheduledBackup catalog reached its safety or display bound</p>
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
     </section>
     {{- end}}
     {{- with .ObjectStore}}
-    <section class="panel">
-      <h2>ObjectStore reference</h2>
+    <section class="panel sectioned" x-data="panel" data-panel="objectstore">
+      <div class="panel-head">
+        <h2>ObjectStore reference</h2>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
       <dl class="facts">
         <dt>Name</dt><dd>{{.Name}}</dd>
         <dt>Cluster reference</dt><dd>{{.ReferenceState}} <span class="origin">({{.ReferenceOrigin.Label}})</span></dd>
         <dt>API lookup</dt><dd>{{.ObservationState}} <span class="origin">({{.ObservationOrigin.Label}})</span></dd>
       </dl>
+      </div>
     </section>
     {{- end}}
     {{- with .Repository}}
-    <section class="panel">
-      <h2>Repository evidence</h2>
-      <p class="meta">sidecar contact: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}){{if .ContactFailure}} — {{.ContactFailure}}{{end}}</p>
+    <section class="panel sectioned" x-data="panel" data-panel="repository">
+      <div class="panel-head">
+        <h2>Repository evidence</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">sidecar contact: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}){{if .ContactFailure}} — {{.ContactFailure}}{{end}}</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
       {{- if .SourceStale}}
-      <p class="state">stale: the sidecar reports its evidence no longer reflects the latest refresh attempt</p>
+      <p class="state" data-state="stale">stale: the sidecar reports its evidence no longer reflects the latest refresh attempt</p>
       {{- end}}
       <dl class="facts">
         <dt>Repository</dt><dd>{{.Repository}}</dd>
@@ -213,6 +292,7 @@
       {{- end}}
       {{- end}}
       {{- if .Capabilities}}
+      <div class="table-scroll">
       <table class="capabilities">
         <caption>Evidence capabilities</caption>
         <thead><tr><th>Capability</th><th>Support</th><th>State</th></tr></thead>
@@ -222,15 +302,21 @@
           {{- end}}
         </tbody>
       </table>
+      </div>
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
     </section>
     {{- end}}
     {{- with .CrossCheck}}
-    <section class="panel">
-      <h2>Backup cross-check</h2>
+    <section class="panel sectioned" x-data="panel" data-panel="crosscheck">
+      <div class="panel-head">
+        <h2>Backup cross-check</h2>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
       {{- if .Degraded}}
-      <p class="state">correlation unknown: {{.Degraded}}</p>
+      <p class="state" data-state="degraded">correlation unknown: {{.Degraded}}</p>
       {{- end}}
       {{- if .FindingCount}}
       <div class="finding">
@@ -238,6 +324,12 @@
       </div>
       {{- end}}
       {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter cross-check" aria-label="Filter cross-check">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
       <table class="cross-check">
         <caption>Backup resources beside repository evidence</caption>
         <thead><tr><th>Backup</th><th>Operator claim</th><th>Backup ID</th><th>Repository evidence</th><th>Outcome</th></tr></thead>
@@ -248,12 +340,15 @@
           {{- end}}
         </tbody>
       </table>
+        </div>
+      </div>
       {{- else}}
       <p class="state">no Backup resources to cross-check</p>
       {{- end}}
       {{- if .OrphansUnknown}}
       <p class="state">repository orphans unknown: {{.OrphansUnknown}}</p>
       {{- else if .Orphans}}
+      <div class="table-scroll">
       <table class="orphans">
         <caption>Repository backups no resource accounts for</caption>
         <thead><tr><th>Backup ID</th><th>Repository evidence</th><th>Completed (UTC)</th></tr></thead>
@@ -263,6 +358,7 @@
           {{- end}}
         </tbody>
       </table>
+      </div>
       {{- if .OrphansTruncated}}
       <p class="state">truncated: more orphaned repository backups than the display bound</p>
       {{- end}}
@@ -270,15 +366,23 @@
       <p class="state">no repository backups outside the operator's catalog</p>
       {{- end}}
       <p class="origin">sources: {{.OperatorOrigin.Label}} and {{.RepositoryOrigin.Label}}, correlated by exact backup ID</p>
+      </div>
     </section>
     {{- end}}
     {{- range .Panels}}
-    <section class="panel">
-      <h2>{{.Title}}</h2>
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>{{.Title}}</h2>
+        <p class="meta" data-state="{{stateToken .State}}">{{.State}}</p>
+      </div>
+      <div class="panel-body">
       <p class="state">{{.State}}: {{.Detail}}</p>
       <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
     </section>
     {{- end}}
   </main>
+  </div>
+  </div>
 </body>
 </html>

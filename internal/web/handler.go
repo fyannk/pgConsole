@@ -159,7 +159,7 @@ type Handler struct {
 // reviewer only in access-review mode; their absence is what makes the
 // corresponding assembly graph writer-free.
 func New(cfg Config, sources Sources, prober ReadinessProber, tailer LogTailer, auth Auth, executor OpsExecutor, reviewer ReviewExecutor, now func() time.Time, logger *slog.Logger) (*Handler, error) {
-	tpl, err := template.ParseFS(assets, "templates/*.tmpl")
+	tpl, err := template.New("pgconsole").Funcs(templateFuncs).ParseFS(assets, "templates/*.tmpl")
 	if err != nil {
 		return nil, redact.NewError("template parse", redact.CategoryInternal, err)
 	}
@@ -228,8 +228,14 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
 		header.Set("Cache-Control", "no-store")
+		// script-src is 'self' only: the enhancement layer is embedded and
+		// served from this binary, never fetched. 'unsafe-eval' is
+		// deliberately absent — the vendored Alpine is the CSP build,
+		// which parses its own restricted expression grammar instead of
+		// calling new Function(). connect-src stays at default-src 'none'
+		// so the scripts cannot originate a request of any kind.
 		header.Set("Content-Security-Policy",
-			"default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+			"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("X-Frame-Options", "DENY")
 		header.Set("Referrer-Policy", "no-referrer")
@@ -255,11 +261,33 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	page := buildPage(h.cfg.ClusterName, h.cfg.Namespace, s, h.now(), h.cfg.Links)
 	page.Identity = h.buildIdentityView(r)
 	page.OperationsEnabled = h.cfg.AllowOperations && h.executor != nil
+	page.Shell = h.shell(r, "overview")
+	page.Shell.SnapshotState = page.SnapshotState
+	page.Shell.SnapshotAge = page.SnapshotAge
+	page.Shell.Generation = page.Generation
+	page.Shell.Identity = page.Identity
+	page.Shell.Links = page.Links
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tpl.ExecuteTemplate(w, "page.html.tmpl", page); err != nil {
 		h.logger.Error("render failed",
 			slog.String("route", "index"),
 			slog.String("category", redact.Safe(err)))
+	}
+}
+
+// shell builds the chrome shared by every page. It carries no cluster
+// fact of its own: pages that have a snapshot copy their own state onto
+// it after calling this, and pages that do not simply leave those fields
+// empty so the top bar renders no snapshot line rather than a false one.
+func (h *Handler) shell(r *http.Request, current string) ShellView {
+	return ShellView{
+		ClusterName:         h.cfg.ClusterName,
+		Namespace:           h.cfg.Namespace,
+		Identity:            h.buildIdentityView(r),
+		Links:               buildLinks(h.cfg.Links),
+		OperationsEnabled:   h.cfg.AllowOperations && h.executor != nil,
+		AccessReviewEnabled: h.cfg.AllowAccessReview && h.reviewer != nil,
+		Current:             current,
 	}
 }
 
@@ -273,19 +301,19 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) requireLevel(min authz.Tier, requirement string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.auth.Extractor == nil {
-			h.renderDenied(w, http.StatusServiceUnavailable,
+			h.renderDenied(w, r, http.StatusServiceUnavailable,
 				"level gating unavailable without a trusted identity header")
 			return
 		}
 		if _, ok := h.auth.Extractor.FromRequest(r); !ok {
 			h.logger.Info("denied", slog.String("reason", "no-identity"))
-			h.renderDenied(w, http.StatusForbidden,
+			h.renderDenied(w, r, http.StatusForbidden,
 				"identity required: the proxy forwarded no usable identity")
 			return
 		}
 		if h.level(r) < min {
 			h.logger.Info("denied", slog.String("reason", "insufficient-level"))
-			h.renderDenied(w, http.StatusForbidden, "not authorized: "+requirement)
+			h.renderDenied(w, r, http.StatusForbidden, "not authorized: "+requirement)
 			return
 		}
 		next(w, r)
@@ -303,10 +331,10 @@ func (h *Handler) level(r *http.Request) authz.Tier {
 }
 
 // renderDenied writes the constant denial page.
-func (h *Handler) renderDenied(w http.ResponseWriter, status int, message string) {
+func (h *Handler) renderDenied(w http.ResponseWriter, r *http.Request, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	if err := h.tpl.ExecuteTemplate(w, "denied.html.tmpl", DeniedView{Message: message}); err != nil {
+	if err := h.tpl.ExecuteTemplate(w, "denied.html.tmpl", DeniedView{Shell: h.shell(r, ""), Message: message}); err != nil {
 		h.logger.Error("render failed",
 			slog.String("route", "denied"),
 			slog.String("category", redact.Safe(err)))
@@ -344,6 +372,7 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := LogsView{
+		Shell:       h.shell(r, ""),
 		ClusterName: h.cfg.ClusterName,
 		Pod:         pod,
 		Origin:      OriginKubernetes,

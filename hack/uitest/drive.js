@@ -1,0 +1,331 @@
+// Browser-side checks for the console UI.
+//
+// Driven by hack/test-ui.sh against the fixture harness in
+// internal/web/uiharness_test.go. Everything asserted here is a property
+// of the served page in a real engine, which is exactly what the Go
+// tests cannot reach: whether the enhancement layer runs at all under
+// the served Content-Security-Policy, whether colour contrast clears
+// WCAG AA in both schemes, and whether a table survives a narrow
+// viewport.
+//
+// Exits non-zero on the first failing check. Screenshots and a summary
+// land in artifacts/ui/ for CI to upload.
+
+'use strict';
+
+const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
+
+const BASE = parseInt(process.env.PGCONSOLE_UI_PORT_BASE || '18090', 10);
+const HOST = process.env.PGCONSOLE_UI_HOST || '127.0.0.1';
+const OUT = process.env.PGCONSOLE_UI_ARTIFACTS ||
+  path.join(__dirname, '..', '..', 'artifacts', 'ui');
+
+const STATES = {
+  healthy: `http://${HOST}:${BASE}/`,
+  stale: `http://${HOST}:${BASE + 1}/`,
+  degraded: `http://${HOST}:${BASE + 2}/`,
+  empty: `http://${HOST}:${BASE + 3}/`,
+};
+
+const results = [];
+
+/**
+ * Records one check and prints it.
+ * @param {string} name What was checked.
+ * @param {boolean} pass Whether it held.
+ * @param {string} [detail] Evidence, printed either way.
+ * @returns {void}
+ */
+function check(name, pass, detail) {
+  results.push({ name, pass, detail: detail || '' });
+  console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
+}
+
+/**
+ * Collects console errors, page errors and >=400 responses for a page.
+ * @param {import('playwright').Page} page Page to watch.
+ * @returns {string[]} Live array, appended to as the page runs.
+ */
+function watch(page) {
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  page.on('response', (r) => {
+    if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`);
+  });
+  return errors;
+}
+
+/** @returns {string} axe-core's browser bundle source. */
+function axeSource() {
+  return fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
+}
+
+/**
+ * Runs axe against the current page, restricted to WCAG 2 A and AA.
+ * @param {import('playwright').Page} page Page to audit.
+ * @returns {Promise<object[]>} Violations, most severe first.
+ */
+async function audit(page) {
+  await page.evaluate(axeSource());
+  return page.evaluate(async () => {
+    const r = await window.axe.run(document, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] },
+    });
+    return r.violations.map((v) => ({
+      id: v.id,
+      impact: v.impact,
+      nodes: v.nodes.length,
+      worst: (v.nodes[0] && v.nodes[0].failureSummary || '')
+        .split('\n').filter(Boolean).slice(-1)[0] || '',
+    }));
+  });
+}
+
+/**
+ * Verifies the enhancement layer loads and every interaction works.
+ * @param {import('playwright').Browser} browser Browser to use.
+ * @returns {Promise<void>}
+ */
+async function checkEnhancement(browser) {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
+  const page = await ctx.newPage();
+  const errors = watch(page);
+  await page.goto(STATES.healthy, { waitUntil: 'networkidle' });
+
+  const csp = errors.filter((e) => /Content Security Policy|Refused to/i.test(e));
+  check('no CSP violations', csp.length === 0, csp.join(' | '));
+
+  const version = await page.evaluate(() => (window.Alpine || {}).version || '');
+  check('Alpine started under script-src self', version !== '', `version ${version || 'absent'}`);
+
+  const toolsVisible = await page.locator('.table-tools').first().isVisible();
+  check('enhancement controls revealed after init', toolsVisible);
+
+  const others = errors.filter((e) => !/Content Security Policy|Refused to/i.test(e));
+  check('no console errors or failed requests', others.length === 0, others.slice(0, 4).join(' | '));
+
+  // Filter.
+  const search = page.locator('section[data-panel="pods"] .table-tools input[type="search"]');
+  const rows = page.locator('section[data-panel="pods"] table.pods tbody tr');
+  const total = await rows.count();
+  await search.fill('orders-2');
+  await page.waitForTimeout(250);
+  const shown = await rows.evaluateAll(
+    (rs) => rs.filter((r) => getComputedStyle(r).display !== 'none').length);
+  check('table filter narrows rows', total === 3 && shown === 1, `${total} rows -> ${shown} visible`);
+
+  const summary = await page.locator('section[data-panel="pods"] .table-tools .count').innerText();
+  check('filter reports the count', /1 of 3 rows/.test(summary), summary);
+  await search.fill('');
+  await page.waitForTimeout(250);
+
+  // Sort.
+  const nameHeader = page.locator('section[data-panel="pods"] table.pods thead th').first();
+  await nameHeader.click();
+  await page.waitForTimeout(150);
+  const asc = await rows.first().locator('td').first().innerText();
+  await nameHeader.click();
+  await page.waitForTimeout(150);
+  const desc = await rows.first().locator('td').first().innerText();
+  check('click-to-sort reorders rows', asc === 'orders-1' && desc === 'orders-3',
+    `asc=${asc}, desc=${desc}`);
+  check('sorted header marked for the stylesheet',
+    (await nameHeader.getAttribute('data-sort')) === 'desc');
+
+  // Collapse.
+  const toggle = page.locator('section[data-panel="events"] .panel-toggle');
+  const body = page.locator('section[data-panel="events"] .panel-body');
+  const before = await body.isVisible();
+  await toggle.click();
+  await page.waitForTimeout(150);
+  const after = await body.isVisible();
+  check('panel collapses', before === true && after === false, `${before} -> ${after}`);
+
+  // Auto-refresh must never be on unless asked for.
+  check('auto-refresh defaults to off',
+    (await page.locator('.refresh input[type="checkbox"]').isChecked()) === false);
+
+  // Sidebar: collapse narrows it to the icon rail and back.
+  const aside = page.locator('aside.sidebar');
+  const widthOf = () => aside.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+  const expanded = await widthOf();
+  await page.locator('.sidebar-toggle').click();
+  await page.waitForTimeout(150);
+  const collapsed = await widthOf();
+  check('sidebar collapses to the icon rail', expanded > 200 && collapsed < 80,
+    `${expanded}px -> ${collapsed}px`);
+  check('collapsed sidebar hides its labels',
+    (await page.locator('.sidebar-link[aria-current="page"] .sidebar-label').isVisible()) === false);
+  await page.locator('.sidebar-toggle').click();
+  await page.waitForTimeout(150);
+  check('sidebar expands again', (await widthOf()) === expanded);
+
+  // A destination this build does not serve is present but inert: shown
+  // so the map stays complete, never a link that would 404.
+  const disabled = page.locator('.sidebar-link[aria-disabled="true"]');
+  const disabledCount = await disabled.count();
+  const anyIsAnchor = await disabled.evaluateAll(
+    (els) => els.some((e) => e.tagName.toLowerCase() === 'a' || e.hasAttribute('href')));
+  check('unbuilt destinations are shown but not links',
+    disabledCount > 0 && anyIsAnchor === false,
+    `${disabledCount} disabled entries, any anchor: ${anyIsAnchor}`);
+
+  // Every live sidebar link must resolve — a 404 in the nav is a lie
+  // about what this build serves.
+  const hrefs = await page.locator('.sidebar-link[href^="/"]').evaluateAll(
+    (els) => els.map((e) => e.getAttribute('href')));
+  const broken = [];
+  for (const href of hrefs) {
+    const res = await page.request.get(new URL(href, STATES.healthy).toString());
+    if (res.status() >= 400) broken.push(`${href} -> ${res.status()}`);
+  }
+  check('every live sidebar link resolves', broken.length === 0,
+    broken.join(', ') || `${hrefs.length} links checked`);
+
+  await ctx.close();
+}
+
+/**
+ * Verifies the page is complete and honest with scripting disabled.
+ * @param {import('playwright').Browser} browser Browser to use.
+ * @returns {Promise<void>}
+ */
+async function checkNoScript(browser) {
+  const ctx = await browser.newContext({
+    javaScriptEnabled: false, viewport: { width: 1440, height: 1400 },
+  });
+  const page = await ctx.newPage();
+  await page.goto(STATES.healthy, { waitUntil: 'domcontentloaded' });
+
+  check('panel bodies visible without JavaScript',
+    await page.locator('section[data-panel="pods"] .panel-body').isVisible());
+  const rows = await page.locator('section[data-panel="pods"] table.pods tbody tr').count();
+  check('table rows present without JavaScript', rows === 3, `${rows} rows`);
+  check('enhancement controls hidden without JavaScript',
+    (await page.locator('.table-tools').first().isVisible()) === false);
+  check('auto-refresh hidden without JavaScript',
+    (await page.locator('.refresh').isVisible()) === false);
+
+  const state = await page.locator('dl.target dd[data-state]').innerText();
+  check('state word present without JavaScript', /current/.test(state), state);
+
+  await page.screenshot({ path: path.join(OUT, 'healthy-nojs-1440.png'), fullPage: true });
+  await ctx.close();
+}
+
+/**
+ * Audits every state in both colour schemes and captures screenshots.
+ * @param {import('playwright').Browser} browser Browser to use.
+ * @returns {Promise<void>}
+ */
+async function checkStates(browser) {
+  for (const scheme of ['light', 'dark']) {
+    for (const [name, url] of Object.entries(STATES)) {
+      const ctx = await browser.newContext({
+        colorScheme: scheme, viewport: { width: 1440, height: 1400 },
+      });
+      const page = await ctx.newPage();
+      const errors = watch(page);
+      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(300);
+
+      const violations = await audit(page);
+      const serious = violations.filter(
+        (v) => v.impact === 'critical' || v.impact === 'serious');
+      check(`${name}/${scheme}: no serious accessibility violations`, serious.length === 0,
+        serious.map((v) => `${v.id}(${v.nodes}) ${v.worst}`).join(' | ') ||
+          (violations.length ? violations.map((v) => `${v.id}(${v.impact})`).join(',') : 'clean'));
+      check(`${name}/${scheme}: no console errors or failed requests`, errors.length === 0,
+        errors.slice(0, 3).join(' | '));
+
+      await page.screenshot({
+        path: path.join(OUT, `${name}-${scheme}-1440.png`), fullPage: true,
+      });
+      await ctx.close();
+    }
+  }
+}
+
+/**
+ * Verifies narrow viewports neither overflow the body nor shred words
+ * inside table cells.
+ * @param {import('playwright').Browser} browser Browser to use.
+ * @returns {Promise<void>}
+ */
+async function checkResponsive(browser) {
+  for (const width of [375, 768, 1024, 1440]) {
+    const ctx = await browser.newContext({ viewport: { width, height: 1200 } });
+    const page = await ctx.newPage();
+    await page.goto(STATES.healthy, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(200);
+
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+    check(`no horizontal page overflow at ${width}px`, !overflow);
+
+    // Guards the specific regression that shredded every table value
+    // into single characters at narrow widths. `overflow-wrap: anywhere`
+    // drops a cell's min-content width to one character, so table
+    // auto-layout collapses each column to nothing; `break-word` keeps
+    // the longest word as the floor. Asserting the computed value is
+    // exact, where measuring rendered text is not: a long image
+    // reference wrapping at 375px is correct behaviour, not a defect.
+    const wrap = await page.evaluate(() => {
+      const cell = document.querySelector('table.pods tbody td');
+      return cell ? getComputedStyle(cell).overflowWrap : 'no-cell';
+    });
+    check(`table cells do not collapse min-content at ${width}px`, wrap === 'break-word',
+      `overflow-wrap: ${wrap}`);
+
+    // With the column floor honoured the table keeps its width and the
+    // surrounding .table-scroll takes the overflow, rather than the
+    // columns compressing until values break apart.
+    const kept = await page.evaluate(() => {
+      const table = document.querySelector('table.pods');
+      const scroll = table && table.closest('.table-scroll');
+      return table && scroll
+        ? { table: Math.round(table.getBoundingClientRect().width), scrollable: scroll.scrollWidth > scroll.clientWidth }
+        : null;
+    });
+    check(`table keeps its column floor at ${width}px`,
+      kept !== null && kept.table >= 600,
+      kept ? `table ${kept.table}px, scroll container ${kept.scrollable ? 'scrolls' : 'fits'}` : 'table missing');
+
+    if (width === 375) {
+      await page.screenshot({ path: path.join(OUT, 'healthy-light-375.png'), fullPage: true });
+    }
+    await ctx.close();
+  }
+}
+
+(async () => {
+  fs.mkdirSync(OUT, { recursive: true });
+  const launch = {};
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launch.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launch);
+  try {
+    await checkEnhancement(browser);
+    await checkNoScript(browser);
+    await checkStates(browser);
+    await checkResponsive(browser);
+  } finally {
+    await browser.close();
+  }
+
+  const failed = results.filter((r) => !r.pass);
+  const summary = `${results.length - failed.length}/${results.length} checks passed`;
+  fs.writeFileSync(path.join(OUT, 'summary.txt'),
+    results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? '  — ' + r.detail : ''}`)
+      .join('\n') + `\n\n${summary}\n`);
+  console.log(`\n${summary}`);
+  console.log(`artifacts in ${OUT}`);
+  process.exit(failed.length === 0 ? 0 : 1);
+})().catch((e) => {
+  console.error('driver error:', e && e.stack || e);
+  process.exit(2);
+});

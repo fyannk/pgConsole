@@ -8,15 +8,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pgConsole — denied</title>
+  <link rel="icon" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <header><h1>pgConsole</h1></header>
+  {{template "icons"}}
+  {{template "topbar" .Shell}}
+  <div class="shell">
+  {{template "sidebar" .Shell}}
+  <div class="content">
+  <header>
+    <div class="header-bar">
+      <h1>pgConsole</h1>
+    </div>
+  </header>
   <main>
     <section class="panel">
       <h2>Access denied</h2>
       <p class="state">{{.Message}}</p>
     </section>
   </main>
+  </div>
+  </div>
 </body>
 </html>

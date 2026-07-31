@@ -9,13 +9,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pgConsole — operations {{.ClusterName}}</title>
+  <link rel="icon" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  {{template "icons"}}
+  {{template "topbar" .Shell}}
+  <div class="shell">
+  {{template "sidebar" .Shell}}
+  <div class="content">
   <header>
-    <h1>pgConsole — operations</h1>
+    <div class="header-bar">
+      <h1>pgConsole — operations</h1>
     <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
-    <nav class="links"><a href="/">back to the console</a></nav>
+    </div>
   </header>
   <main>
     <section class="panel">
@@ -27,5 +34,7 @@
       </ul>
     </section>
   </main>
+  </div>
+  </div>
 </body>
 </html>

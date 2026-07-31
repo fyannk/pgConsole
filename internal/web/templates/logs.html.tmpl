@@ -9,16 +9,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pgConsole — logs {{.Pod}}</title>
+  <link rel="icon" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  {{template "icons"}}
+  {{template "topbar" .Shell}}
+  <div class="shell">
+  {{template "sidebar" .Shell}}
+  <div class="content">
   <header>
-    <h1>pgConsole — log tail</h1>
+    <div class="header-bar">
+      <h1>pgConsole — log tail</h1>
     <dl class="target">
       <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
       <dt>Pod</dt><dd>{{.Pod}}</dd>
     </dl>
-    <nav class="links"><a href="/">back to the console</a></nav>
+    </div>
   </header>
   <main>
     <section class="panel">
@@ -35,5 +42,7 @@
       <p class="origin">source: {{.Origin.Label}}</p>
     </section>
   </main>
+  </div>
+  </div>
 </body>
 </html>

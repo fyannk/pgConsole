@@ -139,6 +139,25 @@ Consequences that constrain every design decision here:
    vocabularies. In particular, an operator's backup claim is never
    presented as repository evidence — that is ObjectStoreViewer's word.
 
+   **One carve-out: the overview summary.** The plain-language block that
+   opens the console page may speak across the three vocabularies, because
+   an operator arriving at an incident needs one sentence before they need
+   three taxonomies. It earns that only under all four of these, and a
+   reviewer should reject it if any is missing:
+
+   1. **Derived, never sourced.** `buildSummary` takes the assembled
+      `Page` and nothing else. It cannot reach a snapshot, so it has no
+      way to state a fact the attributed sections below do not already
+      carry. `TestSummaryRestatesOnlyWhatThePageCarries` holds this.
+   2. **Paraphrase anchored to quotation.** The headline may paraphrase;
+      the sub-line quotes the underlying claim verbatim beneath it.
+   3. **Every card names one origin.** The blend exists at the level of
+      the block, never inside a single card.
+   4. **No claim the sources do not make.** The summary restates; it does
+      not conclude. It never asserts recoverability — that a backup can
+      be restored is not something either the operator or the repository
+      scan reports, so the console does not say it.
+
 ## Engineering conventions
 
 Match the surrounding code. `CONTRIBUTING.md` is the human-readable guide;
@@ -166,8 +185,15 @@ scans, and the tests. In short:
   e2e checks covering watch-break, forbidden-RBAC, operations-disabled and
   redaction negative cases.
 - Makefile targets `build`, `test`, `test-race`, `test-integration`,
-  `test-scale`, `test-container`, `test-multiarch`, `test-e2e`, `lint`,
-  `check`, `docker-build`, `supply-chain`, and `release-check`.
+  `test-scale`, `test-container`, `test-multiarch`, `test-ui`, `test-e2e`,
+  `lint`, `check`, `docker-build`, `supply-chain`, and `release-check`.
+- The console UI is server-rendered `html/template` plus one embedded
+  stylesheet and an embedded progressive-enhancement layer (the Alpine
+  CSP build, vendored — never the standard build, which would require
+  `script-src 'unsafe-eval'`). Content is never gated behind scripting:
+  the document is complete before any script runs, enhancement-only
+  controls carry `x-cloak`, and no state word is ever replaced by a
+  colour or a mark. `make test-ui` enforces all of that in a browser.
 
 ## Naming — settled, use exactly these
 

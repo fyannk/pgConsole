@@ -146,7 +146,7 @@ var requiredHeaders = map[string]string{
 	"X-Content-Type-Options":  "nosniff",
 	"X-Frame-Options":         "DENY",
 	"Referrer-Policy":         "no-referrer",
-	"Content-Security-Policy": "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+	"Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
 }
 
 func TestHandlerSecurityHeadersOnEveryResponse(t *testing.T) {
@@ -382,6 +382,20 @@ func TestHandlerTemplateEscapesHostileValues(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	body := out.String()
+	// The page embeds exactly two scripts of its own: the enhancement
+	// layer and the vendored Alpine CSP build. Both are same-origin src
+	// references with no inline body, and both must be present. Removing
+	// them before the injection scan keeps that scan exact — a third
+	// script tag from a hostile value still fails the check below.
+	for _, own := range []string{
+		`<script src="/static/console.js" defer></script>`,
+		`<script src="/static/alpine.csp.js" defer></script>`,
+	} {
+		if !strings.Contains(body, own) {
+			t.Fatalf("page is missing its own script tag %q", own)
+		}
+		body = strings.ReplaceAll(body, own, "")
+	}
 	for _, forbidden := range []string{"<script", "<iframe", "<style", "<img", "<b>"} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("rendered output contains unescaped %q", forbidden)

@@ -7,7 +7,7 @@ DIST_DIR ?= dist
 ARTIFACT_DIR ?= artifacts
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build clean dev-up test test-race test-integration test-scale test-container test-multiarch test-e2e lint golangci-lint vuln check docs package docker-build supply-chain release-check
+.PHONY: build clean dev-up test test-race test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln check docs package docker-build supply-chain release-check
 
 build:
 	mkdir -p bin
@@ -45,6 +45,9 @@ test-multiarch:
 test-e2e: docker-build
 	./hack/test-e2e.sh
 
+test-ui:
+	./hack/test-ui.sh
+
 lint: golangci-lint
 	test -z "$$(gofmt -l $$(find cmd internal -name '*.go' -type f))"
 	$(GO) vet ./...
@@ -80,4 +83,4 @@ docker-build:
 supply-chain: docker-build
 	./hack/generate-supply-chain-artifacts.sh $(IMAGE) $(ARTIFACT_DIR)/release
 
-release-check: check docs test-integration test-scale test-container test-e2e package test-multiarch supply-chain
+release-check: check docs test-integration test-scale test-ui test-container test-e2e package test-multiarch supply-chain
