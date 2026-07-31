@@ -863,3 +863,40 @@ h2.section-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: 
 .instance .name { font-family: var(--font-mono); font-size: var(--text-lg); font-weight: 600; }
 .instance .line { font-size: var(--text-sm); }
 .instance .line.muted { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); }
+
+/* --------------------------------------------------- Wiring diagram ==
+   One inline SVG on the Overview, drawn from a server-computed geometry.
+   Boxes read left to right; the primary is distinguished by a heavier
+   border (weight, not colour), while each server's border colour carries
+   its health — so neither the role nor the health depends on colour
+   alone. On a narrow screen the diagram scrolls rather than shrinking
+   below legibility. */
+.topo-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: -0.01em; margin: 0 0 var(--space-3); }
+.topo-scroll { -webkit-overflow-scrolling: touch; overflow-x: auto; }
+svg.topo { display: block; height: auto; min-width: 600px; width: 100%; }
+
+.topo text { font-family: var(--font-ui); }
+.topo-label { fill: var(--text); font-size: 13px; font-weight: 600; }
+.topo-sub { fill: var(--text-muted); font-size: 11px; }
+.topo-disk { fill: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
+.topo-elabel { fill: var(--text-muted); font-size: 10.5px; }
+
+.topo-node rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.5; }
+.topo-apps rect, .topo-endpoint rect { fill: var(--surface-2); stroke: var(--border); }
+.topo-storage rect { fill: var(--accent-weak); stroke: var(--accent); }
+.topo-snapshot rect { fill: var(--surface-2); stroke: var(--border-strong); }
+/* Health by border colour; the state word rides in the diagram's labels
+   and on the Cluster status screen, so colour is reinforcement. */
+.topo-node[data-state="current"] rect { stroke: var(--ok); }
+.topo-node[data-state="degraded"] rect { fill: var(--bad-weak); stroke: var(--bad); }
+.topo-node[data-state="unknown"] rect { stroke: var(--border-strong); }
+/* The primary is the one server whose identity changes behaviour: heavier
+   border, independent of the health colour above. */
+.topo-primary rect { stroke-width: 3; }
+
+.topo-edge { fill: none; stroke-width: 1.5; }
+.topo-edge-write { stroke: var(--accent); }
+.topo-edge-read { stroke: var(--text-muted); }
+.topo-edge-replicate { stroke: var(--ok); stroke-dasharray: 5 4; }
+.topo-edge-archive { stroke: var(--accent); stroke-dasharray: 2 4; }
+#topo-arrow path { fill: var(--border-strong); }

@@ -1,0 +1,44 @@
+{{- /*
+  The wiring diagram that opens the Overview: one inline SVG (no script,
+  no external asset) drawn from a TopologyView. It reads left to right —
+  apps, the write and read endpoints, the servers, and the backup
+  storage — so a non-technical reader can see how their apps reach the
+  database and where the data is kept. Every box carries a text label;
+  colour and the primary's emphasis are reinforcement, never the only
+  signal. Positions are computed server-side; the template only draws.
+*/ -}}
+{{- define "topology" -}}
+<section class="panel topo-panel">
+  <h2 class="topo-title">How your database is wired</h2>
+  <div class="topo-scroll">
+  <svg class="topo" viewBox="0 0 {{.Width}} {{.Height}}" role="img"
+       aria-label="How applications reach the database and where the data is stored"
+       preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <marker id="topo-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z"></path>
+      </marker>
+    </defs>
+    {{- range .Edges}}
+    <path class="topo-edge topo-edge-{{.Kind}}" d="{{.Path}}" marker-end="url(#topo-arrow)"></path>
+    {{- if .Label}}
+    <text class="topo-elabel" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle">{{.Label}}</text>
+    {{- end}}
+    {{- end}}
+    {{- range .Nodes}}
+    <g class="topo-node topo-{{.Kind}}"{{if .State}} data-state="{{.State}}"{{end}}>
+      <rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="8"></rect>
+      <text class="topo-label" x="{{add .X 14}}" y="{{add .Y 23}}">{{.Label}}</text>
+      {{- if .Sub}}
+      <text class="topo-sub" x="{{add .X 14}}" y="{{add .Y 40}}">{{.Sub}}</text>
+      {{- end}}
+      {{- if .Disk}}
+      <text class="topo-disk" x="{{add .X 14}}" y="{{add .Y 54}}">{{.Disk}}</text>
+      {{- end}}
+    </g>
+    {{- end}}
+  </svg>
+  </div>
+  <p class="origin">{{.Caption}}</p>
+</section>
+{{- end -}}

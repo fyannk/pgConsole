@@ -14,6 +14,9 @@
       <p class="headline" data-state="{{.HeadlineState}}">{{.Headline}}</p>
       <p class="sub">{{.Sub}}</p>
     </div>
+    {{- with $.Topology}}
+    {{template "topology" .}}
+    {{- end}}
     {{- range .Groups}}
     <h2 class="section-title">{{.Title}}</h2>
     <div class="cards">

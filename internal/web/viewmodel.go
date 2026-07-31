@@ -58,7 +58,7 @@ const maxDisplayMessage = 512
 // templateFuncs are the helpers the templates may call. They classify
 // text that is already rendered; none of them produce a fact, and none
 // may hide one.
-var templateFuncs = template.FuncMap{"stateToken": stateToken}
+var templateFuncs = template.FuncMap{"stateToken": stateToken, "add": func(a, b int) int { return a + b }}
 
 // stateToken reduces a rendered state string to one of the four tokens
 // the stylesheet keys its status treatment on: current, stale, degraded
@@ -681,6 +681,9 @@ type Page struct {
 	// Summary is the plain-language overview, derived from this page's
 	// own sections. Nil when nothing has been observed.
 	Summary *SummaryView
+	// Topology is the plain-language wiring diagram that opens the
+	// Overview, derived from this page. Nil without a cluster snapshot.
+	Topology *TopologyView
 	// ClusterName is the configured target cluster.
 	ClusterName string
 	// Namespace is the configured target namespace.
@@ -820,9 +823,10 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 	if page.Pods != nil && snap.Cluster.Present {
 		page.Pods.Disagreement = buildDisagreement(snap.Cluster, s.pods)
 	}
-	// Derived last, so it reads the finished page and can restate only
+	// Derived last, so they read the finished page and can restate only
 	// what the attributed sections above already carry.
 	page.Summary = buildSummary(&page)
+	page.Topology = buildTopology(&page)
 	return page
 }
 
