@@ -1231,22 +1231,60 @@ func declaredFixture() observe.DatabaseObjectsSnapshot {
 	}
 }
 
-// TestDatabasesRendersDeclarationsAndVerdicts proves the section shows
+// TestDatabasesScreensShowOnlyTheirOwnKind proves the four sidebar
+// entries are four screens and not one page shown four times. The
+// sidebar names a destination; showing every list on all of them makes
+// three of those names a lie.
+func TestDatabasesScreensShowOnlyTheirOwnKind(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
+
+	for _, tc := range []struct {
+		path    string
+		present string
+		absent  []string
+	}{
+		{"/databases", "Database resources", []string{"DatabaseRole resources", "Publication resources", "Subscription resources"}},
+		{"/databases/roles", "DatabaseRole resources", []string{"Database resources", "Publication resources", "Subscription resources"}},
+		{"/databases/publications", "Publication resources", []string{"Database resources", "DatabaseRole resources", "Subscription resources"}},
+		{"/databases/subscriptions", "Subscription resources", []string{"Database resources", "DatabaseRole resources", "Publication resources"}},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			body := get(t, h, http.MethodGet, tc.path).Body.String()
+			if !strings.Contains(body, tc.present) {
+				t.Errorf("%s does not show %q", tc.path, tc.present)
+			}
+			for _, other := range tc.absent {
+				if strings.Contains(body, other) {
+					t.Errorf("%s also shows %q, so it is not its own screen", tc.path, other)
+				}
+			}
+			if !strings.Contains(body, OriginOperator.Label()) {
+				t.Errorf("%s drops its attribution", tc.path)
+			}
+		})
+	}
+}
+
+// TestDatabasesRendersDeclarationsAndVerdicts proves each screen shows
 // what was declared alongside what the operator did with it, and that an
 // unreported verdict reads as unknown rather than as a failure — a
 // freshly created declaration has simply not been acted on yet.
 func TestDatabasesRendersDeclarationsAndVerdicts(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/databases").Body.String()
 
-	for _, want := range []string{
-		"app-db", "UTF8", "app-role", "superuser", "unlimited",
-		"app-pub", "all tables", "app-sub", "upstream",
-		"applied", "failed", "unknown", "operator-reported",
+	for path, wants := range map[string][]string{
+		"/databases":               {"app-db", "UTF8", "applied"},
+		"/databases/roles":         {"app-role", "superuser", "unlimited", "failed"},
+		"/databases/publications":  {"app-pub", "all tables", "applied"},
+		"/databases/subscriptions": {"app-sub", "upstream", "unknown"},
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("databases page misses %q", want)
+		body := get(t, h, http.MethodGet, path).Body.String()
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s misses %q", path, want)
+			}
 		}
 	}
 }
@@ -1257,7 +1295,7 @@ func TestDatabasesRendersDeclarationsAndVerdicts(t *testing.T) {
 func TestDatabasesNeverRendersSecretMaterial(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/databases").Body.String()
+	body := get(t, h, http.MethodGet, "/databases/roles").Body.String()
 
 	if !strings.Contains(body, "from a referenced Secret") {
 		t.Error("the page does not say how the role authenticates")

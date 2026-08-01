@@ -1,7 +1,7 @@
 {{- /*
-  Declared database objects. Renders web.Page.Databases: the Database,
-  DatabaseRole, Publication and Subscription resources this cluster
-  declares, and what the operator reports it did with each.
+  Declared database objects. Renders web.Page.Databases, one kind per
+  screen: the sidebar names four destinations, so each one shows the list
+  it names rather than all four again.
 
   Everything here is a declaration plus a reconciliation verdict. None of
   it is read from PostgreSQL: pgConsole never connects to the database,
@@ -10,42 +10,28 @@
   answer. A role's password Secret is reported as referenced and never
   named, because the console holds no Secret permission.
 
-  The four lists share one snapshot and one freshness: they are four
-  views of the same observation, and separate freshness lines would let
-  one screen disagree with itself.
+  The four screens share one snapshot and one freshness line: they are
+  four views of a single observation, and separate freshness would let
+  one section disagree with another about how current the same fetch is.
 */ -}}
 {{template "page-head" "databases"}}
 {{template "shell-open" .Shell}}
+    {{- $current := .Shell.Current}}
     {{- with .Databases}}
     <section class="panel sectioned" id="databases" x-data="panel" data-panel="databases">
       <div class="panel-head">
-        <h2>Declared objects</h2>
+        <h2>
+          {{- if eq $current "databases-roles"}}Declared roles
+          {{- else if eq $current "databases-publications"}}Declared publications
+          {{- else if eq $current "databases-subscriptions"}}Declared subscriptions
+          {{- else}}Declared databases{{end -}}
+        </h2>
         <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
         <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
 
-      <h3 class="section-title">Databases</h3>
-      {{- if .Databases}}
-      <div class="table-scroll">
-      <table class="declared">
-        <caption>Database resources</caption>
-        <thead><tr><th>Resource</th><th>Database</th><th>Owner</th><th>Encoding</th><th>Ensure</th><th>Reconciliation</th></tr></thead>
-        <tbody>
-          {{- range .Databases}}
-          <tr>
-            <td>{{.Name}}</td><td>{{.Database}}</td><td>{{.Owner}}</td><td>{{.Encoding}}</td><td>{{.Ensure}}</td>
-            <td><span data-state="{{stateToken .Declared.State}}">{{.Declared.State}}</span>{{if .Declared.Message}} — {{.Declared.Message}}{{end}}</td>
-          </tr>
-          {{- end}}
-        </tbody>
-      </table>
-      </div>
-      {{- else}}
-      <div class="empty"><strong>No declared databases</strong>This cluster declares no <code>Database</code> resources. Databases created directly in PostgreSQL are not declarations and are not shown here.</div>
-      {{- end}}
-
-      <h3 class="section-title">Roles</h3>
+      {{- if eq $current "databases-roles"}}
       {{- if .Roles}}
       <div class="table-scroll">
       <table class="declared">
@@ -63,10 +49,10 @@
       </table>
       </div>
       {{- else}}
-      <div class="empty"><strong>No declared roles</strong>This cluster declares no <code>DatabaseRole</code> resources.</div>
+      <div class="empty"><strong>No declared roles</strong>This cluster declares no <code>DatabaseRole</code> resources. Roles created directly in PostgreSQL are not declarations and are not shown here.</div>
       {{- end}}
 
-      <h3 class="section-title">Publications</h3>
+      {{- else if eq $current "databases-publications"}}
       {{- if .Publications}}
       <div class="table-scroll">
       <table class="declared">
@@ -86,7 +72,7 @@
       <div class="empty"><strong>No declared publications</strong>This cluster declares no <code>Publication</code> resources for logical replication.</div>
       {{- end}}
 
-      <h3 class="section-title">Subscriptions</h3>
+      {{- else if eq $current "databases-subscriptions"}}
       {{- if .Subscriptions}}
       <div class="table-scroll">
       <table class="declared">
@@ -106,8 +92,29 @@
       <div class="empty"><strong>No declared subscriptions</strong>This cluster declares no <code>Subscription</code> resources for logical replication.</div>
       {{- end}}
 
+      {{- else}}
+      {{- if .Databases}}
+      <div class="table-scroll">
+      <table class="declared">
+        <caption>Database resources</caption>
+        <thead><tr><th>Resource</th><th>Database</th><th>Owner</th><th>Encoding</th><th>Ensure</th><th>Reconciliation</th></tr></thead>
+        <tbody>
+          {{- range .Databases}}
+          <tr>
+            <td>{{.Name}}</td><td>{{.Database}}</td><td>{{.Owner}}</td><td>{{.Encoding}}</td><td>{{.Ensure}}</td>
+            <td><span data-state="{{stateToken .Declared.State}}">{{.Declared.State}}</span>{{if .Declared.Message}} — {{.Declared.Message}}{{end}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <div class="empty"><strong>No declared databases</strong>This cluster declares no <code>Database</code> resources. Databases created directly in PostgreSQL are not declarations and are not shown here.</div>
+      {{- end}}
+      {{- end}}
+
       {{- if .Truncated}}
-      <p class="state" data-state="degraded">More declared objects matched this cluster than the display bound; at least one list above is cut.</p>
+      <p class="state" data-state="degraded">More declared objects matched this cluster than the display bound; at least one list is cut.</p>
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
       </div>
