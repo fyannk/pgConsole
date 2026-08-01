@@ -73,6 +73,12 @@ type BackupsSource interface {
 	CurrentBackups() (observe.BackupsSnapshot, bool)
 }
 
+// PoolersSource supplies the current Pooler snapshot.
+type PoolersSource interface {
+	// CurrentPoolers returns the snapshot and whether one exists.
+	CurrentPoolers() (observe.PoolersSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -89,6 +95,8 @@ type Sources struct {
 	Events EventsSource
 	// Backups supplies the Backup and ScheduledBackup snapshot.
 	Backups BackupsSource
+	// Poolers supplies the Pooler snapshot.
+	Poolers PoolersSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -268,6 +276,7 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 	s.pods, s.podsOK = h.sources.Pods.CurrentPods()
 	s.events, s.eventsOK = h.sources.Events.CurrentEvents()
 	s.backups, s.backupsOK = h.sources.Backups.CurrentBackups()
+	s.poolers, s.poolersOK = h.sources.Poolers.CurrentPoolers()
 	if h.sources.Evidence != nil {
 		s.evidence = h.sources.Evidence.CurrentEvidence()
 		s.evidenceEnabled = true
@@ -341,9 +350,11 @@ func (h *Handler) handleBackupsEvidence(w http.ResponseWriter, r *http.Request) 
 	h.renderPage(w, "backups-evidence", "backups-evidence.html.tmpl", h.assemble(r, "backups-evidence"))
 }
 
-// handlePoolers renders the poolers section. This build has no Pooler
-// observer, so every poolers screen is the same honest not-observed
-// state; the named key only sets which sidebar entry reads as current.
+// handlePoolers renders the poolers section. The three entries share one
+// screen: a Pooler's pods and logs are the Deployment's, which this
+// console does not observe separately, so splitting them would promise
+// detail it does not have. The named key sets which sidebar entry reads
+// as current.
 func (h *Handler) handlePoolers(current string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		h.renderPage(w, current, "poolers.html.tmpl", h.assemble(r, current))
@@ -533,4 +544,9 @@ func (EmptySnapshots) CurrentEvents() (observe.EventsSnapshot, bool) {
 // CurrentBackups reports no backup snapshot.
 func (EmptySnapshots) CurrentBackups() (observe.BackupsSnapshot, bool) {
 	return observe.BackupsSnapshot{}, false
+}
+
+// CurrentPoolers reports no pooler snapshot.
+func (EmptySnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
+	return observe.PoolersSnapshot{}, false
 }

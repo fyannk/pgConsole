@@ -1,14 +1,56 @@
 {{- /*
-  Poolers. This build ships no Pooler observer, so it makes no claim
-  about connection poolers — the screen says exactly that rather than
-  rendering an empty result that could be read as "no poolers exist".
-  One honest not-observed state serves the overview, pods, and logs
-  entries; the sidebar's current marker is the only thing that differs.
+  Poolers. Renders web.Page.Poolers: the connection poolers the operator
+  reports for this cluster, every value attributed operator-reported.
+
+  The console never connects to PgBouncer, so nothing here claims a
+  pooler is actually accepting connections — only what the operator says
+  of its phase. An absent snapshot and an empty result are different
+  claims and are worded differently: "not observed" means this build
+  makes no claim, while "none" means the operator reports none exist.
 */ -}}
 {{template "page-head" "poolers"}}
 {{template "shell-open" .Shell}}
+    {{- with .Poolers}}
+    <section class="panel sectioned" id="poolers" x-data="panel" data-panel="poolers">
+      <div class="panel-head">
+        <h2>Poolers</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
+      {{- if .Poolers}}
+      <div class="table-scroll">
+      <table class="poolers">
+        <caption>Pooler resources</caption>
+        <thead><tr><th>Name</th><th>Endpoint</th><th>Pool mode</th><th>Instances</th><th>Phase</th><th>Image</th></tr></thead>
+        <tbody>
+          {{- range .Poolers}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{.Type}}</td>
+            <td>{{.PoolMode}}</td>
+            <td>{{.Instances}}</td>
+            <td><span data-state="{{stateToken .Phase}}">{{.Phase}}</span>{{if .PhaseReason}} — {{.PhaseReason}}{{end}}</td>
+            <td>{{.Image}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">More poolers matched this cluster than the display bound; the list above is cut.</p>
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>No poolers</strong>The operator reports no <code>Pooler</code> resources for this cluster. Applications reach the database services directly.</div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- else}}
     <section class="panel">
       <h2>Poolers</h2>
-      <div class="empty"><strong>Poolers are not observed in this build</strong>This console has no PgBouncer <code>Pooler</code> observer, so it makes no claim about connection poolers for this cluster — neither that any exist nor that none do. Applications reach the database services directly unless a pooler is deployed and a future build observes it.</div>
+      <div class="empty"><strong>No pooler snapshot yet</strong>Nothing has been observed about connection poolers for this cluster, so this build makes no claim — neither that any exist nor that none do.</div>
+      <p class="origin">source: operator-reported</p>
     </section>
+    {{- end}}
 {{template "shell-close"}}

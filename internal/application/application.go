@@ -78,6 +78,8 @@ type Deps struct {
 	// BackupSource observes the target cluster's Backup and
 	// ScheduledBackup resources plus its optional ObjectStore reference.
 	BackupSource observe.BackupSource
+	// PoolerSource observes the target cluster's Pooler resources.
+	PoolerSource observe.PoolerSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
@@ -114,6 +116,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		Pods:    web.EmptySnapshots{},
 		Events:  web.EmptySnapshots{},
 		Backups: web.EmptySnapshots{},
+		Poolers: web.EmptySnapshots{},
 	}
 	if deps.Source != nil {
 		store := observe.NewStore()
@@ -134,6 +137,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		backupStore := observe.NewBackupStore()
 		sources.Backups = backupStore
 		runners = append(runners, observe.NewBackupCollector(deps.BackupSource, backupStore, deps.Clock, logger).Run)
+	}
+	if deps.PoolerSource != nil {
+		poolerStore := observe.NewPoolerStore()
+		sources.Poolers = poolerStore
+		runners = append(runners, observe.NewPoolerCollector(deps.PoolerSource, poolerStore, deps.Clock, logger).Run)
 	}
 	if deps.EvidenceFetcher != nil {
 		evidenceStore := evidence.NewStore()

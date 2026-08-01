@@ -35,6 +35,12 @@ rules:
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["backups", "scheduledbackups"]
     verbs: ["get", "list", "watch"]
+  # Poolers: namespace-scoped, selected by spec.cluster.name in the
+  # application. Missing permission degrades the section to unknown and
+  # retains the last-good set rather than failing the page.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["poolers"]
+    verbs: ["get", "list", "watch"]
   # Instance pods: selected by the cluster's labels.
   - apiGroups: [""]
     resources: ["pods"]

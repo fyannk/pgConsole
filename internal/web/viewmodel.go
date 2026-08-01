@@ -703,6 +703,8 @@ type Page struct {
 	Events *EventsView
 	// Backups is the operator-reported backup catalog.
 	Backups *BackupsView
+	// Poolers is the connection-pooler section, nil when never observed.
+	Poolers *PoolersView
 	// ObjectStore is the optional plugin reference lookup.
 	ObjectStore *ObjectStoreView
 	// Repository is the repository-evidence section, nil when the
@@ -746,6 +748,8 @@ type snapshots struct {
 	eventsOK        bool
 	backups         observe.BackupsSnapshot
 	backupsOK       bool
+	poolers         observe.PoolersSnapshot
+	poolersOK       bool
 	evidence        evidence.Status
 	evidenceEnabled bool
 	window          time.Duration
@@ -790,6 +794,12 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 			Panel{Title: "ObjectStore reference", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot},
 		)
 	}
+	if s.poolersOK {
+		page.Poolers = buildPoolersView(s.poolers, now)
+	} else {
+		page.Panels = append(page.Panels,
+			Panel{Title: "Poolers", Origin: OriginOperator, State: unknown, Detail: noSnapshot})
+	}
 	if s.eventsOK {
 		page.Events = buildEventsView(s.events, s.pods, s.podsOK, s.window, now)
 	} else {
@@ -828,6 +838,91 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 	page.Summary = buildSummary(&page)
 	page.Topology = buildTopology(&page)
 	return page
+}
+
+// PoolerRowView is one Pooler as displayed.
+type PoolerRowView struct {
+	// Name is the resource name.
+	Name string
+	// Type is the endpoint the pooler fronts, in words.
+	Type string
+	// PoolMode is the configured PgBouncer pooling mode.
+	PoolMode string
+	// Instances is the ready-of-desired pod count.
+	Instances string
+	// Phase is the operator-reported lifecycle phase.
+	Phase string
+	// PhaseReason is the operator's explanation, empty when none.
+	PhaseReason string
+	// Image is the resolved pgbouncer image.
+	Image string
+}
+
+// PoolersView is the connection-pooler section. Every value is
+// operator-reported: the console does not connect to PgBouncer and makes
+// no claim that a pooler is actually accepting connections beyond what
+// the operator says of it.
+type PoolersView struct {
+	// Origin attributes every claim in this section.
+	Origin Origin
+	// Meta is the section's own freshness.
+	Meta SectionMeta
+	// Truncated reports that more poolers matched than the bound.
+	Truncated bool
+	// Poolers is name-sorted and bounded.
+	Poolers []PoolerRowView
+}
+
+// poolerEndpoint restates the pooler type in the same plain language the
+// wiring diagram uses. An unrecognized value is reported as itself
+// rather than guessed at.
+func poolerEndpoint(t string) string {
+	switch t {
+	case "rw":
+		return "rw — the write endpoint"
+	case "ro":
+		return "ro — the read endpoint"
+	case "r":
+		return "r — every instance"
+	case "":
+		return unknown
+	default:
+		return t
+	}
+}
+
+// buildPoolersView converts the pooler snapshot into bounded display
+// rows. Absence of a reported value is rendered unknown, never blank.
+func buildPoolersView(snap observe.PoolersSnapshot, now time.Time) *PoolersView {
+	view := &PoolersView{
+		Origin:    OriginOperator,
+		Meta:      buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+		Truncated: snap.Truncated,
+	}
+	for _, p := range snap.Poolers {
+		view.Poolers = append(view.Poolers, PoolerRowView{
+			Name:        p.Name,
+			Type:        poolerEndpoint(p.Type),
+			PoolMode:    orUnknown(p.PoolMode),
+			Instances:   formatPoolerInstances(p.ReadyInstances, p.DesiredInstances),
+			Phase:       orUnknown(p.Phase),
+			PhaseReason: p.PhaseReason,
+			Image:       orUnknown(p.Image),
+		})
+	}
+	return view
+}
+
+// formatPoolerInstances renders "scheduled/requested ready" for a
+// pooler. The scheduled count is a plain integer in the resource, so a
+// zero there is a reported zero and not an absent value; the requested
+// count is optional and renders unknown when the resource carried none.
+func formatPoolerInstances(ready int32, desired *int32) string {
+	d := unknown
+	if desired != nil {
+		d = strconv.FormatInt(int64(*desired), 10)
+	}
+	return strconv.FormatInt(int64(ready), 10) + "/" + d + " ready"
 }
 
 // buildBackupsView converts a catalog snapshot into explicitly attributed

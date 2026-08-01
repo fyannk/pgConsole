@@ -234,11 +234,11 @@ page $HEALTHY /backups/objects  "" "" backups-objects.html Pages \
 page $HEALTHY /backups/evidence "" "" backups-evidence.html Pages \
   "Backups — evidence" "Repository evidence and cross-check"
 page $HEALTHY /poolers          "" "" poolers-overview.html Pages \
-  "Poolers — overview" "No Pooler resources in this namespace"
+  "Poolers — overview" "Connection poolers the operator reports for this cluster"
 page $HEALTHY /poolers/pods     "" "" poolers-pods.html Pages \
-  "Poolers — pods" "No pooler pods to report"
+  "Poolers — pods" "Pooler roster, reached from the pods entry"
 page $HEALTHY /poolers/logs     "" "" poolers-logs.html Pages \
-  "Poolers — logs" "No pooler logs to tail"
+  "Poolers — logs" "Pooler roster, reached from the logs entry"
 
 # The level-gated screens. The tail needs poweruser; the review panel
 # needs dba; the refusal is the same route asked for below its level.

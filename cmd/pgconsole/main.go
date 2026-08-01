@@ -70,6 +70,7 @@ func run() error {
 		deps.PodSource = client
 		deps.EventSource = client
 		deps.BackupSource = client
+		deps.PoolerSource = client
 		deps.LogTailer = client
 		deps.Prober = client.NewProber()
 		// The writer is passed only when operations are enabled: in

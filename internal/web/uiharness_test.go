@@ -103,8 +103,28 @@ func uiPopulated(stale bool) staticSnapshots {
 			ObjectStore: observe.ObjectStoreReference{Name: "orders-store", State: observe.ObjectStorePresent},
 		},
 		backupsOK: true,
+		poolers: observe.PoolersSnapshot{
+			Generation: 3, ObservedAt: testNow.Add(-5 * time.Second), Stale: stale,
+			Poolers: []observe.PoolerFacts{
+				{
+					Name: "orders-rw", UID: "uid-pooler-rw", Type: "rw", PoolMode: "transaction",
+					DesiredInstances: int32p(2), ReadyInstances: 2, Phase: "active",
+					Image: "ghcr.io/cloudnative-pg/pgbouncer:1.24",
+				},
+				{
+					Name: "orders-ro", UID: "uid-pooler-ro", Type: "ro", PoolMode: "session",
+					DesiredInstances: int32p(2), ReadyInstances: 1, Phase: "paused",
+					PhaseReason: "holding new client connections while the replicas catch up",
+					Image:       "ghcr.io/cloudnative-pg/pgbouncer:1.24",
+				},
+			},
+		},
+		poolersOK: true,
 	}
 }
+
+// int32p is the pointer form of an optional reported count.
+func int32p(v int32) *int32 { return &v }
 
 // uiAbsent is the observed-but-deleted cluster: the API server answered
 // and the Cluster is not there. It is distinct from the cold start —
@@ -141,7 +161,7 @@ func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, autho
 		ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour,
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
 	}
-	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots,
+	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots,
 		Evidence: fakeEvidence{status: status}}
 	var executor OpsExecutor
 	var reviewer ReviewExecutor

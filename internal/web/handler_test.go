@@ -44,6 +44,8 @@ type staticSnapshots struct {
 	eventsOK  bool
 	backups   observe.BackupsSnapshot
 	backupsOK bool
+	poolers   observe.PoolersSnapshot
+	poolersOK bool
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {
@@ -62,12 +64,17 @@ func (s staticSnapshots) CurrentBackups() (observe.BackupsSnapshot, bool) {
 	return s.backups, s.backupsOK
 }
 
+func (s staticSnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
+	return s.poolers, s.poolersOK
+}
+
 // allSources is the snapshot-supplier bundle of the tests.
 type allSources interface {
 	SnapshotSource
 	PodsSource
 	EventsSource
 	BackupsSource
+	PoolersSource
 }
 
 // newTestHandlerFull builds a Handler with explicit log configuration,
@@ -77,7 +84,7 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: allowLogs, LevelHeader: "X-PgToolBox-Level", Links: links},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots},
 		prober, tailer, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -93,7 +100,7 @@ func newLeveledHandler(t *testing.T, snapshots allSources) (*Handler, *bytes.Buf
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
@@ -977,5 +984,53 @@ func TestHandlerBoundsConditionMessages(t *testing.T) {
 	}
 	if !strings.HasSuffix(msg, "…") {
 		t.Error("truncated message misses the ellipsis")
+	}
+}
+
+// TestHandlerPoolersRendersAttributedRows proves the poolers screen
+// reports what the operator says of each pooler, attributed, and that
+// the pool mode and endpoint reach the page.
+func TestHandlerPoolersRendersAttributedRows(t *testing.T) {
+	t.Parallel()
+	snapshots := staticSnapshots{
+		poolers: observe.PoolersSnapshot{
+			Generation: 3, ObservedAt: testNow.Add(-2 * time.Second),
+			Poolers: []observe.PoolerFacts{{
+				Name: "orders-rw", UID: "u1", Type: "rw", PoolMode: "transaction",
+				ReadyInstances: 2, Phase: "active", Image: "pgbouncer:1.24",
+			}},
+		},
+		poolersOK: true,
+	}
+	h, _ := newTestHandler(t, snapshots, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/poolers").Body.String()
+
+	for _, want := range []string{"orders-rw", "rw — the write endpoint", "transaction", "active", "pgbouncer:1.24", "operator-reported"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("poolers page misses %q", want)
+		}
+	}
+}
+
+// TestHandlerPoolersDistinguishesNotObservedFromNone proves the two
+// claims are worded differently. An empty result means the operator
+// reports no poolers; an absent snapshot means this build makes no
+// claim at all, and rendering the first for the second would invent a
+// fact.
+func TestHandlerPoolersDistinguishesNotObservedFromNone(t *testing.T) {
+	t.Parallel()
+	none := staticSnapshots{poolers: observe.PoolersSnapshot{Generation: 1, ObservedAt: testNow}, poolersOK: true}
+	h, _ := newTestHandler(t, none, kube.FakeProber{}, Links{})
+	if body := get(t, h, http.MethodGet, "/poolers").Body.String(); !strings.Contains(body, "No poolers") {
+		t.Error("an observed-empty pooler set does not say the operator reports none")
+	}
+
+	h, _ = newTestHandler(t, staticSnapshots{}, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/poolers").Body.String()
+	if !strings.Contains(body, "No pooler snapshot yet") {
+		t.Error("an absent pooler snapshot does not say the build makes no claim")
+	}
+	if strings.Contains(body, "No poolers") {
+		t.Error("an absent snapshot rendered as an observed-empty set")
 	}
 }

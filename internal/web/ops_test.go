@@ -76,7 +76,7 @@ func newOpsHandler(t *testing.T, exec OpsExecutor) *Handler {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowOperations: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}},
+		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}, Poolers: staticSnapshots{}},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		exec, nil, func() time.Time { return testNow }, logger)
@@ -250,7 +250,7 @@ func TestOperationsRequirePowerUserLevel(t *testing.T) {
 	exec := newRecordingExecutor()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowOperations: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}},
+		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}, Poolers: staticSnapshots{}},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		exec, nil, func() time.Time { return testNow }, logger)

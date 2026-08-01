@@ -30,6 +30,16 @@ const (
 	maxConditionMessage = 1024
 )
 
+// boundOperatorMessage cuts one piece of operator free text at the same
+// ceiling the conditions use. Bounding happens at this boundary so no
+// later layer can accidentally render or retain an unbounded message.
+func boundOperatorMessage(s string) string {
+	if len(s) > maxConditionMessage {
+		return s[:maxConditionMessage]
+	}
+	return s
+}
+
 // convertCluster converts a raw cluster object into source-neutral
 // facts. Fields absent from the object — older CloudNativePG versions
 // report fewer fields — stay empty or nil and render as unknown; they

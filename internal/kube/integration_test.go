@@ -111,6 +111,11 @@ func startEnv(t *testing.T) *integrationEnv {
 				Resources: []string{"events"},
 				Verbs:     []string{"list", "watch"},
 			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"poolers"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
 		},
 	}
 	if _, err := adminSet.RbacV1().Roles("payments").Create(ctx, role, metav1.CreateOptions{}); err != nil {
@@ -519,5 +524,80 @@ func TestEventCollectorAgainstRealAPIServer(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("event collector did not stop on cancellation")
+	}
+}
+
+// poolerObject is a Pooler referencing the named cluster.
+func poolerObject(name, cluster, poolerType string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       "Pooler",
+		"metadata":   map[string]any{"name": name, "namespace": "payments"},
+		"spec": map[string]any{
+			"cluster":   map[string]any{"name": cluster},
+			"type":      poolerType,
+			"instances": int64(2),
+			"pgbouncer": map[string]any{"poolMode": "transaction"},
+		},
+	}}
+}
+
+// TestPoolerCollectorAgainstRealAPIServer proves the pooler access shape
+// works under the Role the deployment actually grants, and that
+// selection is the spec.cluster.name reference rather than the
+// namespace. A missing RBAC rule fails here and nowhere else: the unit
+// tests use a fake client that grants everything.
+func TestPoolerCollectorAgainstRealAPIServer(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Create(ctx, poolerObject("orders-rw", "orders", "rw"), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create target pooler: %v", err)
+	}
+	if _, err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Create(ctx, poolerObject("other-rw", "other", "rw"), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create foreign pooler: %v", err)
+	}
+
+	store := observe.NewPoolerStore()
+	collector := observe.NewPoolerCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "target-only pooler set", func() bool {
+		snap, ok := store.CurrentPoolers()
+		return ok && len(snap.Poolers) == 1 && snap.Poolers[0].Name == "orders-rw"
+	})
+
+	if _, err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Create(ctx, poolerObject("orders-ro", "orders", "ro"), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create second target pooler: %v", err)
+	}
+	waitFor(t, "watched pooler addition", func() bool {
+		snap, ok := store.CurrentPoolers()
+		return ok && len(snap.Poolers) == 2
+	})
+
+	if err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Delete(ctx, "orders-ro", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("delete pooler: %v", err)
+	}
+	waitFor(t, "watched pooler removal", func() bool {
+		snap, ok := store.CurrentPoolers()
+		return ok && len(snap.Poolers) == 1
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pooler collector did not stop on cancellation")
 	}
 }

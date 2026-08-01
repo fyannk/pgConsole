@@ -41,7 +41,7 @@ func newEvidenceHandler(t *testing.T, snapshots allSources, status evidence.Stat
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Evidence: fakeEvidence{status: status}},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, Evidence: fakeEvidence{status: status}},
 		kube.FakeProber{}, fakeTailer{}, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
