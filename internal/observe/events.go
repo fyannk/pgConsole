@@ -17,11 +17,8 @@ package observe
 import (
 	"context"
 	"log/slog"
-	"sort"
 	"sync"
 	"time"
-
-	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Event bounds. The rendered list and the retained state are both
@@ -140,17 +137,7 @@ func (s *EventStore) publish(events []EventFacts, observedAt time.Time, window t
 		}
 		kept = append(kept, e)
 	}
-	sort.Slice(kept, func(i, j int) bool {
-		if !kept[i].LastSeen.Equal(kept[j].LastSeen) {
-			return kept[i].LastSeen.After(kept[j].LastSeen)
-		}
-		return kept[i].Name < kept[j].Name
-	})
-	truncated := false
-	if len(kept) > MaxEvents {
-		kept = kept[:MaxEvents]
-		truncated = true
-	}
+	kept, truncated := bounded(kept, lessEventRecency, MaxEvents)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snap = EventsSnapshot{
@@ -172,157 +159,103 @@ func (s *EventStore) markStale() {
 	s.snap.Stale = true
 }
 
+// lessEventRecency orders the rendered event list newest first, with
+// the name breaking ties so the order is total and a redraw never
+// reshuffles two events sharing a timestamp.
+func lessEventRecency(a, b EventFacts) bool {
+	if !a.LastSeen.Equal(b.LastSeen) {
+		return a.LastSeen.After(b.LastSeen)
+	}
+	return a.Name < b.Name
+}
+
+// eventRetention identifies retained events and bounds them in memory.
+// The oldest entry loses: an event's value to an operator decays with
+// age, so under a flood the recent ones are the ones worth keeping.
+// Eviction here is deliberately silent — it sets no truncation flag,
+// because the bound an operator is shown is the rendered one applied at
+// publication, and reporting this one too would claim two different
+// truncations for one screen.
+var eventRetention = retention[EventFacts]{
+	Name:      func(e EventFacts) string { return e.Name },
+	UID:       func(e EventFacts) string { return e.UID },
+	Limit:     MaxEventsRetained,
+	Evictable: func(a, b EventFacts) bool { return a.LastSeen.Before(b.LastSeen) },
+}
+
 // EventCollector maintains the event store from an EventSource with the
 // same contract as the other collectors: seed, follow, per-change
-// republication, stale retention, backoff.
+// republication, stale retention, backoff. That contract is the shared
+// loop in loop.go; what follows is only the event-specific part of it.
 type EventCollector struct {
-	source  EventSource
-	store   *EventStore
-	clock   Clock
-	logger  *slog.Logger
-	window  time.Duration
-	backoff time.Duration
-	state   map[string]EventFacts
+	source EventSource
+	store  *EventStore
+	clock  Clock
+	logger *slog.Logger
+	window time.Duration
+	state  keyed[EventFacts]
 }
 
 // NewEventCollector wires an event collector onto a store. window is
 // the configured event age window.
 func NewEventCollector(source EventSource, store *EventStore, window time.Duration, clock Clock, logger *slog.Logger) *EventCollector {
-	return &EventCollector{
-		source:  source,
-		store:   store,
-		clock:   clock,
-		logger:  logger,
-		window:  window,
-		backoff: backoffInitial,
-	}
+	return &EventCollector{source: source, store: store, clock: clock, logger: logger, window: window}
 }
 
 // Run blocks until ctx is done, maintaining the store. Cancellation is
 // the one clean exit.
 func (c *EventCollector) Run(ctx context.Context) error {
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
-		events, rv, err := c.source.FetchEvents(ctx)
-		if err != nil {
-			c.loseContact("events fetch", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.state = make(map[string]EventFacts, len(events))
-		for _, e := range events {
-			c.retain(e)
-		}
-		c.publish()
-
-		w, err := c.source.WatchEvents(ctx, rv)
-		if err != nil {
-			c.loseContact("events watch start", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.follow(ctx, w)
-		if ctx.Err() != nil {
-			return nil
-		}
-		c.loseContact("events watch", nil)
-		if c.wait(ctx) != nil {
-			return nil
-		}
-	}
+	return newLoop[string, EventChange](c, c.clock, c.logger).Run(ctx)
 }
 
-// follow consumes watch changes until the watch ends or ctx is done,
-// draining delivered changes before honoring cancellation.
-func (c *EventCollector) follow(ctx context.Context, w EventWatch) {
-	defer w.Stop()
-	for {
-		select {
-		case ev, ok := <-w.Changes():
-			if !ok {
-				return
-			}
-			c.apply(ev)
-			continue
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case ev, ok := <-w.Changes():
-			if !ok {
-				return
-			}
-			c.apply(ev)
-		}
+// op names this resource in contact-loss logs.
+func (c *EventCollector) op() string { return "events" }
+
+// seed replaces the retained event set and returns the resource version
+// the watch resumes from.
+func (c *EventCollector) seed(ctx context.Context) (string, error) {
+	events, rv, err := c.source.FetchEvents(ctx)
+	if err != nil {
+		return "", err
 	}
+	c.state = make(keyed[EventFacts], len(events))
+	for _, e := range events {
+		c.state.put(e, eventRetention)
+	}
+	return rv, nil
 }
 
-// apply folds one change into the state and republishes. Duplicate
-// names replace the previous entry — an event's count updates arrive
-// this way. A deletion whose UID no longer matches is ignored.
-func (c *EventCollector) apply(ev EventChange) {
+// follow starts the event watch from the seed's resource version.
+func (c *EventCollector) follow(ctx context.Context, from string) (<-chan EventChange, func(), error) {
+	w, err := c.source.WatchEvents(ctx, from)
+	if err != nil {
+		return nil, nil, err
+	}
+	return w.Changes(), w.Stop, nil
+}
+
+// apply folds one change into the retained set. Duplicate names replace
+// the previous entry — an event's count updates arrive this way. It
+// reports whether the change was recognized; a change carrying nothing
+// is not.
+func (c *EventCollector) apply(ev EventChange) bool {
 	switch {
 	case ev.Put != nil:
-		c.retain(*ev.Put)
+		c.state.put(*ev.Put, eventRetention)
 	case ev.Delete != nil:
-		if current, ok := c.state[ev.Delete.Name]; ok && current.UID == ev.Delete.UID {
-			delete(c.state, ev.Delete.Name)
-		}
+		c.state.remove(ev.Delete.Name, ev.Delete.UID, eventRetention)
 	default:
-		return
+		return false
 	}
-	c.publish()
+	return true
 }
 
-// retain upserts one event, evicting the oldest entry when the retained
-// bound is reached by a new name.
-func (c *EventCollector) retain(e EventFacts) {
-	if _, exists := c.state[e.Name]; !exists && len(c.state) >= MaxEventsRetained {
-		oldestName := ""
-		var oldest time.Time
-		for name, cur := range c.state {
-			if oldestName == "" || cur.LastSeen.Before(oldest) {
-				oldestName, oldest = name, cur.LastSeen
-			}
-		}
-		delete(c.state, oldestName)
-	}
-	c.state[e.Name] = e
+// publish snapshots the retained set into the store. The age window is
+// applied there, at publication, so a retained event that has aged out
+// stops being rendered without being forgotten.
+func (c *EventCollector) publish(observedAt time.Time) {
+	c.store.publish(c.state.list(), observedAt, c.window)
 }
 
-// publish snapshots the current state and resets the backoff.
-func (c *EventCollector) publish() {
-	events := make([]EventFacts, 0, len(c.state))
-	for _, e := range c.state {
-		events = append(events, e)
-	}
-	c.store.publish(events, c.clock.Now(), c.window)
-	c.backoff = backoffInitial
-}
-
-// loseContact marks the snapshot stale and logs the failure category.
-func (c *EventCollector) loseContact(op string, err error) {
-	c.store.markStale()
-	attrs := []any{slog.String("op", op)}
-	if err != nil {
-		attrs = append(attrs, slog.String("category", redact.Safe(err)))
-	}
-	c.logger.Info("contact lost", attrs...)
-}
-
-// wait sleeps the current backoff and doubles it up to the bound.
-func (c *EventCollector) wait(ctx context.Context) error {
-	d := c.backoff
-	c.backoff *= 2
-	if c.backoff > backoffMax {
-		c.backoff = backoffMax
-	}
-	return c.clock.Wait(ctx, d)
-}
+// markStale marks the retained snapshot stale, if one exists.
+func (c *EventCollector) markStale() { c.store.markStale() }
