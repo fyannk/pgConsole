@@ -212,6 +212,22 @@ async function checkNoScript(browser) {
   const state = await page.locator('dl.target dd[data-state]').innerText();
   check('state word present without JavaScript', /current/.test(state), state);
 
+  // The topbar snapshot must carry its state hue as well as its word.
+  // `dl.target dd` outranks the bare [data-state] tokens on specificity,
+  // so the colour is restated for the topbar; when that restatement is
+  // missing the mark still renders and only the hue silently flattens to
+  // the body text colour, which no rendered-string test can see.
+  const hue = await page.evaluate(() => {
+    const dd = document.querySelector('dl.target dd[data-state]');
+    const body = document.querySelector('body');
+    return {
+      state: getComputedStyle(dd).color,
+      text: getComputedStyle(body).color,
+    };
+  });
+  check('topbar snapshot carries its state hue, not the body text colour',
+    hue.state !== hue.text, `state ${hue.state} vs text ${hue.text}`);
+
   await page.screenshot({ path: path.join(OUT, 'healthy-nojs-1440.png'), fullPage: true });
   await ctx.close();
 }

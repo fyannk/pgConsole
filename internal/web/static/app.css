@@ -266,8 +266,15 @@ dl.target dd {
 }
 
 /* The snapshot value keeps its state hue and mark, but not the bolder
-   weight the standalone state tokens use, so the row stays uniform. */
+   weight the standalone state tokens use, so the row stays uniform. The
+   hues are restated here because `dl.target dd` outranks the bare
+   [data-state] tokens on specificity and would otherwise flatten them to
+   --text: the mark survived, the colour did not. */
 dl.target dd[data-state] { font-weight: 400; }
+dl.target dd[data-state="current"] { color: var(--ok); }
+dl.target dd[data-state="stale"] { color: var(--warn); }
+dl.target dd[data-state="degraded"] { color: var(--bad); }
+dl.target dd[data-state="unknown"] { color: var(--unknown); }
 
 /* Link-outs and the refresh control share one row, pushed apart, so
    the control has a deliberate home instead of trailing under the nav. */
