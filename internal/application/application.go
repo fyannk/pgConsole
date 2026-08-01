@@ -80,6 +80,10 @@ type Deps struct {
 	BackupSource observe.BackupSource
 	// PoolerSource observes the target cluster's Pooler resources.
 	PoolerSource observe.PoolerSource
+	// FailoverQuorumSource observes the cluster's FailoverQuorum.
+	FailoverQuorumSource observe.FailoverQuorumSource
+	// ImageCatalogSource observes the namespace's ImageCatalog set.
+	ImageCatalogSource observe.ImageCatalogSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
@@ -112,11 +116,13 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 
 	var runners []runner
 	sources := web.Sources{
-		Cluster: web.EmptySnapshots{},
-		Pods:    web.EmptySnapshots{},
-		Events:  web.EmptySnapshots{},
-		Backups: web.EmptySnapshots{},
-		Poolers: web.EmptySnapshots{},
+		Cluster:        web.EmptySnapshots{},
+		Pods:           web.EmptySnapshots{},
+		Events:         web.EmptySnapshots{},
+		Backups:        web.EmptySnapshots{},
+		Poolers:        web.EmptySnapshots{},
+		FailoverQuorum: web.EmptySnapshots{},
+		ImageCatalogs:  web.EmptySnapshots{},
 	}
 	if deps.Source != nil {
 		store := observe.NewStore()
@@ -142,6 +148,16 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		poolerStore := observe.NewPoolerStore()
 		sources.Poolers = poolerStore
 		runners = append(runners, observe.NewPoolerCollector(deps.PoolerSource, poolerStore, deps.Clock, logger).Run)
+	}
+	if deps.FailoverQuorumSource != nil {
+		quorumStore := observe.NewFailoverQuorumStore()
+		sources.FailoverQuorum = quorumStore
+		runners = append(runners, observe.NewFailoverQuorumCollector(deps.FailoverQuorumSource, quorumStore, deps.Clock, logger).Run)
+	}
+	if deps.ImageCatalogSource != nil {
+		catalogStore := observe.NewImageCatalogStore()
+		sources.ImageCatalogs = catalogStore
+		runners = append(runners, observe.NewImageCatalogCollector(deps.ImageCatalogSource, catalogStore, deps.Clock, logger).Run)
 	}
 	if deps.EvidenceFetcher != nil {
 		evidenceStore := evidence.NewStore()

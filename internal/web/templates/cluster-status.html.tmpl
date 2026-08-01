@@ -98,4 +98,59 @@
       <p class="origin">source: operator-reported</p>
     </section>
     {{- end}}
+    {{- with .Quorum}}
+    <section class="panel">
+      <h2>Failover quorum</h2>
+      <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+      {{- if .Configured}}
+      <dl class="facts">
+        <dt>Method</dt><dd>{{.Method}}</dd>
+        <dt>Reported by</dt><dd>{{.Primary}}</dd>
+        <dt>Standbys awaited</dt><dd>{{.StandbyNumber}}</dd>
+        <dt>Potentially synchronous</dt><dd>{{if .Standbys}}{{range $i, $s := .Standbys}}{{if $i}}, {{end}}{{$s}}{{end}}{{else}}none reported{{end}}</dd>
+      </dl>
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">More standbys were reported than the display bound; the list above is cut.</p>
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>Not configured</strong>The operator reports no failover quorum for this cluster, so a transaction does not wait on a synchronous standby before it is acknowledged.</div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+    </section>
+    {{- end}}
+    {{- with .ImageCatalog}}
+    <section class="panel">
+      <h2>Image catalog</h2>
+      <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+      {{- if .Referenced}}
+      <dl class="facts">
+        <dt>Reference</dt><dd>{{.Kind}}/{{.Name}}</dd>
+        <dt>Major version drawn</dt><dd>{{.Major}}</dd>
+      </dl>
+      {{- if not .Observable}}
+      <div class="empty"><strong>Cluster-scoped catalog</strong>The cluster draws its image from a <code>ClusterImageCatalog</code>, which is cluster-scoped. This console&#39;s authority is one namespace, so the reference is shown and its content is not claimed.</div>
+      {{- else if not .Found}}
+      <div class="empty"><strong>Catalog not observed</strong>The cluster names this catalog, but no such <code>ImageCatalog</code> was observed in the namespace.</div>
+      {{- else}}
+      <div class="table-scroll">
+      <table class="catalog-images">
+        <caption>Images offered</caption>
+        <thead><tr><th>Major</th><th>Image</th></tr></thead>
+        <tbody>
+          {{- range .Images}}
+          <tr{{if .Current}} class="current"{{end}}><td>{{.Major}}{{if .Current}} — drawn{{end}}</td><td>{{.Image}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">The catalog carried more images than the display bound; the list above is cut.</p>
+      {{- end}}
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>No catalog</strong>The cluster names its image directly rather than drawing it from an <code>ImageCatalog</code>.</div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+    </section>
+    {{- end}}
 {{template "shell-close"}}

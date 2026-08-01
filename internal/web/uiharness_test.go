@@ -71,6 +71,9 @@ var uiLinks = Links{
 func uiPopulated(stale bool) staticSnapshots {
 	facts := healthyFacts()
 	facts.UID = "uid-1234"
+	// The reference lives on the Cluster and the catalog is a separate
+	// object, so the fixture must set both for the panel to resolve.
+	facts.ImageCatalogRef = &observe.ImageCatalogRef{Kind: "ImageCatalog", Name: "postgres", Major: 16}
 	started := testNow.Add(-2 * time.Hour)
 	stopped := testNow.Add(-90 * time.Minute)
 	return staticSnapshots{
@@ -120,6 +123,25 @@ func uiPopulated(stale bool) staticSnapshots {
 			},
 		},
 		poolersOK: true,
+		quorum: observe.FailoverQuorumSnapshot{
+			Generation: 2, ObservedAt: testNow.Add(-4 * time.Second), Stale: stale,
+			Quorum: observe.FailoverQuorumFacts{
+				Present: true, Method: "any", Primary: "orders-1",
+				StandbyNumber: 1, Standbys: []string{"orders-2", "orders-3"},
+			},
+		},
+		quorumOK: true,
+		catalogs: observe.ImageCatalogsSnapshot{
+			Generation: 2, ObservedAt: testNow.Add(-6 * time.Second), Stale: stale,
+			Catalogs: []observe.ImageCatalogFacts{{
+				Name: "postgres", UID: "uid-catalog",
+				Images: []observe.CatalogImageFacts{
+					{Major: 16, Image: "ghcr.io/cloudnative-pg/postgresql:16.4"},
+					{Major: 17, Image: "ghcr.io/cloudnative-pg/postgresql:17.2"},
+				},
+			}},
+		},
+		catalogsOK: true,
 	}
 }
 
@@ -161,7 +183,7 @@ func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, autho
 		ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour,
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
 	}
-	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots,
+	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots,
 		Evidence: fakeEvidence{status: status}}
 	var executor OpsExecutor
 	var reviewer ReviewExecutor

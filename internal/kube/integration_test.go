@@ -116,6 +116,22 @@ func startEnv(t *testing.T) *integrationEnv {
 				Resources: []string{"poolers"},
 				Verbs:     []string{"get", "list", "watch"},
 			},
+			{
+				APIGroups:     []string{"postgresql.cnpg.io"},
+				Resources:     []string{"failoverquorums"},
+				Verbs:         []string{"get"},
+				ResourceNames: []string{"orders"},
+			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"failoverquorums"},
+				Verbs:     []string{"watch"},
+			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"imagecatalogs"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
 		},
 	}
 	if _, err := adminSet.RbacV1().Roles("payments").Create(ctx, role, metav1.CreateOptions{}); err != nil {
@@ -599,5 +615,118 @@ func TestPoolerCollectorAgainstRealAPIServer(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("pooler collector did not stop on cancellation")
+	}
+}
+
+// TestFailoverQuorumAccessShapeAgainstRealRBAC proves the quorum's
+// access shape works under the Role the deployment grants: the get is
+// pinned by name like the Cluster's, the name-scoped watch succeeds, and
+// an absent object is a successful observation rather than a denial.
+func TestFailoverQuorumAccessShapeAgainstRealRBAC(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// No object yet: absence must read as an observation, not a denial.
+	state, err := client.FetchFailoverQuorum(ctx)
+	if err != nil {
+		t.Fatalf("absent quorum returned an error: %v", err)
+	}
+	if state.Facts.Present {
+		t.Fatal("an absent quorum reported itself present")
+	}
+
+	quorum := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       "FailoverQuorum",
+		"metadata":   map[string]any{"name": "orders", "namespace": "payments"},
+	}}
+	created, err := ie.adminDyn.Resource(failoverQuorumGVR).Namespace("payments").Create(ctx, quorum, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create quorum: %v", err)
+	}
+	created.Object["status"] = map[string]any{
+		"method": "any", "primary": "orders-1",
+		"standbyNames": []any{"orders-2"}, "standbyNumber": int64(1),
+	}
+	if _, err := ie.adminDyn.Resource(failoverQuorumGVR).Namespace("payments").UpdateStatus(ctx, created, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("set quorum status: %v", err)
+	}
+
+	store := observe.NewFailoverQuorumStore()
+	collector := observe.NewFailoverQuorumCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "reported quorum", func() bool {
+		snap, ok := store.CurrentFailoverQuorum()
+		return ok && snap.Quorum.Present && snap.Quorum.Primary == "orders-1"
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("quorum collector did not stop on cancellation")
+	}
+}
+
+// TestImageCatalogCollectorAgainstRealAPIServer proves the catalog
+// access shape works under the deployed Role.
+func TestImageCatalogCollectorAgainstRealAPIServer(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	catalog := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       "ImageCatalog",
+		"metadata":   map[string]any{"name": "postgres", "namespace": "payments"},
+		"spec": map[string]any{"images": []any{
+			map[string]any{"major": int64(17), "image": "pg:17"},
+			map[string]any{"major": int64(16), "image": "pg:16"},
+		}},
+	}}
+	if _, err := ie.adminDyn.Resource(imageCatalogGVR).Namespace("payments").Create(ctx, catalog, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create catalog: %v", err)
+	}
+
+	store := observe.NewImageCatalogStore()
+	collector := observe.NewImageCatalogCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "observed catalog", func() bool {
+		snap, ok := store.CurrentImageCatalogs()
+		if !ok {
+			return false
+		}
+		found, ok := snap.Catalog("postgres")
+		return ok && len(found.Images) == 2 && found.Images[0].Major == 16
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("catalog collector did not stop on cancellation")
 	}
 }

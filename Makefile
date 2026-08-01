@@ -33,7 +33,7 @@ test-integration:
 		$(GO) test -race -tags=integration ./internal/kube/ -count=1
 
 test-scale:
-	$(GO) test -race ./internal/observe -run '^Test(PodStoreBoundsAndFlagsTruncation|EventCollectorBoundsRetentionAndRendering|BackupStoreBoundsAndFlagsTruncation|PoolerStoreBoundsAndFlagsTruncation)$$' -count=1
+	$(GO) test -race ./internal/observe -run '^Test(PodStoreBoundsAndFlagsTruncation|EventCollectorBoundsRetentionAndRendering|BackupStoreBoundsAndFlagsTruncation|PoolerStoreBoundsAndFlagsTruncation|ImageCatalogStoreBoundsAndFlagsTruncation)$$' -count=1
 	$(GO) test -race ./internal/web -run '^TestHandlerIndex(PodUnknownsAndTruncation|EventsTruncationVisible|BackupTruncationVisible)$$' -count=1
 
 test-container: docker-build

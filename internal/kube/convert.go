@@ -60,6 +60,14 @@ func convertCluster(content map[string]any) (observe.ClusterFacts, error) {
 		Image:          cluster.Status.Image,
 	}
 
+	if ref := cluster.Spec.ImageCatalogRef; ref != nil {
+		facts.ImageCatalogRef = &observe.ImageCatalogRef{
+			Kind:  ref.Kind,
+			Name:  ref.Name,
+			Major: ref.Major,
+		}
+	}
+
 	if cluster.Spec.Instances > 0 {
 		v := cluster.Spec.Instances
 		facts.DesiredInstances = &v

@@ -79,6 +79,18 @@ type PoolersSource interface {
 	CurrentPoolers() (observe.PoolersSnapshot, bool)
 }
 
+// FailoverQuorumSource supplies the current failover-quorum snapshot.
+type FailoverQuorumSource interface {
+	// CurrentFailoverQuorum returns the snapshot and whether one exists.
+	CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool)
+}
+
+// ImageCatalogsSource supplies the current ImageCatalog snapshot.
+type ImageCatalogsSource interface {
+	// CurrentImageCatalogs returns the snapshot and whether one exists.
+	CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -97,6 +109,10 @@ type Sources struct {
 	Backups BackupsSource
 	// Poolers supplies the Pooler snapshot.
 	Poolers PoolersSource
+	// FailoverQuorum supplies the failover-quorum snapshot.
+	FailoverQuorum FailoverQuorumSource
+	// ImageCatalogs supplies the ImageCatalog snapshot.
+	ImageCatalogs ImageCatalogsSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -277,6 +293,8 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 	s.events, s.eventsOK = h.sources.Events.CurrentEvents()
 	s.backups, s.backupsOK = h.sources.Backups.CurrentBackups()
 	s.poolers, s.poolersOK = h.sources.Poolers.CurrentPoolers()
+	s.quorum, s.quorumOK = h.sources.FailoverQuorum.CurrentFailoverQuorum()
+	s.catalogs, s.catalogsOK = h.sources.ImageCatalogs.CurrentImageCatalogs()
 	if h.sources.Evidence != nil {
 		s.evidence = h.sources.Evidence.CurrentEvidence()
 		s.evidenceEnabled = true
@@ -549,4 +567,14 @@ func (EmptySnapshots) CurrentBackups() (observe.BackupsSnapshot, bool) {
 // CurrentPoolers reports no pooler snapshot.
 func (EmptySnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
 	return observe.PoolersSnapshot{}, false
+}
+
+// CurrentFailoverQuorum reports no failover-quorum snapshot.
+func (EmptySnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
+	return observe.FailoverQuorumSnapshot{}, false
+}
+
+// CurrentImageCatalogs reports no image-catalog snapshot.
+func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
+	return observe.ImageCatalogsSnapshot{}, false
 }

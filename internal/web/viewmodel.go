@@ -705,6 +705,11 @@ type Page struct {
 	Backups *BackupsView
 	// Poolers is the connection-pooler section, nil when never observed.
 	Poolers *PoolersView
+	// Quorum is the failover-quorum panel, nil when never observed.
+	Quorum *FailoverQuorumView
+	// ImageCatalog is the resolved catalog panel, nil when never
+	// observed.
+	ImageCatalog *ImageCatalogView
 	// ObjectStore is the optional plugin reference lookup.
 	ObjectStore *ObjectStoreView
 	// Repository is the repository-evidence section, nil when the
@@ -750,6 +755,10 @@ type snapshots struct {
 	backupsOK       bool
 	poolers         observe.PoolersSnapshot
 	poolersOK       bool
+	quorum          observe.FailoverQuorumSnapshot
+	quorumOK        bool
+	catalogs        observe.ImageCatalogsSnapshot
+	catalogsOK      bool
 	evidence        evidence.Status
 	evidenceEnabled bool
 	window          time.Duration
@@ -793,6 +802,18 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 			Panel{Title: "Backups", Origin: OriginOperator, State: unknown, Detail: noSnapshot},
 			Panel{Title: "ObjectStore reference", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot},
 		)
+	}
+	if s.quorumOK {
+		page.Quorum = buildFailoverQuorumView(s.quorum, now)
+	} else {
+		page.Panels = append(page.Panels,
+			Panel{Title: "Failover quorum", Origin: OriginOperator, State: unknown, Detail: noSnapshot})
+	}
+	if s.catalogsOK {
+		page.ImageCatalog = buildImageCatalogView(s.catalogs, s.cluster.Cluster.ImageCatalogRef, now)
+	} else {
+		page.Panels = append(page.Panels,
+			Panel{Title: "Image catalog", Origin: OriginOperator, State: unknown, Detail: noSnapshot})
 	}
 	if s.poolersOK {
 		page.Poolers = buildPoolersView(s.poolers, now)
@@ -838,6 +859,133 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 	page.Summary = buildSummary(&page)
 	page.Topology = buildTopology(&page)
 	return page
+}
+
+// FailoverQuorumView is the failover-quorum panel. Every value is
+// operator-reported: the resource is written by the primary's instance
+// manager, and the console restates it without checking that
+// replication is actually synchronous.
+type FailoverQuorumView struct {
+	// Origin attributes every claim in this panel.
+	Origin Origin
+	// Meta is the panel's own freshness.
+	Meta SectionMeta
+	// Configured reports that the cluster runs a failover quorum at all.
+	// False is an observation of absence, not a missing observation.
+	Configured bool
+	// Method is the reported synchronous-replication method.
+	Method string
+	// Primary is the instance that last updated the quorum.
+	Primary string
+	// StandbyNumber is how many synchronous standbys a transaction waits
+	// for, in words.
+	StandbyNumber string
+	// Standbys is the bounded list of potentially synchronous instances.
+	Standbys []string
+	// Truncated reports that more standbys were reported than shown.
+	Truncated bool
+}
+
+// buildFailoverQuorumView converts the quorum snapshot into an
+// attributed panel.
+func buildFailoverQuorumView(snap observe.FailoverQuorumSnapshot, now time.Time) *FailoverQuorumView {
+	view := &FailoverQuorumView{
+		Origin:     OriginOperator,
+		Meta:       buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+		Configured: snap.Quorum.Present,
+	}
+	if !snap.Quorum.Present {
+		return view
+	}
+	view.Method = orUnknown(snap.Quorum.Method)
+	view.Primary = orUnknown(snap.Quorum.Primary)
+	view.StandbyNumber = strconv.Itoa(snap.Quorum.StandbyNumber)
+	view.Standbys = append([]string(nil), snap.Quorum.Standbys...)
+	view.Truncated = snap.Quorum.StandbysTruncated
+	return view
+}
+
+// ImageCatalogView is the image-catalog panel: which catalog the cluster
+// draws its image from, and what that catalog offers.
+//
+// The reference and the catalog are separate observations and are
+// attributed separately. The reference is a fact about the Cluster; the
+// catalog is a fact about another object that may not exist, may not be
+// readable, or may be cluster-scoped and therefore outside this
+// console's namespaced authority.
+type ImageCatalogView struct {
+	// Origin attributes the catalog content.
+	Origin Origin
+	// Meta is the panel's own freshness.
+	Meta SectionMeta
+	// Referenced reports that the cluster names a catalog at all. False
+	// means the image is named directly on the cluster.
+	Referenced bool
+	// Kind is the referenced kind, ImageCatalog or ClusterImageCatalog.
+	Kind string
+	// Name is the referenced catalog's name.
+	Name string
+	// Major is the PostgreSQL major version drawn from the catalog.
+	Major string
+	// Observable reports that the referenced kind is one this console is
+	// permitted to read. A ClusterImageCatalog is cluster-scoped and is
+	// not, so the reference is shown and its content is not claimed.
+	Observable bool
+	// Found reports that the referenced catalog was observed.
+	Found bool
+	// Images is the bounded list the catalog offers, major-ascending.
+	Images []CatalogImageRowView
+	// Truncated reports that the catalog carried more images than shown.
+	Truncated bool
+}
+
+// CatalogImageRowView is one image a catalog offers.
+type CatalogImageRowView struct {
+	// Major is the PostgreSQL major version, as text.
+	Major string
+	// Image is the image reference.
+	Image string
+	// Current marks the major the cluster actually draws.
+	Current bool
+}
+
+// buildImageCatalogView resolves the cluster's catalog reference against
+// the observed catalogs. Resolution happens here rather than in the
+// source because the reference lives on the Cluster and can change
+// without the catalog changing.
+func buildImageCatalogView(snap observe.ImageCatalogsSnapshot, ref *observe.ImageCatalogRef, now time.Time) *ImageCatalogView {
+	view := &ImageCatalogView{
+		Origin: OriginOperator,
+		Meta:   buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+	}
+	if ref == nil {
+		return view
+	}
+	view.Referenced = true
+	view.Kind = orUnknown(ref.Kind)
+	view.Name = orUnknown(ref.Name)
+	view.Major = strconv.Itoa(ref.Major)
+	// Only the namespaced kind is within this console's authority. A
+	// cluster-scoped catalog is named honestly and its content is not
+	// claimed, rather than being reported as missing.
+	view.Observable = ref.Kind == "ImageCatalog"
+	if !view.Observable {
+		return view
+	}
+	catalog, found := snap.Catalog(ref.Name)
+	view.Found = found
+	if !found {
+		return view
+	}
+	view.Truncated = catalog.ImagesTruncated
+	for _, img := range catalog.Images {
+		view.Images = append(view.Images, CatalogImageRowView{
+			Major:   strconv.Itoa(img.Major),
+			Image:   img.Image,
+			Current: img.Major == ref.Major,
+		})
+	}
+	return view
 }
 
 // PoolerRowView is one Pooler as displayed.

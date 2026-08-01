@@ -41,6 +41,22 @@ rules:
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["poolers"]
     verbs: ["get", "list", "watch"]
+  # Failover quorum: one object named after the cluster, so the get is
+  # pinned the same way the Cluster's is. RBAC cannot pin a watch by
+  # name; the application uses a metadata.name field selector.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["failoverquorums"]
+    verbs: ["get"]
+    resourceNames: ["orders"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["failoverquorums"]
+    verbs: ["watch"]
+  # Image catalogs: namespace-shared infrastructure that clusters
+  # reference, so there is no per-cluster ownership to select on. The
+  # console renders only the catalog spec.imageCatalogRef names.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["imagecatalogs"]
+    verbs: ["get", "list", "watch"]
   # Instance pods: selected by the cluster's labels.
   - apiGroups: [""]
     resources: ["pods"]

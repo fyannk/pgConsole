@@ -69,6 +69,11 @@ type ClusterFacts struct {
 	TimelineID *int
 	// Image is the container image the operator reports for the pods.
 	Image string
+	// ImageCatalogRef is the catalog the cluster draws its image from,
+	// nil when the image is named directly. It is a reference, not the
+	// catalog: resolving it is the rendering layer's job, because the
+	// reference can change without the catalog changing and vice versa.
+	ImageCatalogRef *ImageCatalogRef
 	// PostgresMajorVersion is the reported PostgreSQL major version.
 	PostgresMajorVersion *int
 	// Conditions are the operator-reported conditions, bounded by the
@@ -120,6 +125,19 @@ type Snapshot struct {
 	Stale bool
 	// Cluster is the last observed state.
 	Cluster ClusterFacts
+}
+
+// ImageCatalogRef is the cluster's spec.imageCatalogRef: which catalog
+// it draws its image from, and for which PostgreSQL major version.
+type ImageCatalogRef struct {
+	// Kind is ImageCatalog or ClusterImageCatalog. The latter is
+	// cluster-scoped and outside this console's namespaced authority,
+	// so it is reported as referenced-but-not-observable.
+	Kind string
+	// Name is the referenced catalog's name.
+	Name string
+	// Major is the PostgreSQL major version taken from the catalog.
+	Major int
 }
 
 // LogTail is one bounded, on-demand log fetch. It is never cached and

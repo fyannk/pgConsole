@@ -36,16 +36,20 @@ var testNow = time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 
 // staticSnapshots serves fixed snapshots for every section.
 type staticSnapshots struct {
-	snap      observe.Snapshot
-	ok        bool
-	pods      observe.PodsSnapshot
-	podsOK    bool
-	events    observe.EventsSnapshot
-	eventsOK  bool
-	backups   observe.BackupsSnapshot
-	backupsOK bool
-	poolers   observe.PoolersSnapshot
-	poolersOK bool
+	snap       observe.Snapshot
+	ok         bool
+	pods       observe.PodsSnapshot
+	podsOK     bool
+	events     observe.EventsSnapshot
+	eventsOK   bool
+	backups    observe.BackupsSnapshot
+	backupsOK  bool
+	poolers    observe.PoolersSnapshot
+	poolersOK  bool
+	quorum     observe.FailoverQuorumSnapshot
+	quorumOK   bool
+	catalogs   observe.ImageCatalogsSnapshot
+	catalogsOK bool
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {
@@ -68,6 +72,14 @@ func (s staticSnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
 	return s.poolers, s.poolersOK
 }
 
+func (s staticSnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
+	return s.quorum, s.quorumOK
+}
+
+func (s staticSnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
+	return s.catalogs, s.catalogsOK
+}
+
 // allSources is the snapshot-supplier bundle of the tests.
 type allSources interface {
 	SnapshotSource
@@ -75,6 +87,8 @@ type allSources interface {
 	EventsSource
 	BackupsSource
 	PoolersSource
+	FailoverQuorumSource
+	ImageCatalogsSource
 }
 
 // newTestHandlerFull builds a Handler with explicit log configuration,
@@ -84,7 +98,7 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: allowLogs, LevelHeader: "X-PgToolBox-Level", Links: links},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots},
 		prober, tailer, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -100,7 +114,7 @@ func newLeveledHandler(t *testing.T, snapshots allSources) (*Handler, *bytes.Buf
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
@@ -1032,5 +1046,84 @@ func TestHandlerPoolersDistinguishesNotObservedFromNone(t *testing.T) {
 	}
 	if strings.Contains(body, "No poolers") {
 		t.Error("an absent snapshot rendered as an observed-empty set")
+	}
+}
+
+// TestClusterStatusRendersTheFailoverQuorum proves the quorum panel
+// distinguishes a cluster running one from a cluster that is not. "Not
+// configured" is an observation of absence; a missing snapshot is the
+// absence of an observation, and they must not read the same.
+func TestClusterStatusRendersTheFailoverQuorum(t *testing.T) {
+	t.Parallel()
+	configured := staticSnapshots{
+		snap: observe.Snapshot{Generation: 1, ObservedAt: testNow, Cluster: healthyFacts()}, ok: true,
+		quorum: observe.FailoverQuorumSnapshot{
+			Generation: 2, ObservedAt: testNow,
+			Quorum: observe.FailoverQuorumFacts{
+				Present: true, Method: "any", Primary: "orders-1",
+				StandbyNumber: 1, Standbys: []string{"orders-2", "orders-3"},
+			},
+		},
+		quorumOK: true,
+	}
+	h, _ := newTestHandler(t, configured, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/cluster/status").Body.String()
+	for _, want := range []string{"Failover quorum", "orders-1", "orders-2", "operator-reported"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("quorum panel misses %q", want)
+		}
+	}
+
+	absent := configured
+	absent.quorum = observe.FailoverQuorumSnapshot{Generation: 2, ObservedAt: testNow}
+	h, _ = newTestHandler(t, absent, kube.FakeProber{}, Links{})
+	if body := get(t, h, http.MethodGet, "/cluster/status").Body.String(); !strings.Contains(body, "Not configured") {
+		t.Error("a cluster without a quorum does not say so")
+	}
+}
+
+// TestImageCatalogViewResolvesTheClusterReference proves the panel is
+// built from two separate observations — the reference on the Cluster
+// and the catalog itself — and that each way the pairing can fail is a
+// distinct, honest claim rather than a blank.
+func TestImageCatalogViewResolvesTheClusterReference(t *testing.T) {
+	t.Parallel()
+	catalogs := observe.ImageCatalogsSnapshot{
+		Generation: 1, ObservedAt: testNow,
+		Catalogs: []observe.ImageCatalogFacts{{
+			Name: "postgres", UID: "u1",
+			Images: []observe.CatalogImageFacts{
+				{Major: 16, Image: "pg:16"},
+				{Major: 17, Image: "pg:17"},
+			},
+		}},
+	}
+
+	// No reference: the cluster names its image directly.
+	if v := buildImageCatalogView(catalogs, nil, testNow); v.Referenced {
+		t.Error("a cluster with no catalog reference reported one")
+	}
+
+	// Referenced and observed: the drawn major is marked.
+	v := buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ImageCatalog", Name: "postgres", Major: 17}, testNow)
+	if !v.Referenced || !v.Observable || !v.Found {
+		t.Fatalf("view = %+v, want a resolved reference", v)
+	}
+	if len(v.Images) != 2 || !v.Images[1].Current || v.Images[0].Current {
+		t.Errorf("images = %+v, want only major 17 marked as drawn", v.Images)
+	}
+
+	// Referenced but not present in the namespace.
+	v = buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ImageCatalog", Name: "missing", Major: 17}, testNow)
+	if !v.Referenced || !v.Observable || v.Found {
+		t.Errorf("view = %+v, want a reference that resolved to nothing", v)
+	}
+
+	// Cluster-scoped: named honestly, content not claimed. This console's
+	// authority is one namespace, so it must not report the catalog as
+	// missing when it simply cannot look.
+	v = buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ClusterImageCatalog", Name: "shared", Major: 17}, testNow)
+	if !v.Referenced || v.Observable || v.Found || len(v.Images) != 0 {
+		t.Errorf("view = %+v, want the reference shown and its content unclaimed", v)
 	}
 }
