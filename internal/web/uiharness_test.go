@@ -47,6 +47,8 @@ import (
 	"github.com/fyannk/pgConsole/internal/identity"
 	"github.com/fyannk/pgConsole/internal/kube"
 	"github.com/fyannk/pgConsole/internal/observe"
+	"github.com/fyannk/pgConsole/internal/ops"
+	"github.com/fyannk/pgConsole/internal/review"
 )
 
 // defaultPortBase is the first of the four consecutive ports the
@@ -104,31 +106,78 @@ func uiPopulated(stale bool) staticSnapshots {
 	}
 }
 
+// uiAbsent is the observed-but-deleted cluster: the API server answered
+// and the Cluster is not there. It is distinct from the cold start —
+// absence is a reported fact, not a missing observation — and the
+// console must render it as such rather than as an error.
+func uiAbsent() staticSnapshots {
+	return staticSnapshots{
+		snap: observe.Snapshot{
+			Generation: 9, ObservedAt: testNow.Add(-3 * time.Second),
+			Cluster: observe.ClusterFacts{Present: false},
+		},
+		ok:        true,
+		podsOK:    true,
+		eventsOK:  true,
+		backupsOK: true,
+	}
+}
+
 // uiHandler builds the fully wired handler for one fixture state: every
 // snapshot source, the repository-evidence consumer, all link-outs, and
 // the trusted level header.
-func uiHandler(t *testing.T, snapshots allSources, status evidence.Status) *Handler {
+//
+// authorized selects the capability set. False is the baseline build:
+// operations and access review are switched off, so the sidebar carries
+// them as inert entries and neither route exists. True wires the
+// executor, the reviewer and the access-review source from the ordinary
+// unit-test fakes, so every screen the console can serve is reachable.
+// Both are real deployments — which is why the harness serves each
+// fixture state twice rather than picking one.
+func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, authorized bool) *Handler {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
-	h, err := New(Config{
+	cfg := Config{
 		ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour,
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
-	},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots,
-			Evidence: fakeEvidence{status: status}},
+	}
+	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots,
+		Evidence: fakeEvidence{status: status}}
+	var executor OpsExecutor
+	var reviewer ReviewExecutor
+	if authorized {
+		cfg.AllowOperations = true
+		cfg.AllowAccessReview = true
+		executor = newRecordingExecutor()
+		csrf, err := ops.NewCSRF(reviewClock{})
+		if err != nil {
+			t.Fatalf("NewCSRF: %v", err)
+		}
+		reviewer = review.NewExecutor(&reviewWriter{}, csrf, reviewClock{}, logger)
+		sources.AccessReview = pendingSnapshot()
+	}
+	h, err := New(cfg, sources,
 		kube.FakeProber{}, fakeTailer{}, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
-		nil, nil, func() time.Time { return testNow }, logger)
+		executor, reviewer, func() time.Time { return testNow }, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return h
 }
 
-// TestUIHarness serves four fixture states on consecutive ports until
-// signalled. The states are the ones whose presentation differs: a
+// TestUIHarness serves the fixture states on consecutive ports until
+// signalled. The data states are the ones whose presentation differs: a
 // fully reported cluster, the same cluster with every watch broken, the
 // same again with the evidence consumer unreachable, and a cold start
 // with nothing observed yet.
+//
+// Each is served twice. The first four ports are the baseline build,
+// with operations and access review switched off; hack/uitest/drive.js
+// drives those, and its check that an unbuilt destination stays inert
+// depends on them staying that way. The next four are the same data
+// with every capability wired, which is what hack/design-bundle.sh
+// captures — a design bundle should describe the whole console, not the
+// subset one deployment enables.
 func TestUIHarness(t *testing.T) {
 	base := defaultPortBase
 	if v := os.Getenv("PGCONSOLE_UI_PORT_BASE"); v != "" {
@@ -143,14 +192,35 @@ func TestUIHarness(t *testing.T) {
 		Generation: 2, ObservedAt: testNow.Add(-time.Minute), Report: completeReport(),
 	}}
 
-	states := []struct {
+	data := []struct {
+		name      string
+		snapshots allSources
+		status    evidence.Status
+	}{
+		{"healthy", uiPopulated(false), report},
+		{"stale", uiPopulated(true), report},
+		{"degraded", uiPopulated(true), evidence.Status{Failure: evidence.FailureUnavailable}},
+		{"empty", EmptySnapshots{}, evidence.Status{}},
+		// Appended, never inserted: drive.js addresses the first four
+		// baseline ports by offset.
+		{"absent", uiAbsent(), evidence.Status{}},
+	}
+
+	var states []struct {
 		name    string
 		handler *Handler
-	}{
-		{"healthy", uiHandler(t, uiPopulated(false), report)},
-		{"stale", uiHandler(t, uiPopulated(true), report)},
-		{"degraded", uiHandler(t, uiPopulated(true), evidence.Status{Failure: evidence.FailureUnavailable})},
-		{"empty", uiHandler(t, EmptySnapshots{}, evidence.Status{})},
+	}
+	for _, authorized := range []bool{false, true} {
+		suffix := ""
+		if authorized {
+			suffix = "-authorized"
+		}
+		for _, d := range data {
+			states = append(states, struct {
+				name    string
+				handler *Handler
+			}{d.name + suffix, uiHandler(t, d.snapshots, d.status, authorized)})
+		}
 	}
 
 	var wg sync.WaitGroup

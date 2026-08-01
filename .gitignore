@@ -3,3 +3,4 @@
 /artifacts/
 *.out
 coverage.txt
+.gstack/
