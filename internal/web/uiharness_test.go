@@ -169,6 +169,90 @@ func uiAbsent() staticSnapshots {
 	}
 }
 
+// uiQuiet is the observed-but-empty cluster: every source answered, and
+// what it reported is nothing.
+//
+// It is a different claim from the cold start, and the console words it
+// differently — "the operator reports no Poolers" versus "nothing has
+// been observed" — so a design that only ever sees one of the two cannot
+// tell whether it has covered the other. The cluster itself is healthy,
+// because the point of this state is the empty sections around it.
+func uiQuiet() staticSnapshots {
+	facts := healthyFacts()
+	facts.UID = "uid-1234"
+	// No catalog reference, so the image-catalog panel shows the
+	// cluster naming its image directly.
+	facts.ImageCatalogRef = nil
+	return staticSnapshots{
+		snap:         observe.Snapshot{Generation: 3, ObservedAt: testNow.Add(-3 * time.Second), Cluster: facts},
+		ok:           true,
+		pods:         observe.PodsSnapshot{Generation: 3, ObservedAt: testNow.Add(-3 * time.Second)},
+		podsOK:       true,
+		events:       observe.EventsSnapshot{Generation: 3, ObservedAt: testNow.Add(-3 * time.Second)},
+		eventsOK:     true,
+		backups:      observe.BackupsSnapshot{Generation: 3, ObservedAt: testNow.Add(-3 * time.Second), ObjectStore: observe.ObjectStoreReference{State: observe.ObjectStoreNotReferenced}},
+		backupsOK:    true,
+		poolers:      observe.PoolersSnapshot{Generation: 3, ObservedAt: testNow.Add(-3 * time.Second)},
+		poolersOK:    true,
+		poolerPods:   observe.PodsSnapshot{Generation: 3, ObservedAt: testNow.Add(-3 * time.Second)},
+		poolerPodsOK: true,
+		quorum: observe.FailoverQuorumSnapshot{
+			Generation: 3, ObservedAt: testNow.Add(-3 * time.Second),
+			Quorum: observe.FailoverQuorumFacts{Present: false},
+		},
+		quorumOK: true,
+		catalogs: observe.ImageCatalogsSnapshot{
+			Generation: 3, ObservedAt: testNow.Add(-3 * time.Second),
+			ClusterCatalogState: observe.ClusterCatalogNotReferenced,
+		},
+		catalogsOK: true,
+		declared:   observe.DatabaseObjectsSnapshot{Generation: 3, ObservedAt: testNow.Add(-3 * time.Second)},
+		declaredOK: true,
+	}
+}
+
+// uiClusterCatalog is a cluster drawing its image from a cluster-scoped
+// ClusterImageCatalog that this deployment did not opt in to read.
+//
+// It exists because the image-catalog panel has four outcomes and only
+// one of them — the resolved namespaced catalog — appears in any other
+// fixture. This is the branch that must never read as "the catalog is
+// missing" when the truth is "I was not permitted to look", so it is the
+// one worth putting in front of a designer.
+func uiClusterCatalog() staticSnapshots {
+	src := uiPopulated(false)
+	facts := src.snap.Cluster
+	facts.ImageCatalogRef = &observe.ImageCatalogRef{
+		Kind: "ClusterImageCatalog", Name: "shared-postgres", Major: 16,
+	}
+	src.snap.Cluster = facts
+	src.catalogs = observe.ImageCatalogsSnapshot{
+		Generation: 2, ObservedAt: testNow.Add(-6 * time.Second),
+		ClusterCatalogState: observe.ClusterCatalogDisabled,
+	}
+	src.catalogsOK = true
+	return src
+}
+
+// uiMissingCatalog is a cluster naming a namespaced catalog that was not
+// observed. It is the fourth and last outcome of the image-catalog
+// panel, and the only one where the console does say the catalog is not
+// there — because here the API server answered and it was not.
+func uiMissingCatalog() staticSnapshots {
+	src := uiPopulated(false)
+	facts := src.snap.Cluster
+	facts.ImageCatalogRef = &observe.ImageCatalogRef{
+		Kind: "ImageCatalog", Name: "retired-catalog", Major: 16,
+	}
+	src.snap.Cluster = facts
+	src.catalogs = observe.ImageCatalogsSnapshot{
+		Generation: 2, ObservedAt: testNow.Add(-6 * time.Second),
+		ClusterCatalogState: observe.ClusterCatalogNotReferenced,
+	}
+	src.catalogsOK = true
+	return src
+}
+
 // uiHandler builds the fully wired handler for one fixture state: every
 // snapshot source, the repository-evidence consumer, all link-outs, and
 // the trusted level header.
@@ -250,6 +334,12 @@ func TestUIHarness(t *testing.T) {
 		// Appended, never inserted: drive.js addresses the first four
 		// baseline ports by offset.
 		{"absent", uiAbsent(), evidence.Status{}},
+		// Observed and empty, with a silent evidence sidecar: the
+		// wording every "there are none" branch uses, which no other
+		// fixture reaches.
+		{"quiet", uiQuiet(), evidence.Status{Failure: evidence.FailureUnavailable}},
+		{"cluster-catalog", uiClusterCatalog(), report},
+		{"missing-catalog", uiMissingCatalog(), report},
 	}
 
 	var states []struct {

@@ -40,13 +40,16 @@ ROOT=$(CDPATH= cd -- "$HERE/.." && pwd)
 # The harness serves five data states, each twice. The baseline copies
 # occupy the first five ports (hack/uitest/drive.js addresses those by
 # offset); the authorized copies follow, which is what AUTH shifts to.
-STATES=5
+STATES=8
 AUTH=$STATES
 HEALTHY=$((AUTH + 0))
 STALE=$((AUTH + 1))
 DEGRADED=$((AUTH + 2))
 EMPTY=$((AUTH + 3))
 ABSENT=$((AUTH + 4))
+QUIET=$((AUTH + 5))
+CLUSTERCAT=$((AUTH + 6))
+MISSINGCAT=$((AUTH + 7))
 PORTS=$((STATES * 2))
 
 log() { echo "[design] $*"; }
@@ -81,6 +84,26 @@ mkdir -p "$OUT/pages"
 # the SIGTERM in cleanup would leave the server holding its ports. A
 # survivor then answers the next run from a stale build, which looks
 # exactly like a bundle that ignored your edits.
+# Refuse to start on top of somebody else's harness. The readiness check
+# below only asks whether a port answers, which a survivor from an
+# earlier run does — and then the capture silently mixes two harnesses
+# with different state lists, so a page named "empty" holds populated
+# data. That is a wrong bundle that looks right, which is worse than a
+# failed run.
+busy=""
+p=0
+while [ "$p" -lt "$PORTS" ]; do
+  if curl -fsS --max-time 1 "http://127.0.0.1:$((PORT_BASE + p))/healthz" > /dev/null 2>&1; then
+    busy="$busy $((PORT_BASE + p))"
+  fi
+  p=$((p + 1))
+done
+if [ -n "$busy" ]; then
+  log "ports already answering:$busy"
+  log "another fixture harness is running; stop it before capturing a bundle"
+  exit 1
+fi
+
 log "building the fixture harness"
 $GO test -c -tags=uiharness -o "$STAGE/uiharness.test" ./internal/web/
 
@@ -275,6 +298,54 @@ page $HEALTHY /access-requests dba dba@corp access-requests.html Pages \
 refused $HEALTHY /operations view viewer 403 \
   | emit denied.html Pages \
       "Denied" "Level gate refusing a route, with the reason stated"
+
+# Observed and empty. Every "there are none" branch the console can take
+# is a distinct claim from "nothing observed yet", worded differently on
+# purpose, and a design that never sees it cannot check the wording or
+# the layout of a screen with no rows in it.
+page $QUIET /cluster/pods    "" "" cluster-pods-empty.html Pages \
+  "Cluster — pods, none" "Observed and empty: no instance pods reported"
+page $QUIET /cluster/events  "" "" cluster-events-empty.html Pages \
+  "Cluster — events, none" "Observed and empty: no events in the window"
+page $QUIET /cluster/status  "" "" cluster-status-empty.html Pages \
+  "Cluster — status, no quorum or catalog" "Failover quorum not configured; image named directly rather than drawn from a catalog"
+page $QUIET /backups         "" "" backups-overview-empty.html Pages \
+  "Backups — none" "Observed and empty: no backups reported"
+page $QUIET /backups/evidence "" "" backups-evidence-silent.html Pages \
+  "Backups — evidence, sidecar silent" "The consumer is configured and the sidecar has not answered, which is not the same as unconfigured"
+page $QUIET /databases       "" "" databases-empty.html Pages \
+  "Databases — none declared" "Observed and empty: the cluster declares no Database resources"
+page $QUIET /databases/roles "" "" databases-roles-empty.html Pages \
+  "Databases — no roles declared" "Observed and empty: the cluster declares no DatabaseRole resources"
+page $QUIET /databases/publications "" "" databases-publications-empty.html Pages \
+  "Databases — no publications declared" "Observed and empty: no Publication resources for logical replication"
+page $QUIET /databases/subscriptions "" "" databases-subscriptions-empty.html Pages \
+  "Databases — no subscriptions declared" "Observed and empty: no Subscription resources for logical replication"
+page $QUIET /poolers         "" "" poolers-empty.html Pages \
+  "Poolers — none" "Observed and empty: the operator reports no Pooler resources"
+page $QUIET /poolers/pods poweruser operator poolers-pods-empty.html Pages \
+  "Poolers — no pods" "Observed and empty: no pod owned by one of this cluster's poolers"
+
+# Nothing observed at all: the sections say the build makes no claim,
+# which is a third wording distinct from both "none" and a populated
+# list, and until now only the Overview had a card for it.
+page $EMPTY /databases    "" "" databases-no-snapshot.html Pages \
+  "Databases — nothing observed" "No declaration snapshot: the build makes no claim either way"
+page $EMPTY /poolers      "" "" poolers-no-snapshot.html Pages \
+  "Poolers — nothing observed" "No pooler snapshot: the build makes no claim either way"
+page $EMPTY /poolers/pods poweruser operator poolers-pods-no-snapshot.html Pages \
+  "Poolers — pods, nothing observed" "No pooler pod snapshot: the build makes no claim either way"
+
+page $MISSINGCAT /cluster/status "" "" cluster-status-missing-catalog.html Pages \
+  "Cluster — catalog not found" "The cluster names a catalog the API server reports does not exist"
+
+page $CLUSTERCAT /cluster/status "" "" cluster-status-cluster-catalog.html Pages \
+  "Cluster — cluster-scoped catalog" "The image is drawn from a ClusterImageCatalog this deployment does not read; the reference is shown and its content is not claimed"
+
+# The pooler tail's own output, which is a different route to a
+# different container from the instance tail beside it.
+page $HEALTHY /poolers/logs/orders-rw-pooler-abc-1 poweruser operator poolers-logs-tail.html Pages \
+  "Pooler log tail" "Bounded on-demand fetch of a pooler pod's pgbouncer container"
 
 # The baseline build, where operations and access review are switched
 # off. Its sidebar carries them as inert entries rather than dropping
