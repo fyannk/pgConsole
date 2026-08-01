@@ -50,6 +50,10 @@ type Options struct {
 	LogTailLines int
 	// LogTailMaxBytes bounds the bytes of one log tail.
 	LogTailMaxBytes int64
+	// AllowClusterCatalogs permits the one cluster-scoped read this
+	// console can be granted: the ClusterImageCatalog its Cluster
+	// references. False means the lookup is never attempted.
+	AllowClusterCatalogs bool
 }
 
 // Client accesses the one target cluster through the Kubernetes API.

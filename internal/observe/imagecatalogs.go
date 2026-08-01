@@ -31,6 +31,30 @@ const (
 	MaxCatalogImages = 16
 )
 
+// ClusterCatalogState is the outcome of the optional cluster-scoped
+// catalog lookup. A ClusterImageCatalog lives outside the namespace this
+// console is otherwise confined to, so every way the lookup can decline
+// to produce content is named rather than collapsed into an absence.
+type ClusterCatalogState string
+
+const (
+	// ClusterCatalogDisabled means the deployment did not opt in. The
+	// reference is shown and its content is not claimed.
+	ClusterCatalogDisabled ClusterCatalogState = "disabled"
+	// ClusterCatalogNotReferenced means the cluster draws its image from
+	// a namespaced catalog, or names it directly.
+	ClusterCatalogNotReferenced ClusterCatalogState = "not-referenced"
+	// ClusterCatalogPresent means the referenced catalog was read.
+	ClusterCatalogPresent ClusterCatalogState = "present"
+	// ClusterCatalogAbsent means the API server confirmed the referenced
+	// catalog does not exist.
+	ClusterCatalogAbsent ClusterCatalogState = "absent"
+	// ClusterCatalogUnknown means the lookup could not be made. A denied
+	// ClusterRole binding and a missing CRD both land here: the console
+	// says it could not look, never that the catalog is not there.
+	ClusterCatalogUnknown ClusterCatalogState = "unknown"
+)
+
 // CatalogImageFacts is one image a catalog offers.
 type CatalogImageFacts struct {
 	// Major is the PostgreSQL major version the image provides.
@@ -88,11 +112,29 @@ type ImageCatalogWatch interface {
 	Stop()
 }
 
+// ImageCatalogsState is one complete seed: the namespace's catalogs,
+// the optional cluster-scoped one, and the version the watch resumes
+// from.
+type ImageCatalogsState struct {
+	// Catalogs is the bounded namespaced catalog seed.
+	Catalogs []ImageCatalogFacts
+	// ResourceVersion starts the namespaced watch.
+	ResourceVersion string
+	// Truncated reports a source safety ceiling.
+	Truncated bool
+	// ClusterCatalog is the referenced cluster-scoped catalog, read only
+	// when the deployment opted in. It has no watch: a cluster-scoped
+	// watch cannot be pinned by name and would need list authority over
+	// every catalog in the cluster, so it refreshes on re-seed.
+	ClusterCatalog ImageCatalogFacts
+	// ClusterCatalogState is the outcome of that optional lookup.
+	ClusterCatalogState ClusterCatalogState
+}
+
 // ImageCatalogSource produces the namespace's ImageCatalog resources.
 type ImageCatalogSource interface {
-	// FetchImageCatalogs returns the current set and the resource
-	// version to resume watching from.
-	FetchImageCatalogs(ctx context.Context) (catalogs []ImageCatalogFacts, resourceVersion string, truncated bool, err error)
+	// FetchImageCatalogs returns a complete bounded seed.
+	FetchImageCatalogs(ctx context.Context) (ImageCatalogsState, error)
 	// WatchImageCatalogs streams changes from the given version.
 	WatchImageCatalogs(ctx context.Context, fromResourceVersion string) (ImageCatalogWatch, error)
 }
@@ -108,8 +150,16 @@ type ImageCatalogsSnapshot struct {
 	Stale bool
 	// Truncated reports that more catalogs existed than the bound.
 	Truncated bool
-	// Catalogs is sorted by name and bounded by MaxImageCatalogs.
+	// Catalogs is sorted by name and bounded by MaxImageCatalogs. These
+	// are the namespace's catalogs.
 	Catalogs []ImageCatalogFacts
+	// ClusterCatalog is the cluster-scoped catalog the Cluster
+	// references, read only when the deployment opted in. It is kept
+	// apart from Catalogs because a namespaced and a cluster-scoped
+	// catalog may share a name and mean different objects.
+	ClusterCatalog ImageCatalogFacts
+	// ClusterCatalogState is the outcome of that optional lookup.
+	ClusterCatalogState ClusterCatalogState
 }
 
 // Catalog returns the named catalog and whether it was observed.
@@ -142,15 +192,17 @@ func (s *ImageCatalogStore) CurrentImageCatalogs() (ImageCatalogsSnapshot, bool)
 
 // publish replaces the snapshot, advancing the generation and clearing
 // staleness.
-func (s *ImageCatalogStore) publish(catalogs []ImageCatalogFacts, observedAt time.Time, sourceTruncated bool) {
+func (s *ImageCatalogStore) publish(catalogs []ImageCatalogFacts, clusterCatalog ImageCatalogFacts, clusterState ClusterCatalogState, observedAt time.Time, sourceTruncated bool) {
 	sorted, cut := bounded(catalogs, lessCatalogName, MaxImageCatalogs)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snap = ImageCatalogsSnapshot{
-		Generation: s.snap.Generation + 1,
-		ObservedAt: observedAt,
-		Truncated:  sourceTruncated || cut,
-		Catalogs:   sorted,
+		Generation:          s.snap.Generation + 1,
+		ObservedAt:          observedAt,
+		Truncated:           sourceTruncated || cut,
+		Catalogs:            sorted,
+		ClusterCatalog:      clusterCatalog,
+		ClusterCatalogState: clusterState,
 	}
 	s.has = true
 }
@@ -181,12 +233,14 @@ var catalogRetention = retention[ImageCatalogFacts]{
 
 // ImageCatalogCollector maintains the catalog store on the shared loop.
 type ImageCatalogCollector struct {
-	source    ImageCatalogSource
-	store     *ImageCatalogStore
-	clock     Clock
-	logger    *slog.Logger
-	state     keyed[ImageCatalogFacts]
-	truncated bool
+	source         ImageCatalogSource
+	store          *ImageCatalogStore
+	clock          Clock
+	logger         *slog.Logger
+	state          keyed[ImageCatalogFacts]
+	truncated      bool
+	clusterCatalog ImageCatalogFacts
+	clusterState   ClusterCatalogState
 }
 
 // NewImageCatalogCollector wires a catalog collector onto a store.
@@ -205,18 +259,20 @@ func (c *ImageCatalogCollector) op() string { return "image catalogs" }
 // seed replaces the retained set and returns the resource version the
 // watch resumes from.
 func (c *ImageCatalogCollector) seed(ctx context.Context) (string, error) {
-	catalogs, rv, truncated, err := c.source.FetchImageCatalogs(ctx)
+	state, err := c.source.FetchImageCatalogs(ctx)
 	if err != nil {
 		return "", err
 	}
-	c.truncated = truncated
-	c.state = make(keyed[ImageCatalogFacts], len(catalogs))
-	for _, cat := range catalogs {
+	c.truncated = state.Truncated
+	c.clusterCatalog = state.ClusterCatalog
+	c.clusterState = state.ClusterCatalogState
+	c.state = make(keyed[ImageCatalogFacts], len(state.Catalogs))
+	for _, cat := range state.Catalogs {
 		if c.state.put(cat, catalogRetention) {
 			c.truncated = true
 		}
 	}
-	return rv, nil
+	return state.ResourceVersion, nil
 }
 
 // follow starts the catalog watch from the seed's resource version.
@@ -246,7 +302,7 @@ func (c *ImageCatalogCollector) apply(change ImageCatalogChange) bool {
 
 // publish snapshots the retained set into the store.
 func (c *ImageCatalogCollector) publish(observedAt time.Time) {
-	c.store.publish(c.state.list(), observedAt, c.truncated)
+	c.store.publish(c.state.list(), c.clusterCatalog, c.clusterState, observedAt, c.truncated)
 }
 
 // markStale marks the retained snapshot stale, if one exists.

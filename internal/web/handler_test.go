@@ -1126,12 +1126,56 @@ func TestImageCatalogViewResolvesTheClusterReference(t *testing.T) {
 		t.Errorf("view = %+v, want a reference that resolved to nothing", v)
 	}
 
-	// Cluster-scoped: named honestly, content not claimed. This console's
-	// authority is one namespace, so it must not report the catalog as
-	// missing when it simply cannot look.
+	// Cluster-scoped with no opt-in: named honestly, content not claimed,
+	// and explicitly not reported as missing.
+	catalogs.ClusterCatalogState = observe.ClusterCatalogDisabled
 	v = buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ClusterImageCatalog", Name: "shared", Major: 17}, testNow)
 	if !v.Referenced || v.Observable || v.Found || len(v.Images) != 0 {
 		t.Errorf("view = %+v, want the reference shown and its content unclaimed", v)
+	}
+	if v.Unobservable == "" {
+		t.Error("the panel does not say why the content is not claimed")
+	}
+}
+
+// TestClusterImageCatalogOutcomesAreDistinct proves the four ways a
+// cluster-scoped reference can resolve stay distinct on the page. The
+// one that matters most is that a refused read never renders as a
+// missing catalog: declining the opt-in is a deployment choice, whereas
+// absence is a claim about the cluster.
+func TestClusterImageCatalogOutcomesAreDistinct(t *testing.T) {
+	t.Parallel()
+	ref := &observe.ImageCatalogRef{Kind: "ClusterImageCatalog", Name: "shared", Major: 17}
+	base := observe.ImageCatalogsSnapshot{Generation: 1, ObservedAt: testNow}
+
+	for _, tc := range []struct {
+		name           string
+		state          observe.ClusterCatalogState
+		wantObservable bool
+		wantFound      bool
+		wantExplained  bool
+	}{
+		{"opted out", observe.ClusterCatalogDisabled, false, false, true},
+		{"refused", observe.ClusterCatalogUnknown, false, false, true},
+		{"confirmed absent", observe.ClusterCatalogAbsent, true, false, false},
+		{"read", observe.ClusterCatalogPresent, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := base
+			snap.ClusterCatalogState = tc.state
+			if tc.state == observe.ClusterCatalogPresent {
+				snap.ClusterCatalog = observe.ImageCatalogFacts{
+					Name: "shared", Images: []observe.CatalogImageFacts{{Major: 17, Image: "pg:17"}},
+				}
+			}
+			v := buildImageCatalogView(snap, ref, testNow)
+			if v.Observable != tc.wantObservable || v.Found != tc.wantFound {
+				t.Errorf("observable=%v found=%v, want %v/%v", v.Observable, v.Found, tc.wantObservable, tc.wantFound)
+			}
+			if (v.Unobservable != "") != tc.wantExplained {
+				t.Errorf("explanation=%q, want present=%v", v.Unobservable, tc.wantExplained)
+			}
+		})
 	}
 }
 

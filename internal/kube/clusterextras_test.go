@@ -16,13 +16,17 @@ package kube
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/fyannk/pgConsole/internal/observe"
 )
@@ -139,14 +143,14 @@ func TestFetchImageCatalogsOrdersImagesByMajor(t *testing.T) {
 			map[string]any{"major": int64(16), "image": "pg:16"},
 		}))
 
-	catalogs, _, truncated, err := c.FetchImageCatalogs(context.Background())
+	state, err := c.FetchImageCatalogs(context.Background())
 	if err != nil {
 		t.Fatalf("FetchImageCatalogs: %v", err)
 	}
-	if truncated || len(catalogs) != 1 {
-		t.Fatalf("catalogs=%d truncated=%v, want the one catalog", len(catalogs), truncated)
+	if state.Truncated || len(state.Catalogs) != 1 {
+		t.Fatalf("catalogs=%d truncated=%v, want the one catalog", len(state.Catalogs), state.Truncated)
 	}
-	if got := catalogs[0].Images; len(got) != 2 || got[0].Major != 16 || got[1].Major != 17 {
+	if got := state.Catalogs[0].Images; len(got) != 2 || got[0].Major != 16 || got[1].Major != 17 {
 		t.Errorf("images = %+v, want major-ascending", got)
 	}
 }
@@ -155,3 +159,167 @@ var (
 	_ observe.FailoverQuorumSource = (*Client)(nil)
 	_ observe.ImageCatalogSource   = (*Client)(nil)
 )
+
+func rawClusterWithCatalogRef(kind, name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1", "kind": "Cluster",
+		"metadata": map[string]any{"name": "orders", "namespace": "payments"},
+		"spec": map[string]any{"imageCatalogRef": map[string]any{
+			"apiGroup": "postgresql.cnpg.io", "kind": kind, "name": name, "major": int64(17),
+		}},
+	}}
+}
+
+func clusterCatalogScheme() *runtime.Scheme {
+	s := extrasScheme()
+	s.AddKnownTypeWithName(schema.GroupVersionKind{
+		Group: "postgresql.cnpg.io", Version: "v1", Kind: "ClusterImageCatalogList",
+	}, &unstructured.UnstructuredList{})
+	s.AddKnownTypeWithName(schema.GroupVersionKind{
+		Group: "postgresql.cnpg.io", Version: "v1", Kind: "ClusterList",
+	}, &unstructured.UnstructuredList{})
+	return s
+}
+
+func clusterCatalogListKinds() map[schema.GroupVersionResource]string {
+	return map[schema.GroupVersionResource]string{
+		imageCatalogGVR:        "ImageCatalogList",
+		clusterImageCatalogGVR: "ClusterImageCatalogList",
+		clusterGVR:             "ClusterList",
+	}
+}
+
+// TestClusterCatalogNotReadWithoutTheOptIn proves the cluster-scoped
+// read never happens unless the deployment asked for it. This is the one
+// capability that reaches outside the namespace, so "off" must mean the
+// request is not made at all, not merely that it fails.
+func TestClusterCatalogNotReadWithoutTheOptIn(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t)
+	c.opts.AllowClusterCatalogs = false
+	c.dyn = fake.NewSimpleDynamicClientWithCustomListKinds(clusterCatalogScheme(), clusterCatalogListKinds(),
+		rawClusterWithCatalogRef("ClusterImageCatalog", "shared"),
+		rawClusterCatalog("shared"),
+	)
+
+	state, err := c.FetchImageCatalogs(context.Background())
+	if err != nil {
+		t.Fatalf("FetchImageCatalogs: %v", err)
+	}
+	if state.ClusterCatalogState != observe.ClusterCatalogDisabled {
+		t.Errorf("state = %q, want disabled when the deployment did not opt in", state.ClusterCatalogState)
+	}
+	if len(state.ClusterCatalog.Images) != 0 {
+		t.Error("the cluster-scoped catalog was read without the opt-in")
+	}
+}
+
+func rawClusterCatalog(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1", "kind": "ClusterImageCatalog",
+		"metadata": map[string]any{"name": name, "uid": "u-" + name},
+		"spec": map[string]any{"images": []any{
+			map[string]any{"major": int64(17), "image": "pg:17"},
+		}},
+	}}
+}
+
+// TestClusterCatalogReadWithTheOptIn proves the referenced cluster-scoped
+// catalog is read, and only when the reference names that kind.
+func TestClusterCatalogReadWithTheOptIn(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t)
+	c.opts.AllowClusterCatalogs = true
+	c.dyn = fake.NewSimpleDynamicClientWithCustomListKinds(clusterCatalogScheme(), clusterCatalogListKinds(),
+		rawClusterWithCatalogRef("ClusterImageCatalog", "shared"),
+		rawClusterCatalog("shared"),
+	)
+
+	state, err := c.FetchImageCatalogs(context.Background())
+	if err != nil {
+		t.Fatalf("FetchImageCatalogs: %v", err)
+	}
+	if state.ClusterCatalogState != observe.ClusterCatalogPresent {
+		t.Fatalf("state = %q, want present", state.ClusterCatalogState)
+	}
+	if len(state.ClusterCatalog.Images) != 1 || state.ClusterCatalog.Images[0].Major != 17 {
+		t.Errorf("images = %+v, want the catalog's content", state.ClusterCatalog.Images)
+	}
+}
+
+// TestClusterCatalogNotReferencedWhenTheRefIsNamespaced proves a
+// namespaced reference does not trigger the cluster-scoped read.
+func TestClusterCatalogNotReferencedWhenTheRefIsNamespaced(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t)
+	c.opts.AllowClusterCatalogs = true
+	c.dyn = fake.NewSimpleDynamicClientWithCustomListKinds(clusterCatalogScheme(), clusterCatalogListKinds(),
+		rawClusterWithCatalogRef("ImageCatalog", "postgres"),
+	)
+
+	state, err := c.FetchImageCatalogs(context.Background())
+	if err != nil {
+		t.Fatalf("FetchImageCatalogs: %v", err)
+	}
+	if state.ClusterCatalogState != observe.ClusterCatalogNotReferenced {
+		t.Errorf("state = %q, want not-referenced for a namespaced reference", state.ClusterCatalogState)
+	}
+}
+
+// TestClusterCatalogAbsentIsDistinctFromUnreadable proves the console
+// separates "the API server says it is not there" from "I could not
+// look". Collapsing them would let a denied binding read as a missing
+// catalog, which is a claim the console has no basis for.
+func TestClusterCatalogAbsentIsDistinctFromUnreadable(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t)
+	c.opts.AllowClusterCatalogs = true
+	c.dyn = fake.NewSimpleDynamicClientWithCustomListKinds(clusterCatalogScheme(), clusterCatalogListKinds(),
+		rawClusterWithCatalogRef("ClusterImageCatalog", "missing"),
+	)
+
+	state, err := c.FetchImageCatalogs(context.Background())
+	if err != nil {
+		t.Fatalf("FetchImageCatalogs: %v", err)
+	}
+	if state.ClusterCatalogState != observe.ClusterCatalogAbsent {
+		t.Errorf("state = %q, want absent when the API server confirms not-found", state.ClusterCatalogState)
+	}
+	if state.ClusterCatalog.Name != "missing" {
+		t.Errorf("name = %q, want the reference still named", state.ClusterCatalog.Name)
+	}
+}
+
+// TestClusterCatalogDeniedReadsAsUnknownNotAbsent proves an unbound
+// ClusterRole degrades to "could not look" rather than "not there". The
+// difference matters: one is a deployment choice, the other is a claim
+// about the cluster that the console has no basis to make.
+func TestClusterCatalogDeniedReadsAsUnknownNotAbsent(t *testing.T) {
+	t.Parallel()
+	c, logs := newTestClient(t)
+	c.opts.AllowClusterCatalogs = true
+	dyn := fake.NewSimpleDynamicClientWithCustomListKinds(clusterCatalogScheme(), clusterCatalogListKinds(),
+		rawClusterWithCatalogRef("ClusterImageCatalog", "shared"),
+	)
+	dyn.PrependReactor("get", "clusterimagecatalogs", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: "postgresql.cnpg.io", Resource: "clusterimagecatalogs"},
+			"shared", errors.New("no ClusterRole bound"))
+	})
+	c.dyn = dyn
+
+	state, err := c.FetchImageCatalogs(context.Background())
+	if err != nil {
+		t.Fatalf("a denied cluster-scoped read failed the whole fetch: %v", err)
+	}
+	if state.ClusterCatalogState != observe.ClusterCatalogUnknown {
+		t.Errorf("state = %q, want unknown when the read is refused", state.ClusterCatalogState)
+	}
+	// The namespaced half must be unaffected.
+	if state.Catalogs != nil && len(state.Catalogs) != 0 {
+		t.Errorf("namespaced catalogs = %+v, want the namespaced listing unaffected", state.Catalogs)
+	}
+	if !strings.Contains(logs.String(), "forbidden") {
+		t.Errorf("the refusal category was not logged: %s", logs.String())
+	}
+}

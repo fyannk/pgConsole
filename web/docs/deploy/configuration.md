@@ -34,6 +34,10 @@ denied; with no level header only the read-only baseline is reachable.
 
 - `ALLOW_OPERATIONS` (default `false`) — the enumerated day-2 operations.
 - `ALLOW_ACCESS_REVIEW` (default `false`) — the dba review panel.
+- `ALLOW_CLUSTER_CATALOGS` (default `false`) — the cluster-scoped catalog
+  read. This is the only switch that grants authority outside the
+  console's namespace, so it needs its own ClusterRole
+  (`deploy/cluster-catalog-role.yaml`) as well as the flag.
 - `ALLOW_LOGS` (default `true`) — the master switch for the log tail; when
   on, the tail still requires the `poweruser` level.
 
@@ -64,3 +68,26 @@ disabled — no panel, no poller, no socket. The URL must be a `unix://`
 socket URI or an absolute socket path; loopback and TCP forms refuse to
 start, because the evidence API exists only on a pod-private Unix socket.
 See [Repository evidence](../architecture/repository-evidence.md).
+
+## The cluster-scoped catalog read
+
+A CloudNativePG `Cluster` may draw its image from a `ClusterImageCatalog`
+rather than naming the image directly. That resource is cluster-scoped,
+so reading it needs authority the console's namespaced Role does not
+have.
+
+Leaving this off is a supported configuration, not a degraded one. The
+console still shows the *reference*, because `spec.imageCatalogRef` is a
+field on the Cluster, which is namespaced. What it will not do is claim
+anything about the catalog's content — and, importantly, it will not
+report the catalog as missing. "I was not permitted to look" and "it is
+not there" are different statements, and the panel makes which one
+applies explicit.
+
+To turn it on, apply `deploy/cluster-catalog-role.yaml` and set
+`ALLOW_CLUSTER_CATALOGS=true`. The grant is a `get` on
+`clusterimagecatalogs` and nothing else: no `list` and no `watch`, so the
+console can read the one catalog its Cluster names but cannot enumerate
+the catalogs in the cluster. With the flag set but the ClusterRole
+unbound, the read is refused and the panel says the content could not be
+read.

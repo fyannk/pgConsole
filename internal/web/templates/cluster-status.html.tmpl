@@ -128,9 +128,9 @@
         <dt>Major version drawn</dt><dd>{{.Major}}</dd>
       </dl>
       {{- if not .Observable}}
-      <div class="empty"><strong>Cluster-scoped catalog</strong>The cluster draws its image from a <code>ClusterImageCatalog</code>, which is cluster-scoped. This console&#39;s authority is one namespace, so the reference is shown and its content is not claimed.</div>
+      <div class="empty"><strong>Content not claimed</strong>The cluster draws its image from a <code>ClusterImageCatalog</code>, which lives outside this console&#39;s namespace. {{.Unobservable}}, so the reference is shown and its content is not claimed. This is not a statement that the catalog is missing.</div>
       {{- else if not .Found}}
-      <div class="empty"><strong>Catalog not observed</strong>The cluster names this catalog, but no such <code>ImageCatalog</code> was observed in the namespace.</div>
+      <div class="empty"><strong>Catalog not found</strong>The cluster names this catalog, but the API server reports no such catalog exists.</div>
       {{- else}}
       <div class="table-scroll">
       <table class="catalog-images">

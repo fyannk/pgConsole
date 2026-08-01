@@ -49,6 +49,12 @@ const (
 	EnvTrustedLevelHeader = "TRUSTED_LEVEL_HEADER"
 	// EnvAllowOperations enables the enumerated day-2 operation routes.
 	EnvAllowOperations = "ALLOW_OPERATIONS"
+	// EnvAllowClusterCatalogs lets the console read the one
+	// cluster-scoped ClusterImageCatalog its Cluster references. It is
+	// the only capability that needs authority outside the namespace, so
+	// it is opt-in, needs its own ClusterRole, and degrades to unknown
+	// when the flag is set but the binding is absent.
+	EnvAllowClusterCatalogs = "ALLOW_CLUSTER_CATALOGS"
 	// EnvAllowAccessReview enables the dba access-request review panel.
 	EnvAllowAccessReview = "ALLOW_ACCESS_REVIEW"
 	// EnvAllowLogs enables the bounded instance log tail.
@@ -148,6 +154,8 @@ type Config struct {
 	TrustedLevelHeader string
 	// AllowOperations enables the enumerated day-2 operation routes.
 	AllowOperations bool
+	// AllowClusterCatalogs enables the cluster-scoped catalog read.
+	AllowClusterCatalogs bool
 	// AllowAccessReview enables the dba access-request review panel.
 	AllowAccessReview bool
 	// AllowLogs enables the bounded instance log tail.
@@ -270,6 +278,7 @@ func Load(lookup Lookup) (Config, error) {
 	}
 
 	cfg.AllowOperations = boolVar(lookup, EnvAllowOperations, false, fail)
+	cfg.AllowClusterCatalogs = boolVar(lookup, EnvAllowClusterCatalogs, false, fail)
 	cfg.AllowAccessReview = boolVar(lookup, EnvAllowAccessReview, false, fail)
 	cfg.AllowInsecureLinks = boolVar(lookup, EnvAllowInsecureLinks, false, fail)
 	cfg.AllowLogs = boolVar(lookup, EnvAllowLogs, true, fail)

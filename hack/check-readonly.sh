@@ -53,6 +53,32 @@ if [ -f deploy/access-review-role.yaml ]; then
   fi
 fi
 
+# Cluster-scoped authority is confined to one opt-in manifest. Every
+# other manifest must stay namespaced: that is the difference between a
+# console whose blast radius is one namespace and one that can read the
+# whole cluster.
+for manifest in deploy/*.yaml; do
+  [ "$manifest" = "deploy/cluster-catalog-role.yaml" ] && continue
+  if grep -En '^kind: Cluster(Role|RoleBinding)' "$manifest"; then
+    echo "cluster-scoped grant outside deploy/cluster-catalog-role.yaml: $manifest" >&2
+    status=1
+  fi
+done
+
+# The one cluster-scoped Role may grant only a get, and only on catalogs.
+# A list or watch there would mean enumerating every catalog in the
+# cluster rather than reading the one the Cluster names.
+if [ -f deploy/cluster-catalog-role.yaml ]; then
+  if grep -En '"(list|watch|create|update|patch|delete|deletecollection|impersonate|escalate|bind)"' deploy/cluster-catalog-role.yaml; then
+    echo "cluster-catalog Role grants more than a get" >&2
+    status=1
+  fi
+  if grep -En 'resources:' deploy/cluster-catalog-role.yaml | grep -vq 'clusterimagecatalogs'; then
+    echo "cluster-catalog Role names a resource other than clusterimagecatalogs" >&2
+    status=1
+  fi
+fi
+
 # No manifest may reference the secret resource.
 if grep -En '"secrets"' deploy/*.yaml; then
   echo "secret resource referenced in example manifests" >&2

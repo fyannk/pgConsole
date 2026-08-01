@@ -1,0 +1,52 @@
+# Optional, opt-in cluster-scoped read for pgConsole.
+#
+# This is the ONLY manifest in this repository that grants authority
+# outside the console's namespace, and the only one that may contain a
+# ClusterRole. hack/check-readonly.sh enforces both of those.
+#
+# Why it exists. A CloudNativePG Cluster may draw its image from a
+# ClusterImageCatalog, which is cluster-scoped. Without this grant the
+# console can still see the *reference* — it is a field on the Cluster,
+# which is namespaced — but not the catalog's content, and it says so
+# rather than reporting the catalog as missing. Bind this only if you
+# want the console to show which images that catalog offers.
+#
+# Why it is safe to decline. Nothing degrades: with ALLOW_CLUSTER_CATALOGS
+# unset the console never attempts the read, and the panel states that
+# the deployment does not grant it. With the flag set but this Role
+# unbound, the read is refused and the panel says the content could not
+# be read — never that the catalog does not exist.
+#
+# Why it is narrow. The grant is "get" only, on one resource, with no
+# list and no watch. A cluster-scoped watch cannot be pinned by name, so
+# it would require list authority over every catalog in the cluster; a
+# get needs only the one the Cluster names. The console reads catalog
+# content and nothing else cluster-wide.
+#
+# Apply alongside deploy/kubernetes-example.yaml and set
+# ALLOW_CLUSTER_CATALOGS=true on the Deployment.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pgconsole-orders-cluster-catalogs
+rules:
+  # Get only. RBAC cannot pin a get by name for a name the operator does
+  # not know in advance, so the rule is unpinned — but without list or
+  # watch the console can read a catalog only when the Cluster it
+  # observes names it.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusterimagecatalogs"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pgconsole-orders-cluster-catalogs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pgconsole-orders-cluster-catalogs
+subjects:
+  - kind: ServiceAccount
+    name: pgconsole-orders
+    namespace: payments

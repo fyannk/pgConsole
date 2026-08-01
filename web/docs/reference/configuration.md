@@ -19,6 +19,7 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `TRUSTED_LEVEL_HEADER` | `X-PgToolBox-Level` | Proxy level header carrying `view`, `poweruser`, or `dba`; empty leaves only the read-only baseline. |
 | `ALLOW_OPERATIONS` | `false` | Enables the enumerated day-2 operation routes. Strict boolean. |
 | `ALLOW_ACCESS_REVIEW` | `false` | Enables the dba access-request review panel. Strict boolean; needs its own Role. |
+| `ALLOW_CLUSTER_CATALOGS` | `false` | Lets the console read the one cluster-scoped `ClusterImageCatalog` its Cluster references. Strict boolean; needs its own ClusterRole. The only setting that grants authority outside the namespace. |
 | `ALLOW_LOGS` | `true` | Master switch for the bounded log tail; when on, the tail still requires the `poweruser` level. |
 | `LOG_TAIL_LINES` | `200` | Lines per log request, 1–2000. |
 | `LOG_TAIL_MAX_BYTES` | `1048576` | Bytes per log request, 4 KiB–8 MiB. |

@@ -56,11 +56,12 @@ func run() error {
 	// is the honest degraded state rather than a crash loop.
 	deps := application.Deps{Prober: kube.UnavailableProber{}, Clock: observe.RealClock{}}
 	client, err := kube.InClusterClient(kube.Options{
-		Namespace:       cfg.Namespace,
-		ClusterName:     cfg.ClusterName,
-		RequestTimeout:  cfg.APIRequestTimeout,
-		LogTailLines:    cfg.LogTailLines,
-		LogTailMaxBytes: cfg.LogTailMaxBytes,
+		Namespace:            cfg.Namespace,
+		ClusterName:          cfg.ClusterName,
+		RequestTimeout:       cfg.APIRequestTimeout,
+		LogTailLines:         cfg.LogTailLines,
+		LogTailMaxBytes:      cfg.LogTailMaxBytes,
+		AllowClusterCatalogs: cfg.AllowClusterCatalogs,
 	}, logger)
 	if err != nil {
 		logger.Warn("kubernetes access unavailable",

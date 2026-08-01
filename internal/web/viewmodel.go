@@ -1128,10 +1128,14 @@ type ImageCatalogView struct {
 	Name string
 	// Major is the PostgreSQL major version drawn from the catalog.
 	Major string
-	// Observable reports that the referenced kind is one this console is
-	// permitted to read. A ClusterImageCatalog is cluster-scoped and is
-	// not, so the reference is shown and its content is not claimed.
+	// Observable reports that the console was able to look at all. A
+	// namespaced catalog is always observable; a cluster-scoped one is
+	// only when the deployment opted in and the ClusterRole is bound.
 	Observable bool
+	// Unobservable explains, when Observable is false, why the content
+	// is not claimed. It never says the catalog is absent — that is a
+	// different fact, carried by Found.
+	Unobservable string
 	// Found reports that the referenced catalog was observed.
 	Found bool
 	// Images is the bounded list the catalog offers, major-ascending.
@@ -1150,6 +1154,10 @@ type CatalogImageRowView struct {
 	Current bool
 }
 
+// clusterCatalogKind is the kind a Cluster names when it draws its image
+// from a cluster-scoped catalog.
+const clusterCatalogKind = "ClusterImageCatalog"
+
 // buildImageCatalogView resolves the cluster's catalog reference against
 // the observed catalogs. Resolution happens here rather than in the
 // source because the reference lives on the Cluster and can change
@@ -1166,16 +1174,30 @@ func buildImageCatalogView(snap observe.ImageCatalogsSnapshot, ref *observe.Imag
 	view.Kind = orUnknown(ref.Kind)
 	view.Name = orUnknown(ref.Name)
 	view.Major = strconv.Itoa(ref.Major)
-	// Only the namespaced kind is within this console's authority. A
-	// cluster-scoped catalog is named honestly and its content is not
-	// claimed, rather than being reported as missing.
-	view.Observable = ref.Kind == "ImageCatalog"
-	if !view.Observable {
-		return view
+
+	var catalog observe.ImageCatalogFacts
+	var found bool
+	if ref.Kind == clusterCatalogKind {
+		// Cluster-scoped: outside the namespaced Role, so it is read only
+		// when the deployment opted in. Each way the lookup can decline
+		// is stated, and none of them claims the catalog is absent unless
+		// the API server said so.
+		switch snap.ClusterCatalogState {
+		case observe.ClusterCatalogPresent:
+			view.Observable, catalog, found = true, snap.ClusterCatalog, true
+		case observe.ClusterCatalogAbsent:
+			view.Observable = true
+		case observe.ClusterCatalogDisabled:
+			view.Unobservable = "this deployment does not grant the cluster-scoped read"
+		default:
+			view.Unobservable = "the cluster-scoped catalog could not be read"
+		}
+	} else {
+		view.Observable = true
+		catalog, found = snap.Catalog(ref.Name)
 	}
-	catalog, found := snap.Catalog(ref.Name)
 	view.Found = found
-	if !found {
+	if !view.Observable || !found {
 		return view
 	}
 	view.Truncated = catalog.ImagesTruncated

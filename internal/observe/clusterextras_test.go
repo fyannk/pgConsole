@@ -53,7 +53,7 @@ func TestImageCatalogSnapshotResolvesByName(t *testing.T) {
 	store.publish([]ImageCatalogFacts{
 		{Name: "postgres", UID: "u1"},
 		{Name: "postgis", UID: "u2"},
-	}, time.Unix(1000, 0), false)
+	}, ImageCatalogFacts{}, ClusterCatalogNotReferenced, time.Unix(1000, 0), false)
 
 	snap, _ := store.CurrentImageCatalogs()
 	if snap.Catalogs[0].Name != "postgis" {
@@ -76,7 +76,7 @@ func TestImageCatalogStoreBoundsAndFlagsTruncation(t *testing.T) {
 		catalogs[i] = ImageCatalogFacts{Name: string(rune('a'+i%26)) + string(rune('a'+i/26)), UID: "u"}
 	}
 	store := NewImageCatalogStore()
-	store.publish(catalogs, time.Unix(1000, 0), false)
+	store.publish(catalogs, ImageCatalogFacts{}, ClusterCatalogNotReferenced, time.Unix(1000, 0), false)
 
 	snap, _ := store.CurrentImageCatalogs()
 	if len(snap.Catalogs) != MaxImageCatalogs || !snap.Truncated {

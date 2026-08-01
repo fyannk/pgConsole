@@ -98,13 +98,23 @@ Consequences that constrain every design decision here:
    (`none < view < poweruser < dba`) to decide which routes above the
    read-only baseline a request may reach. This gating never widens what the
    ServiceAccount can do. The console performs **no capability probing of
-   its own**: there is no SubjectAccessReview, no cluster-scoped grant, and
-   nothing cached — the level is trustworthy only because the deployment
-   confines the console's ingress to that proxy. A missing, empty, or
-   unrecognized level reaches only the baseline; `ALLOW_OPERATIONS=false`
-   removes the write surface regardless of any asserted level; the Role
-   stays fully namespaced in every mode. Two audiences needing different
+   its own**: there is no SubjectAccessReview and nothing cached — the
+   level is trustworthy only because the deployment confines the console's
+   ingress to that proxy. A missing, empty, or unrecognized level reaches
+   only the baseline; `ALLOW_OPERATIONS=false` removes the write surface
+   regardless of any asserted level. Two audiences needing different
    Role-level authority means two deployments with different Roles.
+
+   The Role is namespaced in every mode but one, and that exception is
+   deliberately narrow. `ALLOW_CLUSTER_CATALOGS=true` plus the separate
+   `deploy/cluster-catalog-role.yaml` grants `get` — never `list`, never
+   `watch` — on `clusterimagecatalogs`, because a Cluster may draw its
+   image from a cluster-scoped catalog and the console can otherwise see
+   the reference but not its content. Declining the grant costs nothing:
+   the panel reports that the content was not read, and never that the
+   catalog is absent. `hack/check-readonly.sh` enforces that no other
+   manifest contains a ClusterRole and that this one grants nothing
+   beyond that get. Any further cluster-scoped authority is a non-goal.
 
 ## Hard rules (violating any of these is a bug)
 
@@ -121,7 +131,10 @@ Consequences that constrain every design decision here:
    nothing displayed may require secret material.
 4. **One cluster, one namespace, one trust domain.** The target cluster name
    and namespace are fixed configuration. Every list/watch is
-   namespace-scoped and filtered to that cluster's objects. Note that RBAC
+   namespace-scoped and filtered to that cluster's objects; the single
+   exception is the opt-in `clusterimagecatalogs` **get** described above,
+   which is a get precisely so that nothing cluster-wide is ever
+   enumerated. Note that RBAC
    cannot pin `list`/`watch` by `resourceNames`, so the namespace boundary
    plus application-side selection is the honest scope for listing — and pod
    labels are a *selection* mechanism, never a security boundary.
