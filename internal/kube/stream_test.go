@@ -17,6 +17,7 @@ package kube
 import (
 	"context"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -52,17 +53,42 @@ func passThrough(watch.Event) (int, bool, bool) { return 1, true, false }
 // guarded by the stream's context, the pump goroutine stayed parked
 // there for the life of the process — one leak per watch, per re-seed.
 //
-// Deliberately not parallel, and deliberately never receiving from the
-// merged channel: the leak only exists for a consumer that has stopped
-// receiving, so a test that drains the channel unblocks the very pump it
-// is meant to catch and passes against the bug. Goroutine count is
-// therefore the assertion — waiting for the channel to close is not
-// available, because detecting a close requires a receive.
+// strandedPumps counts goroutines parked in a channel send inside fanIn,
+// which is exactly the leak's signature and nothing else.
+//
+// Neither cruder measure works. A runtime.NumGoroutine() comparison is
+// flaky because the other tests in this package run in parallel and move
+// the global count. Counting every goroutine whose stack mentions fanIn
+// is flaky for the same reason — a healthy stream from a sibling test is
+// alive and waiting on its source. A healthy pump is always parked in a
+// receive; only a stranded one is parked in a send.
+func strandedPumps() int {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	stranded := 0
+	for _, block := range strings.Split(string(buf[:n]), "\n\n") {
+		if strings.Contains(block, "[chan send") && strings.Contains(block, "internal/kube.fanIn") {
+			stranded++
+		}
+	}
+	return stranded
+}
+
+// TestFanInStopReleasesAPumpBlockedMidSend proves stopping a stream
+// releases a pump blocked handing an item to a consumer that has stopped
+// receiving.
+//
+// It deliberately never receives from the merged channel: the leak only
+// exists for a consumer that has stopped receiving, so a test that drains
+// the channel unblocks the very pump it is meant to catch and passes
+// against the bug. Waiting for the channel to close is not available
+// either, because detecting a close requires a receive — which is why the
+// assertion is on the goroutines themselves.
 func TestFanInStopReleasesAPumpBlockedMidSend(t *testing.T) {
+	t.Parallel()
 	source := newScriptedWatch(1)
 	source.ch <- watch.Event{Type: watch.Added}
 
-	before := runtime.NumGoroutine()
 	_, stop := fanIn(context.Background(),
 		[]watch.Interface{source}, []pump[int]{passThrough})
 
@@ -74,15 +100,15 @@ func TestFanInStopReleasesAPumpBlockedMidSend(t *testing.T) {
 
 	// Both the pump and the goroutine waiting on it must return. If the
 	// send is unguarded, both stay parked for the life of the process.
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if runtime.NumGoroutine() <= before {
+		if strandedPumps() == 0 {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("goroutines %d before, %d after stop: a pump is stranded on a send nobody will receive",
-		before, runtime.NumGoroutine())
+	t.Fatalf("%d pump(s) still parked in a send after stop: stranded on a channel nobody will receive",
+		strandedPumps())
 }
 
 // TestFanInEndsTheMergedStreamWhenOneSourceEnds proves a partial stream

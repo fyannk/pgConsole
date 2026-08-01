@@ -15,6 +15,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -40,10 +41,73 @@ type TopologyView struct {
 	Edges []TopoEdge
 	// Caption states what is observed versus standard wiring.
 	Caption string
+	// Graph is the same diagram with the layout removed: which boxes
+	// exist, which tier each sits in, and what connects to what.
+	//
+	// The geometry above stays the served state, so the diagram renders
+	// without a single line of script and the enhancement layer is
+	// exactly that — an enhancement. When it runs it re-lays the diagram
+	// out from this graph, which lets boxes and edge labels push each
+	// other apart instead of sitting where a fixed column put them.
+	Graph TopoGraph
+}
+
+// TopoGraph is the wiring diagram as a graph rather than a drawing.
+type TopoGraph struct {
+	// Nodes are the boxes, each pinned to a tier on the horizontal axis.
+	Nodes []TopoGraphNode `json:"nodes"`
+	// Links are the flows between them.
+	Links []TopoGraphLink `json:"links"`
+}
+
+// TopoGraphNode is one box, without a position.
+type TopoGraphNode struct {
+	// ID is the link endpoint identifier.
+	ID string `json:"id"`
+	// Layer is the tier: applications, endpoints, servers, storage.
+	Layer int `json:"layer"`
+	// Cls is the CSS treatment, matching TopoNode.Kind.
+	Cls string `json:"cls"`
+	// Label, Sub and Disk are the box's lines of text.
+	Label string `json:"label"`
+	Sub   string `json:"sub,omitempty"`
+	Disk  string `json:"disk,omitempty"`
+	// State is the health token, empty for infrastructure nodes.
+	State string `json:"state,omitempty"`
+	// W and H are the box extent; the layout decides only x and y.
+	W int `json:"w,omitempty"`
+	H int `json:"h,omitempty"`
+}
+
+// TopoGraphLink is one flow.
+type TopoGraphLink struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Kind   string `json:"kind"`
+	Label  string `json:"label,omitempty"`
+}
+
+// GraphJSON renders the graph for the enhancement layer.
+//
+// It returns a plain string, and the template puts it in an attribute
+// rather than a script block. That keeps html/template's contextual
+// escaping in charge: no template.JS conversion, so no place where the
+// safety rests on this function having reasoned correctly about which
+// characters json.Marshal escapes.
+func (v TopologyView) GraphJSON() (string, error) {
+	raw, err := json.Marshal(v.Graph)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 // TopoNode is one box in the diagram.
 type TopoNode struct {
+	// ID names the box for the graph's links. It never reaches the SVG.
+	ID string
+	// Layer is the tier the box sits in, for the re-layout.
+	Layer int
 	// Kind selects the CSS treatment: apps, endpoint, primary, replica,
 	// storage, snapshot.
 	Kind string
@@ -123,24 +187,27 @@ func buildTopology(p *Page) *TopologyView {
 	for i, s := range servers {
 		s.X, s.W, s.H = topoColSrv, topoWSrv, topoSrvH
 		s.Y = srvTop + i*(topoSrvH+topoSrvGap)
+		s.ID, s.Layer = fmt.Sprintf("srv-%d", i), 2
 		serverNodes = append(serverNodes, s)
 	}
 
 	// Infrastructure nodes: apps, the two endpoints, and whatever storage
 	// is actually configured.
 	head := []TopoNode{
-		{Kind: "apps", Label: "Your applications", Sub: "clients that connect",
+		{ID: "apps", Layer: 0, Kind: "apps", Label: "Your applications", Sub: "clients that connect",
 			X: topoColApps, Y: mid - 30, W: topoWApps, H: 60},
-		{Kind: "endpoint", Label: "Write endpoint", Sub: p.ClusterName + "-rw",
+		{ID: "rw", Layer: 1, Kind: "endpoint", Label: "Write endpoint", Sub: p.ClusterName + "-rw",
 			X: topoColSvc, Y: mid - 58, W: topoWSvc, H: 48},
-		{Kind: "endpoint", Label: "Read endpoint", Sub: p.ClusterName + "-ro",
+		{ID: "ro", Layer: 1, Kind: "endpoint", Label: "Read endpoint", Sub: p.ClusterName + "-ro",
 			X: topoColSvc, Y: mid + 10, W: topoWSvc, H: 48},
 	}
 	store, snapshot := topoStorage(p, mid)
 	if store != nil {
+		store.ID, store.Layer = "store", 3
 		head = append(head, *store)
 	}
 	if snapshot != nil {
+		snapshot.ID, snapshot.Layer = "snapshot", 3
 		head = append(head, *snapshot)
 	}
 
@@ -165,24 +232,38 @@ func buildTopology(p *Page) *TopologyView {
 
 	// Flows. Apps reach the two doors; the doors reach the servers; the
 	// primary copies to the replicas and streams backups to storage.
-	view.Edges = append(view.Edges,
-		edge("write", "writes", apps, rw),
-		edge("read", "reads", apps, ro),
-	)
+	// link draws the flow and records it in the graph in one step, so the
+	// served drawing and the graph the enhancement re-lays out can never
+	// describe different diagrams.
+	link := func(kind, label string, from, to TopoNode) {
+		view.Edges = append(view.Edges, edge(kind, label, from, to))
+		view.Graph.Links = append(view.Graph.Links,
+			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind, Label: label})
+	}
+
+	link("write", "writes", apps, rw)
+	link("read", "reads", apps, ro)
 	if primary != nil {
-		view.Edges = append(view.Edges, edge("write", "", rw, *primary))
+		link("write", "", rw, *primary)
 	}
 	for _, r := range replicas {
-		view.Edges = append(view.Edges, edge("read", "", ro, *r))
+		link("read", "", ro, *r)
 		if primary != nil {
-			view.Edges = append(view.Edges, edge("replicate", "", *primary, *r))
+			link("replicate", "", *primary, *r)
 		}
 	}
 	if storeN != nil && primary != nil {
-		view.Edges = append(view.Edges, edge("archive", "continuous backup", *primary, *storeN))
+		link("archive", "continuous backup", *primary, *storeN)
 	}
 	if snapshotN != nil && primary != nil {
-		view.Edges = append(view.Edges, edge("archive", "snapshots", *primary, *snapshotN))
+		link("archive", "snapshots", *primary, *snapshotN)
+	}
+
+	for _, n := range view.Nodes {
+		view.Graph.Nodes = append(view.Graph.Nodes, TopoGraphNode{
+			ID: n.ID, Layer: n.Layer, Cls: n.Kind, Label: n.Label,
+			Sub: n.Sub, Disk: n.Disk, State: n.State, W: n.W, H: n.H,
+		})
 	}
 
 	// The caption states what is observed versus fixed wiring, and only

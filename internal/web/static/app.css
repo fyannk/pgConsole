@@ -880,7 +880,11 @@ h2.section-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: 
    below legibility. */
 .topo-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: -0.01em; margin: 0 0 var(--space-3); }
 .topo-scroll { -webkit-overflow-scrolling: touch; overflow-x: auto; }
-svg.topo { display: block; height: auto; min-width: 600px; width: 100%; }
+/* The viewBox is the server's fixed geometry until the enhancement layer
+   refits it to the settled layout, so the drawing adapts to any width it
+   is given. The floor exists only to stop the type going illegible on a
+   phone, where the scroll shell then earns its keep. */
+svg.topo { display: block; height: auto; min-width: 420px; width: 100%; }
 
 .topo text { font-family: var(--font-ui); }
 .topo-label { fill: var(--text); font-size: 13px; font-weight: 600; }

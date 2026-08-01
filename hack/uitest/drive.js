@@ -101,11 +101,29 @@ async function checkEnhancement(browser) {
   const version = await page.evaluate(() => (window.Alpine || {}).version || '');
   check('Alpine started under script-src self', version !== '', `version ${version || 'absent'}`);
 
-  const toolsVisible = await page.locator('.table-tools').first().isVisible();
-  check('enhancement controls revealed after init', toolsVisible);
-
   const others = errors.filter((e) => !/Content Security Policy|Refused to/i.test(e));
   check('no console errors or failed requests', others.length === 0, others.slice(0, 4).join(' | '));
+
+  // The wiring diagram lives on the Overview, so it is checked before
+  // moving on to the screens that carry the tables.
+  const topo = await page.evaluate(() => {
+    const svg = document.querySelector('svg.topo');
+    if (!svg) return { layout: 'missing', boxes: 0, dup: 0 };
+    const boxes = svg.querySelectorAll('.topo-node').length;
+    const ids = new Set([...svg.querySelectorAll('.topo-node .topo-label')].map((n) => n.textContent));
+    return { layout: svg.getAttribute('data-layout'), boxes, dup: boxes - ids.size };
+  });
+  check('wiring diagram is re-laid out when the enhancement runs',
+    topo.layout === 'force' && topo.boxes > 0, `layout ${topo.layout}, ${topo.boxes} boxes`);
+  // Appending instead of replacing would double every box.
+  check('re-layout replaces the served drawing rather than adding to it',
+    topo.dup === 0, `${topo.dup} duplicated boxes`);
+
+  // The pod roster is its own screen since the shell rebuild.
+  await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'networkidle' });
+
+  const toolsVisible = await page.locator('.table-tools').first().isVisible();
+  check('enhancement controls revealed after init', toolsVisible);
 
   // Filter.
   const search = page.locator('section[data-panel="pods"] .table-tools input[type="search"]');
@@ -135,7 +153,8 @@ async function checkEnhancement(browser) {
   check('sorted header marked for the stylesheet',
     (await nameHeader.getAttribute('data-sort')) === 'desc');
 
-  // Collapse.
+  // Collapse, on the events screen.
+  await page.goto(new URL('/cluster/events', STATES.healthy).toString(), { waitUntil: 'networkidle' });
   const toggle = page.locator('section[data-panel="events"] .panel-toggle');
   const body = page.locator('section[data-panel="events"] .panel-body');
   const before = await body.isVisible();
@@ -200,6 +219,24 @@ async function checkNoScript(browser) {
   const page = await ctx.newPage();
   await page.goto(STATES.healthy, { waitUntil: 'domcontentloaded' });
 
+  // The wiring diagram is served drawn. The force re-layout is an
+  // enhancement, so with script off the boxes and flows must still be
+  // there — an empty <svg> waiting to be filled would mean the Overview
+  // silently loses its diagram for anyone without JavaScript.
+  const topoNoJs = await page.evaluate(() => {
+    const svg = document.querySelector('svg.topo');
+    if (!svg) return { boxes: -1, edges: -1, layout: 'missing' };
+    return {
+      boxes: svg.querySelectorAll('.topo-node').length,
+      edges: svg.querySelectorAll('.topo-edge').length,
+      layout: svg.getAttribute('data-layout') || 'server',
+    };
+  });
+  check('wiring diagram is drawn without JavaScript',
+    topoNoJs.boxes > 0 && topoNoJs.edges > 0 && topoNoJs.layout === 'server',
+    `${topoNoJs.boxes} boxes, ${topoNoJs.edges} flows, layout ${topoNoJs.layout}`);
+
+  await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'domcontentloaded' });
   check('panel bodies visible without JavaScript',
     await page.locator('section[data-panel="pods"] .panel-body').isVisible());
   const rows = await page.locator('section[data-panel="pods"] table.pods tbody tr').count();
@@ -211,6 +248,7 @@ async function checkNoScript(browser) {
 
   const state = await page.locator('dl.target dd[data-state]').innerText();
   check('state word present without JavaScript', /current/.test(state), state);
+
 
   // The topbar snapshot must carry its state hue as well as its word.
   // `dl.target dd` outranks the bare [data-state] tokens on specificity,
@@ -281,6 +319,14 @@ async function checkResponsive(browser) {
     const overflow = await page.evaluate(() =>
       document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
     check(`no horizontal page overflow at ${width}px`, !overflow);
+
+    // The table checks below need a screen that carries one; the
+    // Overview stopped being that screen with the shell rebuild.
+    await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'networkidle' });
+    await page.waitForTimeout(200);
+    const podsOverflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+    check(`no horizontal page overflow on the pod roster at ${width}px`, !podsOverflow);
 
     // Guards the specific regression that shredded every table value
     // into single characters at narrow widths. `overflow-wrap: anywhere`

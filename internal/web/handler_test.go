@@ -17,6 +17,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"html"
+	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1286,5 +1289,100 @@ func TestDatabasesDistinguishesNotObservedFromNone(t *testing.T) {
 	}
 	if strings.Contains(body, "No declared databases") {
 		t.Error("an absent snapshot rendered as an observed-empty set")
+	}
+}
+
+// TestTopologyRendersWithoutScriptAndCarriesItsGraph proves the wiring
+// diagram is served drawn, not assembled in the browser. The re-layout
+// is an enhancement: the boxes, the flows and the caption must all be in
+// the served HTML, and the graph the enhancement reads must describe the
+// same diagram the server drew.
+func TestTopologyRendersWithoutScriptAndCarriesItsGraph(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, fullPage(), kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/").Body.String()
+
+	// The served drawing: real geometry, not an empty frame for a script
+	// to fill.
+	for _, want := range []string{`<svg class="topo"`, `class="topo-node`, `class="topo-edge`, `<rect x=`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("served diagram misses %q — the drawing depends on script", want)
+		}
+	}
+
+	// The graph rides in an attribute, so html/template's contextual
+	// escaping stays in charge of it.
+	if !strings.Contains(body, `data-topo="`) {
+		t.Fatal("the diagram carries no graph for the enhancement layer")
+	}
+	if !strings.Contains(body, `<script src="/static/topology-force.js" defer></script>`) {
+		t.Error("the re-layout script is not loaded")
+	}
+
+	raw := body[strings.Index(body, `data-topo="`)+len(`data-topo="`):]
+	raw = html.UnescapeString(raw[:strings.Index(raw, `"`)])
+	var graph TopoGraph
+	if err := json.Unmarshal([]byte(raw), &graph); err != nil {
+		t.Fatalf("graph is not valid JSON after unescaping: %v", err)
+	}
+	if len(graph.Nodes) == 0 || len(graph.Links) == 0 {
+		t.Fatalf("graph is empty: %d nodes, %d links", len(graph.Nodes), len(graph.Links))
+	}
+
+	// Every link must name boxes that exist: a dangling endpoint would
+	// silently drop a flow once the enhancement redraws.
+	ids := map[string]bool{}
+	for _, n := range graph.Nodes {
+		if n.ID == "" {
+			t.Errorf("graph node %q has no id", n.Label)
+		}
+		ids[n.ID] = true
+	}
+	for _, l := range graph.Links {
+		if !ids[l.Source] || !ids[l.Target] {
+			t.Errorf("link %s -> %s names a box the graph does not carry", l.Source, l.Target)
+		}
+	}
+
+	// The graph and the served drawing must describe the same diagram —
+	// compared against the rendered SVG, so a divergence between what
+	// ships and what the enhancement redraws cannot hide behind the
+	// builder agreeing with itself.
+	if got, want := strings.Count(body, `class="topo-node`), len(graph.Nodes); got != want {
+		t.Errorf("the drawing has %d boxes, the graph has %d", got, want)
+	}
+	if got, want := strings.Count(body, `class="topo-edge`), len(graph.Links); got != want {
+		t.Errorf("the drawing has %d flows, the graph has %d", got, want)
+	}
+}
+
+// TestTopologyGraphEscapesHostileIdentifiers proves an identifier drawn
+// from cluster state cannot close the data block it is embedded in.
+// json.Marshal escapes the angle brackets; this is the test that says so
+// out loud, because the consequence of it not holding is script
+// injection on the Overview.
+func TestTopologyGraphEscapesHostileIdentifiers(t *testing.T) {
+	t.Parallel()
+	view := TopologyView{Graph: TopoGraph{
+		Nodes: []TopoGraphNode{{
+			ID:    "rw",
+			Label: "Write endpoint",
+			Sub:   `</script><script>alert(1)</script>`,
+		}},
+	}}
+	raw, err := view.GraphJSON()
+	if err != nil {
+		t.Fatalf("GraphJSON: %v", err)
+	}
+	// The value lands in an attribute, so the escaping that matters is
+	// the template's. Render it the way the page does and confirm the
+	// quote cannot terminate the attribute.
+	var out bytes.Buffer
+	tpl := template.Must(template.New("t").Parse(`<svg data-topo="{{.}}"></svg>`))
+	if err := tpl.Execute(&out, raw); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(out.String(), `"><script>`) {
+		t.Fatalf("a hostile identifier broke out of the attribute: %s", out.String())
 	}
 }

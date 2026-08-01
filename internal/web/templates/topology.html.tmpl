@@ -11,7 +11,11 @@
 <section class="panel topo-panel">
   <h2 class="topo-title">How your database is wired</h2>
   <div class="topo-scroll">
-  <svg class="topo" viewBox="0 0 {{.Width}} {{.Height}}" role="img"
+  {{- /* data-topo carries the layout-free graph the enhancement layer
+         re-lays this diagram out from. An attribute, not a script block:
+         html/template escapes attribute values contextually, so a value
+         drawn from cluster state cannot break out of it. */}}
+  <svg class="topo" data-topo="{{.GraphJSON}}" viewBox="0 0 {{.Width}} {{.Height}}" role="img"
        aria-label="How applications reach the database and where the data is stored"
        preserveAspectRatio="xMidYMid meet">
     <defs>
@@ -40,5 +44,6 @@
   </svg>
   </div>
   <p class="origin">{{.Caption}}</p>
+  <script src="/static/topology-force.js" defer></script>
 </section>
 {{- end -}}
