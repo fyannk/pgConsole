@@ -59,6 +59,7 @@ cd "$ROOT"
 need() { command -v "$1" > /dev/null 2>&1 || { echo "design-bundle needs '$1' on PATH" >&2; exit 1; }; }
 need curl
 need sed
+need python3
 
 STAGE=$(mktemp -d)
 harness_pid=""
@@ -387,6 +388,14 @@ curl -fsS --max-time 15 -X POST \
   "http://127.0.0.1:$((PORT_BASE + HEALTHY))/access-requests/$req/approve" \
   | emit access-result.html Pages \
       "Access requests — decision" "Recorded decision and its attribution"
+
+# The foundations card is generated from the same run: its tokens come
+# from the real stylesheet and its component samples are lifted from the
+# pages just captured, so it cannot drift from the console the way a
+# hand-authored copy did.
+log "generating the foundations card"
+mkdir -p "$OUT/foundations"
+python3 "$HERE/design-foundations.py" internal/web/static/app.css "$OUT/pages" "$OUT/foundations/foundations.html"
 
 log "bundle written to $OUT/pages ($(find "$OUT/pages" -name '*.html' | wc -l | tr -d ' ') pages)"
 log "review it, then upload pages/** to the design project"
