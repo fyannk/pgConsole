@@ -43,10 +43,10 @@
 <header class="topbar">
   <h1>pgConsole</h1>
   <dl class="target">
-    <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
     {{- if .Namespace}}
     <dt>Namespace</dt><dd>{{.Namespace}}</dd>
     {{- end}}
+    <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
     {{- if .SnapshotState}}
     <dt>Snapshot</dt><dd data-state="{{stateToken .SnapshotState}}">{{.SnapshotState}}{{if .SnapshotAge}} — age {{.SnapshotAge}} (generation {{.Generation}}){{end}}</dd>
     {{- end}}
