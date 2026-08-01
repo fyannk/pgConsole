@@ -39,11 +39,15 @@ type probeFeed struct {
 	unrecognized map[int]bool
 
 	seedCalls   int
-	followCalls int
 	applied     []int
 	publishedAt []time.Time
 	staleCalls  int
 }
+
+// Asserted for the same reason the real feeds are in loop.go: these
+// methods are reached only through a type parameter, so nothing else
+// tells the analysis they are live.
+var _ feed[string, int] = (*probeFeed)(nil)
 
 func (p *probeFeed) op() string { return "probe" }
 
@@ -60,9 +64,8 @@ func (p *probeFeed) seed(context.Context) (string, error) {
 func (p *probeFeed) follow(_ context.Context, _ string) (<-chan int, func(), error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	i := p.followCalls
-	p.followCalls++
-	if i >= len(p.streams) {
+	i := p.seedCalls - 1
+	if i < 0 || i >= len(p.streams) {
 		// Nothing scripted: an already-closed stream ends this pass
 		// without blocking.
 		closed := make(chan int)

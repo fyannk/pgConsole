@@ -316,7 +316,7 @@ func TestClusterCatalogDeniedReadsAsUnknownNotAbsent(t *testing.T) {
 		t.Errorf("state = %q, want unknown when the read is refused", state.ClusterCatalogState)
 	}
 	// The namespaced half must be unaffected.
-	if state.Catalogs != nil && len(state.Catalogs) != 0 {
+	if len(state.Catalogs) != 0 {
 		t.Errorf("namespaced catalogs = %+v, want the namespaced listing unaffected", state.Catalogs)
 	}
 	if !strings.Contains(logs.String(), "forbidden") {

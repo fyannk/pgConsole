@@ -75,6 +75,26 @@ type feed[C any, E any] interface {
 	markStale()
 }
 
+// The feed implementations, asserted at compile time.
+//
+// This block is not ceremony. The methods below are unexported and are
+// reached only through a type parameter, so a static analysis cannot see
+// that anything calls them — without these assertions `unused` reports
+// every seed, follow, apply and publish in this package as dead code.
+// It also makes the doc comment above checkable: if a collector stops
+// satisfying the contract, this stops compiling.
+var (
+	_ feed[string, ClusterState]                        = (*Collector)(nil)
+	_ feed[string, PodEvent]                            = (*PodCollector)(nil)
+	_ feed[string, EventChange]                         = (*EventCollector)(nil)
+	_ feed[BackupCatalogState, BackupChange]            = (*BackupCollector)(nil)
+	_ feed[AccessReviewState, AccessRequestChange]      = (*AccessReviewCollector)(nil)
+	_ feed[string, PoolerChange]                        = (*PoolerCollector)(nil)
+	_ feed[string, FailoverQuorumState]                 = (*FailoverQuorumCollector)(nil)
+	_ feed[string, ImageCatalogChange]                  = (*ImageCatalogCollector)(nil)
+	_ feed[DatabaseObjectsState, DatabaseObjectsChange] = (*DatabaseObjectsCollector)(nil)
+)
+
 // loop is the shared collector engine: seed, publish, follow, fold and
 // republish per item, mark the snapshot stale on any contact loss, and
 // retry with a bounded exponential backoff. Every collector in this
