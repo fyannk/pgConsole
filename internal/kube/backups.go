@@ -17,7 +17,6 @@ package kube
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	apiv1 "github.com/cloudnative-pg/api/pkg/api/v1"
@@ -236,111 +235,66 @@ func (c *Client) WatchBackupCatalog(ctx context.Context, state observe.BackupCat
 		return nil, categorize("scheduled backups watch", err)
 	}
 
-	watchCtx, cancel := context.WithCancel(ctx)
-	w := &backupWatch{
-		client: c, ctx: watchCtx, cancel: cancel,
-		backups: backups, schedules: schedules, changes: make(chan observe.BackupChange),
+	items, stop := fanIn(ctx,
+		[]watch.Interface{backups, schedules},
+		[]pump[observe.BackupChange]{c.pumpBackup, c.pumpScheduledBackup})
+	return changeStream[observe.BackupChange]{stream[observe.BackupChange]{items: items, stop: stop}}, nil
+}
+
+// pumpBackup converts one Backup watch event. A backup belonging to
+// another cluster is skipped, not fatal: the watch is namespace-scoped
+// because RBAC cannot pin a watch by name, so other clusters' backups
+// are expected traffic rather than an error.
+func (c *Client) pumpBackup(event watch.Event) (observe.BackupChange, bool, bool) {
+	var change observe.BackupChange
+	obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
+	if !ok {
+		return change, false, true
 	}
-	w.wg.Add(2)
-	go w.pumpBackups()
-	go w.pumpSchedules()
-	go func() {
-		w.wg.Wait()
-		close(w.changes)
-	}()
-	return w, nil
-}
-
-type backupWatch struct {
-	client    *Client
-	ctx       context.Context
-	cancel    context.CancelFunc
-	backups   watch.Interface
-	schedules watch.Interface
-	changes   chan observe.BackupChange
-	once      sync.Once
-	wg        sync.WaitGroup
-}
-
-func (w *backupWatch) Changes() <-chan observe.BackupChange { return w.changes }
-
-func (w *backupWatch) Stop() {
-	w.once.Do(func() {
-		w.cancel()
-		w.backups.Stop()
-		w.schedules.Stop()
-	})
-}
-
-func (w *backupWatch) pumpBackups() {
-	defer w.wg.Done()
-	defer w.Stop()
-	for event := range w.backups.ResultChan() {
-		obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
-		if !ok {
-			return
-		}
-		facts, member, err := w.client.convertBackup(obj.UnstructuredContent())
-		if err != nil {
-			return
-		}
-		if !member {
-			continue
-		}
-		var change observe.BackupChange
-		switch event.Type {
-		case watch.Added, watch.Modified:
-			change.PutBackup = &facts
-		case watch.Deleted:
-			change.DeleteBackup = &observe.BackupDeletion{Name: facts.Name, UID: facts.UID}
-		case watch.Bookmark:
-			continue
-		default:
-			return
-		}
-		if !w.send(change) {
-			return
-		}
+	facts, member, err := c.convertBackup(obj.UnstructuredContent())
+	if err != nil {
+		return change, false, true
 	}
+	if !member {
+		return change, false, false
+	}
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		change.PutBackup = &facts
+	case watch.Deleted:
+		change.DeleteBackup = &observe.BackupDeletion{Name: facts.Name, UID: facts.UID}
+	case watch.Bookmark:
+		return change, false, false
+	default:
+		return change, false, true
+	}
+	return change, true, false
 }
 
-func (w *backupWatch) pumpSchedules() {
-	defer w.wg.Done()
-	defer w.Stop()
-	for event := range w.schedules.ResultChan() {
-		obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
-		if !ok {
-			return
-		}
-		facts, member, err := w.client.convertScheduledBackup(obj.UnstructuredContent())
-		if err != nil {
-			return
-		}
-		if !member {
-			continue
-		}
-		var change observe.BackupChange
-		switch event.Type {
-		case watch.Added, watch.Modified:
-			change.PutScheduledBackup = &facts
-		case watch.Deleted:
-			change.DeleteScheduledBackup = &observe.ScheduledBackupDeletion{Name: facts.Name, UID: facts.UID}
-		case watch.Bookmark:
-			continue
-		default:
-			return
-		}
-		if !w.send(change) {
-			return
-		}
+// pumpScheduledBackup converts one ScheduledBackup watch event, on the
+// same terms as pumpBackup.
+func (c *Client) pumpScheduledBackup(event watch.Event) (observe.BackupChange, bool, bool) {
+	var change observe.BackupChange
+	obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
+	if !ok {
+		return change, false, true
 	}
-}
-
-func (w *backupWatch) send(change observe.BackupChange) bool {
-	select {
-	case <-w.ctx.Done():
-		return false
-	case w.changes <- change:
-		return true
+	facts, member, err := c.convertScheduledBackup(obj.UnstructuredContent())
+	if err != nil {
+		return change, false, true
 	}
+	if !member {
+		return change, false, false
+	}
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		change.PutScheduledBackup = &facts
+	case watch.Deleted:
+		change.DeleteScheduledBackup = &observe.ScheduledBackupDeletion{Name: facts.Name, UID: facts.UID}
+	case watch.Bookmark:
+		return change, false, false
+	default:
+		return change, false, true
+	}
+	return change, true, false
 }

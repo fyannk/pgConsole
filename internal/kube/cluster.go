@@ -120,60 +120,39 @@ func (c *Client) Watch(ctx context.Context, fromResourceVersion string) (observe
 	if err != nil {
 		return nil, categorize("cluster watch", err)
 	}
-	cw := &clusterWatch{
-		inner:   w,
-		results: make(chan observe.ClusterState),
-	}
-	go cw.pump()
-	return cw, nil
+	items, stop := fanIn(ctx,
+		[]watch.Interface{w},
+		[]pump[observe.ClusterState]{pumpCluster})
+	return resultStream[observe.ClusterState]{stream[observe.ClusterState]{items: items, stop: stop}}, nil
 }
 
-// clusterWatch adapts a Kubernetes watch to observe.Watch, converting
-// each event to source-neutral facts.
-type clusterWatch struct {
-	inner   watch.Interface
-	results chan observe.ClusterState
-}
-
-// Results streams converted observations until the watch ends.
-func (w *clusterWatch) Results() <-chan observe.ClusterState {
-	return w.results
-}
-
-// Stop releases the underlying watch. The pump goroutine then observes
-// the closed event channel and exits.
-func (w *clusterWatch) Stop() {
-	w.inner.Stop()
-}
-
-// pump converts events until the underlying channel closes. A malformed
-// or error event ends the watch: the collector re-seeds with a fresh
-// fetch, which is the safe interpretation of an undecodable stream.
-func (w *clusterWatch) pump() {
-	defer close(w.results)
-	for ev := range w.inner.ResultChan() {
-		switch ev.Type {
-		case watch.Added, watch.Modified:
-			obj, ok := ev.Object.(interface{ UnstructuredContent() map[string]any })
-			if !ok {
-				return
-			}
-			facts, err := convertCluster(obj.UnstructuredContent())
-			if err != nil {
-				return
-			}
-			rv := ""
-			if meta, ok := ev.Object.(metav1.Object); ok {
-				rv = meta.GetResourceVersion()
-			}
-			w.results <- observe.ClusterState{Facts: facts, ResourceVersion: rv}
-		case watch.Deleted:
-			w.results <- observe.ClusterState{Facts: observe.ClusterFacts{Present: false}}
-		case watch.Bookmark:
-			continue
-		case watch.Error:
-			return
+// pumpCluster converts one Cluster watch event. A malformed or error
+// event ends the watch: the collector then re-seeds with a fresh get,
+// which is the safe interpretation of an undecodable stream. A deletion
+// is a complete observation in its own right — absence is a fact the
+// console renders, not an error.
+func pumpCluster(event watch.Event) (observe.ClusterState, bool, bool) {
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
+		if !ok {
+			return observe.ClusterState{}, false, true
 		}
+		facts, err := convertCluster(obj.UnstructuredContent())
+		if err != nil {
+			return observe.ClusterState{}, false, true
+		}
+		rv := ""
+		if meta, ok := event.Object.(metav1.Object); ok {
+			rv = meta.GetResourceVersion()
+		}
+		return observe.ClusterState{Facts: facts, ResourceVersion: rv}, true, false
+	case watch.Deleted:
+		return observe.ClusterState{Facts: observe.ClusterFacts{Present: false}}, true, false
+	case watch.Bookmark:
+		return observe.ClusterState{}, false, false
+	default:
+		return observe.ClusterState{}, false, true
 	}
 }
 

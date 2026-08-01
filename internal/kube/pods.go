@@ -93,63 +93,39 @@ func (c *Client) WatchPods(ctx context.Context, fromResourceVersion string) (obs
 	if err != nil {
 		return nil, categorize("pods watch", err)
 	}
-	pw := &podWatch{
-		client: c,
-		inner:  w,
-		events: make(chan observe.PodEvent),
+	items, stop := fanIn(ctx,
+		[]watch.Interface{w},
+		[]pump[observe.PodEvent]{c.pumpPod})
+	return eventStream[observe.PodEvent]{stream[observe.PodEvent]{items: items, stop: stop}}, nil
+}
+
+// pumpPod converts one pod watch event. A pod that fails membership
+// verification is excluded and logged; its deletion is still forwarded,
+// so a formerly excluded name can never linger in the retained set.
+func (c *Client) pumpPod(event watch.Event) (observe.PodEvent, bool, bool) {
+	obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
+	if !ok {
+		// A non-object carried by anything but an error event is not
+		// itself a reason to re-seed.
+		return observe.PodEvent{}, false, event.Type == watch.Error
 	}
-	go pw.pump()
-	return pw, nil
-}
-
-// podWatch adapts a Kubernetes pod watch to observe.PodWatch.
-type podWatch struct {
-	client *Client
-	inner  watch.Interface
-	events chan observe.PodEvent
-}
-
-// Events streams converted pod events until the watch ends.
-func (w *podWatch) Events() <-chan observe.PodEvent {
-	return w.events
-}
-
-// Stop releases the underlying watch.
-func (w *podWatch) Stop() {
-	w.inner.Stop()
-}
-
-// pump converts events until the underlying channel closes. A pod that
-// fails membership verification is excluded and logged; its deletion is
-// forwarded so a formerly excluded name can never linger.
-func (w *podWatch) pump() {
-	defer close(w.events)
-	for ev := range w.inner.ResultChan() {
-		obj, ok := ev.Object.(interface{ UnstructuredContent() map[string]any })
-		if !ok {
-			if ev.Type == watch.Error {
-				return
-			}
-			continue
+	facts, member, err := c.convertPod(obj.UnstructuredContent())
+	if err != nil {
+		return observe.PodEvent{}, false, true
+	}
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		if !member {
+			c.logExcludedPod(facts.Name)
+			return observe.PodEvent{}, false, false
 		}
-		facts, member, err := w.client.convertPod(obj.UnstructuredContent())
-		if err != nil {
-			return
-		}
-		switch ev.Type {
-		case watch.Added, watch.Modified:
-			if !member {
-				w.client.logExcludedPod(facts.Name)
-				continue
-			}
-			w.events <- observe.PodEvent{Put: &facts}
-		case watch.Deleted:
-			w.events <- observe.PodEvent{Delete: &observe.PodDeletion{Name: facts.Name, UID: facts.UID}}
-		case watch.Bookmark:
-			continue
-		case watch.Error:
-			return
-		}
+		return observe.PodEvent{Put: &facts}, true, false
+	case watch.Deleted:
+		return observe.PodEvent{Delete: &observe.PodDeletion{Name: facts.Name, UID: facts.UID}}, true, false
+	case watch.Bookmark:
+		return observe.PodEvent{}, false, false
+	default:
+		return observe.PodEvent{}, false, true
 	}
 }
 

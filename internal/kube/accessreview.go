@@ -175,43 +175,31 @@ func (c *Client) WatchAccessReview(ctx context.Context, state observe.AccessRevi
 	if err != nil {
 		return nil, categorize("access requests watch", err)
 	}
-	aw := &accessReviewWatch{inner: w, changes: make(chan observe.AccessRequestChange)}
-	go aw.pump()
-	return aw, nil
+	items, stop := fanIn(ctx,
+		[]watch.Interface{w},
+		[]pump[observe.AccessRequestChange]{pumpAccessRequest})
+	return changeStream[observe.AccessRequestChange]{stream[observe.AccessRequestChange]{items: items, stop: stop}}, nil
 }
 
-// accessReviewWatch adapts a Kubernetes watch to observe.AccessReviewWatch.
-type accessReviewWatch struct {
-	inner   watch.Interface
-	changes chan observe.AccessRequestChange
-}
-
-func (w *accessReviewWatch) Changes() <-chan observe.AccessRequestChange { return w.changes }
-
-func (w *accessReviewWatch) Stop() { w.inner.Stop() }
-
-// pump converts events until the underlying channel closes. A malformed
-// or error event ends the watch; the collector re-lists and republishes
-// only a complete generation.
-func (w *accessReviewWatch) pump() {
-	defer close(w.changes)
-	for ev := range w.inner.ResultChan() {
-		u, ok := ev.Object.(*unstructured.Unstructured)
-		if !ok {
-			return
-		}
-		facts := convertAccessRequest(u)
-		var change observe.AccessRequestChange
-		switch ev.Type {
-		case watch.Added, watch.Modified:
-			change.Put = &facts
-		case watch.Deleted:
-			change.Delete = &observe.AccessRequestDeletion{Name: facts.Name, UID: facts.UID}
-		case watch.Bookmark:
-			continue
-		default:
-			return
-		}
-		w.changes <- change
+// pumpAccessRequest converts one access-request watch event. A
+// malformed or error event ends the watch; the collector then re-lists
+// and republishes only a complete generation.
+func pumpAccessRequest(event watch.Event) (observe.AccessRequestChange, bool, bool) {
+	var change observe.AccessRequestChange
+	u, ok := event.Object.(*unstructured.Unstructured)
+	if !ok {
+		return change, false, true
 	}
+	facts := convertAccessRequest(u)
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		change.Put = &facts
+	case watch.Deleted:
+		change.Delete = &observe.AccessRequestDeletion{Name: facts.Name, UID: facts.UID}
+	case watch.Bookmark:
+		return change, false, false
+	default:
+		return change, false, true
+	}
+	return change, true, false
 }
