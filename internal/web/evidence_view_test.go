@@ -267,3 +267,65 @@ func TestHandlerIndexRepositoryAbsentWhenDisabled(t *testing.T) {
 		t.Error("disabled consumer still renders a repository section")
 	}
 }
+
+// TestEvidenceScreenNamesItsProducer proves the repository section says
+// whose report it is. The console renders ObjectStoreViewer's evidence
+// in full, but named the source nowhere — so the only place the product
+// appeared in the navigation was a link pointing away from the data,
+// and the screen read as if the data lived somewhere else.
+func TestEvidenceScreenNamesItsProducer(t *testing.T) {
+	t.Parallel()
+
+	// A populated report names the producer and points at the sibling
+	// tool for the objects themselves.
+	h := newEvidenceHandler(t, observedCluster(false), evidence.Status{
+		HasReport: true,
+		Snapshot:  evidence.Snapshot{Generation: 2, ObservedAt: testNow.Add(-time.Minute), Report: completeReport()},
+	})
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
+	if !strings.Contains(body, "ObjectStoreViewer") {
+		t.Error("the evidence screen does not say whose report it is")
+	}
+	if !strings.Contains(body, "never reads object storage") {
+		t.Error("the screen does not say why the console is not the source")
+	}
+
+	// A silent sidecar still names it, so a reader who never sees a
+	// report learns where one would come from.
+	h = newEvidenceHandler(t, observedCluster(false), evidence.Status{Failure: evidence.FailureUnavailable})
+	if body := get(t, h, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "ObjectStoreViewer has not answered") {
+		t.Error("the silent-sidecar card does not name the producer")
+	}
+}
+
+// TestSilentSidecarIsExplainedEvenWhenTheCrossCheckRenders proves the
+// repository section states its own absence independently of whether a
+// cross-check appeared below it.
+//
+// The two are different things: one is ObjectStoreViewer's report, the
+// other is a correlation between that report and the operator's catalog.
+// Guarding the explanation on the cross-check being absent meant that in
+// the ordinary case — backups observed, sidecar quiet — the page said
+// only "correlation unknown" and never named the reason or the producer.
+func TestSilentSidecarIsExplainedEvenWhenTheCrossCheckRenders(t *testing.T) {
+	t.Parallel()
+	src := observedCluster(false)
+	src.backups = observe.BackupsSnapshot{
+		Generation: 4, ObservedAt: testNow.Add(-time.Second),
+		Backups: []observe.BackupFacts{{Name: "plugin-backup", Phase: "completed", Method: "plugin"}},
+	}
+	src.backupsOK = true
+
+	h := newEvidenceHandler(t, src, evidence.Status{Failure: evidence.FailureUnavailable})
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
+
+	if !strings.Contains(body, "Backup cross-check") {
+		t.Fatal("the cross-check did not render, so this test proves nothing")
+	}
+	if !strings.Contains(body, "ObjectStoreViewer has not answered") {
+		t.Error("a silent sidecar is not explained when a cross-check renders beside it")
+	}
+	if !strings.Contains(body, "no successful sidecar contact yet (unavailable)") {
+		t.Error("the failure kind is not carried")
+	}
+}
