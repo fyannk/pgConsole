@@ -1218,9 +1218,14 @@ func buildClusterView(facts observe.ClusterFacts) *ClusterView {
 func buildLinks(links Links) []Link {
 	var out []Link
 	for _, l := range []Link{
-		{Label: "Repository evidence (ObjectStoreViewer)", URL: links.ObjectStoreViewer},
-		{Label: "SQL console (pgAdmin)", URL: links.PgAdmin},
-		{Label: "Metrics history (monitoring)", URL: links.Monitoring},
+		// The product name alone. These are sidebar entries beside
+		// Overview and Cluster, and the template appends "(new tab)" to
+		// build each title, so a parenthetical in the label itself lands
+		// as "SQL console (pgAdmin) (new tab)". The sibling tools are
+		// named the same way everywhere else in the console.
+		{Label: "ObjectStoreViewer", URL: links.ObjectStoreViewer},
+		{Label: "pgAdmin", URL: links.PgAdmin},
+		{Label: "Monitoring", URL: links.Monitoring},
 	} {
 		if l.URL != "" {
 			out = append(out, l)

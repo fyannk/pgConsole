@@ -322,10 +322,10 @@ func TestHandlerLinkOutsRenderOnlyWhenConfigured(t *testing.T) {
 	if !strings.Contains(body, `rel="noopener noreferrer"`) {
 		t.Error("link-out misses the rel attributes")
 	}
-	if strings.Contains(body, "Metrics history") {
+	if strings.Contains(body, "Monitoring") {
 		t.Error("unconfigured link-out rendered")
 	}
-	if strings.Contains(body, "SQL console") {
+	if strings.Contains(body, "pgAdmin") {
 		t.Error("unconfigured link-out rendered")
 	}
 }

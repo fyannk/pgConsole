@@ -123,6 +123,19 @@ YAML
   log "enabling the dba capabilities (operations, review; logs on by default)"
   kubectl -n payments set env deployment/pgconsole-orders \
     ALLOW_OPERATIONS=true ALLOW_ACCESS_REVIEW=true > /dev/null
+
+  # The sibling-tool link-outs are what put pgAdmin and its neighbours in
+  # the sidebar; buildLinks drops every unconfigured one, so a dev console
+  # without them renders a sidebar the design does not describe. These are
+  # the same placeholder hosts the UI harness uses (uiLinks in
+  # uiharness_test.go), so dev, the browser tests and the design project
+  # all show the same three entries. They are deliberately unreachable —
+  # this is about the console's own chrome, not about the sibling tools.
+  log "configuring the sibling-tool link-outs (ObjectStoreViewer, pgAdmin, monitoring)"
+  kubectl -n payments set env deployment/pgconsole-orders \
+    OBJECTSTOREVIEWER_URL=https://viewer.example.com/orders \
+    PGADMIN_URL=https://pgadmin.example.com \
+    MONITORING_URL=https://grafana.example.com/d/pg > /dev/null
   kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
 fi
 
