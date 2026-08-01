@@ -142,6 +142,8 @@ func uiPopulated(stale bool) staticSnapshots {
 			}},
 		},
 		catalogsOK: true,
+		declared:   declaredFixture(),
+		declaredOK: true,
 	}
 }
 
@@ -183,7 +185,7 @@ func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, autho
 		ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour,
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
 	}
-	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots,
+	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots,
 		Evidence: fakeEvidence{status: status}}
 	var executor OpsExecutor
 	var reviewer ReviewExecutor

@@ -50,6 +50,8 @@ type staticSnapshots struct {
 	quorumOK   bool
 	catalogs   observe.ImageCatalogsSnapshot
 	catalogsOK bool
+	declared   observe.DatabaseObjectsSnapshot
+	declaredOK bool
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {
@@ -80,6 +82,10 @@ func (s staticSnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, 
 	return s.catalogs, s.catalogsOK
 }
 
+func (s staticSnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool) {
+	return s.declared, s.declaredOK
+}
+
 // allSources is the snapshot-supplier bundle of the tests.
 type allSources interface {
 	SnapshotSource
@@ -89,6 +95,7 @@ type allSources interface {
 	PoolersSource
 	FailoverQuorumSource
 	ImageCatalogsSource
+	DatabaseObjectsSource
 }
 
 // newTestHandlerFull builds a Handler with explicit log configuration,
@@ -98,7 +105,7 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: allowLogs, LevelHeader: "X-PgToolBox-Level", Links: links},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
 		prober, tailer, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -114,7 +121,7 @@ func newLeveledHandler(t *testing.T, snapshots allSources) (*Handler, *bytes.Buf
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
@@ -1125,5 +1132,93 @@ func TestImageCatalogViewResolvesTheClusterReference(t *testing.T) {
 	v = buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ClusterImageCatalog", Name: "shared", Major: 17}, testNow)
 	if !v.Referenced || v.Observable || v.Found || len(v.Images) != 0 {
 		t.Errorf("view = %+v, want the reference shown and its content unclaimed", v)
+	}
+}
+
+// declaredFixture is a populated declarative snapshot covering all four
+// kinds and both reconciliation outcomes.
+func declaredFixture() observe.DatabaseObjectsSnapshot {
+	applied, failed := true, false
+	return observe.DatabaseObjectsSnapshot{
+		Generation: 4, ObservedAt: testNow.Add(-3 * time.Second),
+		Databases: []observe.DatabaseFacts{{
+			Name: "app-db", UID: "d1", Database: "app", Owner: "app", Encoding: "UTF8", Ensure: "present",
+			Declared: observe.Declared{Applied: &applied, ObservedGeneration: 2},
+		}},
+		Roles: []observe.DatabaseRoleFacts{{
+			Name: "app-role", UID: "r1", Role: "app", Superuser: true, ConnectionLimit: -1,
+			InRoles: []string{"reader"}, HasPasswordSecret: true,
+			Declared: observe.Declared{Applied: &failed, Message: "role could not be reconciled", ObservedGeneration: 1},
+		}},
+		Publications: []observe.PublicationFacts{{
+			Name: "app-pub", UID: "p1", Publication: "pub", Database: "app", AllTables: true,
+			Declared: observe.Declared{Applied: &applied, ObservedGeneration: 1},
+		}},
+		Subscriptions: []observe.SubscriptionFacts{{
+			Name: "app-sub", UID: "s1", Subscription: "sub", Database: "app",
+			Publication: "pub", ExternalCluster: "upstream",
+			Declared: observe.Declared{ObservedGeneration: 0},
+		}},
+	}
+}
+
+// TestDatabasesRendersDeclarationsAndVerdicts proves the section shows
+// what was declared alongside what the operator did with it, and that an
+// unreported verdict reads as unknown rather than as a failure — a
+// freshly created declaration has simply not been acted on yet.
+func TestDatabasesRendersDeclarationsAndVerdicts(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/databases").Body.String()
+
+	for _, want := range []string{
+		"app-db", "UTF8", "app-role", "superuser", "unlimited",
+		"app-pub", "all tables", "app-sub", "upstream",
+		"applied", "failed", "unknown", "operator-reported",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("databases page misses %q", want)
+		}
+	}
+}
+
+// TestDatabasesNeverRendersSecretMaterial proves the page reports that a
+// role references a password Secret without naming it. The console holds
+// no Secret permission and nothing it displays may need one.
+func TestDatabasesNeverRendersSecretMaterial(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/databases").Body.String()
+
+	if !strings.Contains(body, "from a referenced Secret") {
+		t.Error("the page does not say how the role authenticates")
+	}
+	for _, forbidden := range []string{"passwordSecret", "secretResourceVersion"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("the page rendered %q, which names Secret wiring", forbidden)
+		}
+	}
+}
+
+// TestDatabasesDistinguishesNotObservedFromNone proves an empty
+// declaration set and an absent snapshot are different claims.
+func TestDatabasesDistinguishesNotObservedFromNone(t *testing.T) {
+	t.Parallel()
+	empty := staticSnapshots{
+		declared:   observe.DatabaseObjectsSnapshot{Generation: 1, ObservedAt: testNow},
+		declaredOK: true,
+	}
+	h, _ := newTestHandler(t, empty, kube.FakeProber{}, Links{})
+	if body := get(t, h, http.MethodGet, "/databases").Body.String(); !strings.Contains(body, "No declared databases") {
+		t.Error("an observed-empty declaration set does not say the cluster declares none")
+	}
+
+	h, _ = newTestHandler(t, staticSnapshots{}, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/databases").Body.String()
+	if !strings.Contains(body, "No declaration snapshot yet") {
+		t.Error("an absent snapshot does not say the build makes no claim")
+	}
+	if strings.Contains(body, "No declared databases") {
+		t.Error("an absent snapshot rendered as an observed-empty set")
 	}
 }

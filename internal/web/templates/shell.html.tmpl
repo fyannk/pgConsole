@@ -29,6 +29,9 @@
 <symbol id="i-backups" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="4" rx="5" ry="2"></ellipse><path d="M3 4v8c0 1.1 2.24 2 5 2s5-.9 5-2V4"></path><path d="M3 8c0 1.1 2.24 2 5 2s5-.9 5-2"></path></symbol>
 <symbol id="i-objects" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4" rx="1"></rect><rect x="2" y="9.5" width="12" height="4" rx="1"></rect></symbol>
 <symbol id="i-evidence" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5 14 14"></path></symbol>
+<symbol id="i-databases" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="3.5" rx="5" ry="1.8"></ellipse><path d="M3 3.5v9c0 1 2.24 1.8 5 1.8s5-.8 5-1.8v-9"></path><path d="M3 8c0 1 2.24 1.8 5 1.8s5-.8 5-1.8"></path></symbol>
+<symbol id="i-roles" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6.5" r="2.5"></circle><path d="M10 6.5h4M12.5 6.5v2M14 6.5v1.5"></path><path d="M2 13.5v-.5A2.5 2.5 0 0 1 4.5 10.5h3A2.5 2.5 0 0 1 10 13v.5"></path></symbol>
+<symbol id="i-replication" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h9l-2-2M13.5 10.5h-9l2 2"></path></symbol>
 <symbol id="i-poolers" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="8" r="2.25"></circle><circle cx="12" cy="8" r="2.25"></circle><path d="M6.25 8h3.5"></path></symbol>
 <symbol id="i-logs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M2.5 7h11M2.5 10h7.5M2.5 13h5"></path></symbol>
 <symbol id="i-operations" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"></circle><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"></path></symbol>
@@ -64,6 +67,8 @@
 {{- /* sidebar renders a ShellView. Current keys: overview,
        cluster-status, cluster-pods, cluster-events, cluster-logs,
        backups-overview, backups-objects, backups-evidence,
+       databases-overview, databases-roles, databases-publications,
+       databases-subscriptions,
        poolers-overview, poolers-pods, poolers-logs, operations, access. */ -}}
 {{- define "sidebar" -}}
 <aside class="sidebar" x-data="sidebar" data-collapsed="false" aria-label="Console sections">
@@ -94,6 +99,16 @@
         <a class="sidebar-link" href="/backups"{{if eq .Current "backups-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-status"></use></svg><span class="sidebar-label">Overview</span></a>
         <a class="sidebar-link" href="/backups/objects"{{if eq .Current "backups-objects"}} aria-current="page"{{end}} title="Objects"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></a>
         <a class="sidebar-link" href="/backups/evidence"{{if eq .Current "backups-evidence"}} aria-current="page"{{end}} title="Evidence"><svg><use href="#i-evidence"></use></svg><span class="sidebar-label">Evidence</span></a>
+      </div>
+    </div>
+
+    <div class="sidebar-group">
+      <a class="sidebar-link sidebar-group-label" href="/databases" title="Databases"><svg><use href="#i-databases"></use></svg><span>Databases</span></a>
+      <div class="sidebar-sub">
+        <a class="sidebar-link" href="/databases"{{if eq .Current "databases-overview"}} aria-current="page"{{end}} title="Databases"><svg><use href="#i-databases"></use></svg><span class="sidebar-label">Databases</span></a>
+        <a class="sidebar-link" href="/databases/roles"{{if eq .Current "databases-roles"}} aria-current="page"{{end}} title="Roles"><svg><use href="#i-roles"></use></svg><span class="sidebar-label">Roles</span></a>
+        <a class="sidebar-link" href="/databases/publications"{{if eq .Current "databases-publications"}} aria-current="page"{{end}} title="Publications"><svg><use href="#i-replication"></use></svg><span class="sidebar-label">Publications</span></a>
+        <a class="sidebar-link" href="/databases/subscriptions"{{if eq .Current "databases-subscriptions"}} aria-current="page"{{end}} title="Subscriptions"><svg><use href="#i-replication"></use></svg><span class="sidebar-label">Subscriptions</span></a>
       </div>
     </div>
 

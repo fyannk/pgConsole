@@ -41,6 +41,13 @@ rules:
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["poolers"]
     verbs: ["get", "list", "watch"]
+  # Declared database objects: namespace-scoped, each selected by its
+  # spec.cluster.name. Only the declaration and the operator's
+  # reconciliation report are read; the console never connects to
+  # PostgreSQL and never reads the Secrets a role declaration may name.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["databases", "databaseroles", "publications", "subscriptions"]
+    verbs: ["get", "list", "watch"]
   # Failover quorum: one object named after the cluster, so the get is
   # pinned the same way the Cluster's is. RBAC cannot pin a watch by
   # name; the application uses a metadata.name field selector.

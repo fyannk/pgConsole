@@ -169,6 +169,10 @@ rewrite() {
     -e 's|"/backups/objects"|"backups-objects.html"|g' \
     -e 's|"/backups/evidence"|"backups-evidence.html"|g' \
     -e 's|"/backups"|"backups-overview.html"|g' \
+    -e 's|"/databases/roles"|"databases-roles.html"|g' \
+    -e 's|"/databases/publications"|"databases-publications.html"|g' \
+    -e 's|"/databases/subscriptions"|"databases-subscriptions.html"|g' \
+    -e 's|"/databases"|"databases-overview.html"|g' \
     -e 's|"/poolers/pods"|"poolers-pods.html"|g' \
     -e 's|"/poolers/logs"|"poolers-logs.html"|g' \
     -e 's|"/poolers"|"poolers-overview.html"|g' \
@@ -233,6 +237,14 @@ page $HEALTHY /backups/objects  "" "" backups-objects.html Pages \
   "Backups — objects" "Backup and ScheduledBackup resources"
 page $HEALTHY /backups/evidence "" "" backups-evidence.html Pages \
   "Backups — evidence" "Repository evidence and cross-check"
+page $HEALTHY /databases               "" "" databases-overview.html Pages \
+  "Databases — declared" "Declared databases and the operator's reconciliation verdict"
+page $HEALTHY /databases/roles         "" "" databases-roles.html Pages \
+  "Databases — roles" "Declared roles, their attributes and how they authenticate"
+page $HEALTHY /databases/publications  "" "" databases-publications.html Pages \
+  "Databases — publications" "Declared logical-replication publications"
+page $HEALTHY /databases/subscriptions "" "" databases-subscriptions.html Pages \
+  "Databases — subscriptions" "Declared logical-replication subscriptions"
 page $HEALTHY /poolers          "" "" poolers-overview.html Pages \
   "Poolers — overview" "Connection poolers the operator reports for this cluster"
 page $HEALTHY /poolers/pods     "" "" poolers-pods.html Pages \

@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -114,6 +115,11 @@ func startEnv(t *testing.T) *integrationEnv {
 			{
 				APIGroups: []string{"postgresql.cnpg.io"},
 				Resources: []string{"poolers"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"databases", "databaseroles", "publications", "subscriptions"},
 				Verbs:     []string{"get", "list", "watch"},
 			},
 			{
@@ -728,5 +734,94 @@ func TestImageCatalogCollectorAgainstRealAPIServer(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("catalog collector did not stop on cancellation")
+	}
+}
+
+// declaredObject is one declarative resource referencing the named
+// cluster.
+func declaredObject(kind, name, cluster string, spec map[string]any) *unstructured.Unstructured {
+	if spec == nil {
+		spec = map[string]any{}
+	}
+	spec["cluster"] = map[string]any{"name": cluster}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       kind,
+		"metadata":   map[string]any{"name": name, "namespace": "payments"},
+		"spec":       spec,
+	}}
+}
+
+// TestDatabaseObjectsAgainstRealAPIServer proves the four-way merged
+// watch works under the Role the deployment grants, that each kind
+// selects on its own spec.cluster.name, and that a change to any one of
+// the four reaches the store — the property a merged stream can quietly
+// lose if one pump is wired to the wrong watch.
+func TestDatabaseObjectsAgainstRealAPIServer(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	seed := []struct {
+		gvr schema.GroupVersionResource
+		obj *unstructured.Unstructured
+	}{
+		{databaseGVR, declaredObject("Database", "app-db", "orders", map[string]any{"name": "app", "owner": "app"})},
+		{databaseGVR, declaredObject("Database", "other-db", "other", map[string]any{"name": "other", "owner": "other"})},
+		{databaseRoleGVR, declaredObject("DatabaseRole", "app-role", "orders", map[string]any{"name": "app"})},
+		{publicationGVR, declaredObject("Publication", "app-pub", "orders", map[string]any{"name": "pub", "dbname": "app"})},
+	}
+	for _, s := range seed {
+		if _, err := ie.adminDyn.Resource(s.gvr).Namespace("payments").Create(ctx, s.obj, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create %s: %v", s.obj.GetName(), err)
+		}
+	}
+
+	store := observe.NewDatabaseObjectsStore()
+	collector := observe.NewDatabaseObjectsCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "seeded declarations, target only", func() bool {
+		snap, ok := store.CurrentDatabaseObjects()
+		return ok && len(snap.Databases) == 1 && snap.Databases[0].Name == "app-db" &&
+			len(snap.Roles) == 1 && len(snap.Publications) == 1
+	})
+
+	// A change on the fourth kind must reach the store through the same
+	// merged stream.
+	if _, err := ie.adminDyn.Resource(subscriptionGVR).Namespace("payments").Create(ctx,
+		declaredObject("Subscription", "app-sub", "orders",
+			map[string]any{"name": "sub", "dbname": "app", "publicationName": "pub", "externalClusterName": "upstream"}),
+		metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	waitFor(t, "watched subscription addition", func() bool {
+		snap, ok := store.CurrentDatabaseObjects()
+		return ok && len(snap.Subscriptions) == 1 && snap.Subscriptions[0].Name == "app-sub"
+	})
+
+	if err := ie.adminDyn.Resource(databaseGVR).Namespace("payments").Delete(ctx, "app-db", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("delete database: %v", err)
+	}
+	waitFor(t, "watched database removal", func() bool {
+		snap, ok := store.CurrentDatabaseObjects()
+		return ok && len(snap.Databases) == 0
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("declarative collector did not stop on cancellation")
 	}
 }

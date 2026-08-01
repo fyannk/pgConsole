@@ -76,7 +76,7 @@ func newReviewHandler(t *testing.T, source AccessReviewSource) (*Handler, *revie
 	}
 	exec := review.NewExecutor(w, csrf, reviewClock{}, logger)
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, LevelHeader: "X-PgToolBox-Level", AllowAccessReview: true},
-		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}, Poolers: staticSnapshots{}, FailoverQuorum: staticSnapshots{}, ImageCatalogs: staticSnapshots{}, AccessReview: source},
+		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}, Poolers: staticSnapshots{}, FailoverQuorum: staticSnapshots{}, ImageCatalogs: staticSnapshots{}, DatabaseObjects: staticSnapshots{}, AccessReview: source},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, exec, func() time.Time { return testNow }, logger)

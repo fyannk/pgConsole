@@ -1,0 +1,122 @@
+{{- /*
+  Declared database objects. Renders web.Page.Databases: the Database,
+  DatabaseRole, Publication and Subscription resources this cluster
+  declares, and what the operator reports it did with each.
+
+  Everything here is a declaration plus a reconciliation verdict. None of
+  it is read from PostgreSQL: pgConsole never connects to the database,
+  so a database's size, a role's effective privileges, and a
+  publication's replicated tables appear nowhere — those are pgAdmin's to
+  answer. A role's password Secret is reported as referenced and never
+  named, because the console holds no Secret permission.
+
+  The four lists share one snapshot and one freshness: they are four
+  views of the same observation, and separate freshness lines would let
+  one screen disagree with itself.
+*/ -}}
+{{template "page-head" "databases"}}
+{{template "shell-open" .Shell}}
+    {{- with .Databases}}
+    <section class="panel sectioned" id="databases" x-data="panel" data-panel="databases">
+      <div class="panel-head">
+        <h2>Declared objects</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
+
+      <h3 class="section-title">Databases</h3>
+      {{- if .Databases}}
+      <div class="table-scroll">
+      <table class="declared">
+        <caption>Database resources</caption>
+        <thead><tr><th>Resource</th><th>Database</th><th>Owner</th><th>Encoding</th><th>Ensure</th><th>Reconciliation</th></tr></thead>
+        <tbody>
+          {{- range .Databases}}
+          <tr>
+            <td>{{.Name}}</td><td>{{.Database}}</td><td>{{.Owner}}</td><td>{{.Encoding}}</td><td>{{.Ensure}}</td>
+            <td><span data-state="{{stateToken .Declared.State}}">{{.Declared.State}}</span>{{if .Declared.Message}} — {{.Declared.Message}}{{end}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <div class="empty"><strong>No declared databases</strong>This cluster declares no <code>Database</code> resources. Databases created directly in PostgreSQL are not declarations and are not shown here.</div>
+      {{- end}}
+
+      <h3 class="section-title">Roles</h3>
+      {{- if .Roles}}
+      <div class="table-scroll">
+      <table class="declared">
+        <caption>DatabaseRole resources</caption>
+        <thead><tr><th>Resource</th><th>Role</th><th>Attributes</th><th>Connections</th><th>Member of</th><th>Password</th><th>Valid until</th><th>Reconciliation</th></tr></thead>
+        <tbody>
+          {{- range .Roles}}
+          <tr>
+            <td>{{.Name}}</td><td>{{.Role}}</td><td>{{.Attributes}}</td><td>{{.ConnectionLimit}}</td>
+            <td>{{.InRoles}}</td><td>{{.Password}}</td><td>{{.ValidUntil}}</td>
+            <td><span data-state="{{stateToken .Declared.State}}">{{.Declared.State}}</span>{{if .Declared.Message}} — {{.Declared.Message}}{{end}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <div class="empty"><strong>No declared roles</strong>This cluster declares no <code>DatabaseRole</code> resources.</div>
+      {{- end}}
+
+      <h3 class="section-title">Publications</h3>
+      {{- if .Publications}}
+      <div class="table-scroll">
+      <table class="declared">
+        <caption>Publication resources</caption>
+        <thead><tr><th>Resource</th><th>Publication</th><th>Database</th><th>Target</th><th>Reconciliation</th></tr></thead>
+        <tbody>
+          {{- range .Publications}}
+          <tr>
+            <td>{{.Name}}</td><td>{{.Publication}}</td><td>{{.Database}}</td><td>{{.Target}}</td>
+            <td><span data-state="{{stateToken .Declared.State}}">{{.Declared.State}}</span>{{if .Declared.Message}} — {{.Declared.Message}}{{end}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <div class="empty"><strong>No declared publications</strong>This cluster declares no <code>Publication</code> resources for logical replication.</div>
+      {{- end}}
+
+      <h3 class="section-title">Subscriptions</h3>
+      {{- if .Subscriptions}}
+      <div class="table-scroll">
+      <table class="declared">
+        <caption>Subscription resources</caption>
+        <thead><tr><th>Resource</th><th>Subscription</th><th>Database</th><th>Publication</th><th>Source cluster</th><th>Reconciliation</th></tr></thead>
+        <tbody>
+          {{- range .Subscriptions}}
+          <tr>
+            <td>{{.Name}}</td><td>{{.Subscription}}</td><td>{{.Database}}</td><td>{{.Publication}}</td><td>{{.ExternalCluster}}</td>
+            <td><span data-state="{{stateToken .Declared.State}}">{{.Declared.State}}</span>{{if .Declared.Message}} — {{.Declared.Message}}{{end}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <div class="empty"><strong>No declared subscriptions</strong>This cluster declares no <code>Subscription</code> resources for logical replication.</div>
+      {{- end}}
+
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">More declared objects matched this cluster than the display bound; at least one list above is cut.</p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- else}}
+    <section class="panel">
+      <h2>Declared objects</h2>
+      <div class="empty"><strong>No declaration snapshot yet</strong>Nothing has been observed about declared databases, roles, publications or subscriptions, so this build makes no claim — neither that any exist nor that none do.</div>
+      <p class="origin">source: operator-reported</p>
+    </section>
+    {{- end}}
+{{template "shell-close"}}

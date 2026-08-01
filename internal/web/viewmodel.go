@@ -705,6 +705,9 @@ type Page struct {
 	Backups *BackupsView
 	// Poolers is the connection-pooler section, nil when never observed.
 	Poolers *PoolersView
+	// Databases is the declarative-objects section, nil when never
+	// observed.
+	Databases *DatabaseObjectsView
 	// Quorum is the failover-quorum panel, nil when never observed.
 	Quorum *FailoverQuorumView
 	// ImageCatalog is the resolved catalog panel, nil when never
@@ -759,6 +762,8 @@ type snapshots struct {
 	quorumOK        bool
 	catalogs        observe.ImageCatalogsSnapshot
 	catalogsOK      bool
+	declared        observe.DatabaseObjectsSnapshot
+	declaredOK      bool
 	evidence        evidence.Status
 	evidenceEnabled bool
 	window          time.Duration
@@ -802,6 +807,12 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 			Panel{Title: "Backups", Origin: OriginOperator, State: unknown, Detail: noSnapshot},
 			Panel{Title: "ObjectStore reference", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot},
 		)
+	}
+	if s.declaredOK {
+		page.Databases = buildDatabaseObjectsView(s.declared, now)
+	} else {
+		page.Panels = append(page.Panels,
+			Panel{Title: "Declared database objects", Origin: OriginOperator, State: unknown, Detail: noSnapshot})
 	}
 	if s.quorumOK {
 		page.Quorum = buildFailoverQuorumView(s.quorum, now)
@@ -859,6 +870,196 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 	page.Summary = buildSummary(&page)
 	page.Topology = buildTopology(&page)
 	return page
+}
+
+// DeclaredView is the reconciliation spine shared by every declarative
+// row: what was asked for, and what the operator reports it did.
+type DeclaredView struct {
+	// State is the reconciliation verdict in words: applied, failed, or
+	// unknown when the operator has not reported one. Unknown is not a
+	// failure — a freshly created declaration has simply not been acted
+	// on yet.
+	State string
+	// Message is the operator's reconciliation output, empty when none.
+	Message string
+	// Generation is the spec generation the operator last synchronized.
+	Generation string
+}
+
+// buildDeclaredView restates the operator's reconciliation report.
+func buildDeclaredView(d observe.Declared) DeclaredView {
+	view := DeclaredView{Message: d.Message, Generation: strconv.FormatInt(d.ObservedGeneration, 10)}
+	switch {
+	case d.Applied == nil:
+		view.State = unknown
+	case *d.Applied:
+		view.State = "applied"
+	default:
+		view.State = "failed"
+	}
+	return view
+}
+
+// DatabaseRowView is one declared database as displayed.
+type DatabaseRowView struct {
+	Name     string
+	Database string
+	Owner    string
+	Encoding string
+	Ensure   string
+	Declared DeclaredView
+}
+
+// DatabaseRoleRowView is one declared role as displayed. The privilege
+// columns are the declaration, never a reading of the cluster's
+// catalogs: pgConsole does not speak SQL.
+type DatabaseRoleRowView struct {
+	Name string
+	Role string
+	// Attributes is the declared privilege set in words, or "none".
+	Attributes string
+	// ConnectionLimit is the declared limit, or "unlimited".
+	ConnectionLimit string
+	// InRoles is the declared membership list, or "none".
+	InRoles string
+	// Password states how the role authenticates, without naming or
+	// reading any Secret.
+	Password string
+	// ValidUntil is the declared password expiry, or "no expiry".
+	ValidUntil string
+	Declared   DeclaredView
+}
+
+// PublicationRowView is one declared publication as displayed.
+type PublicationRowView struct {
+	Name        string
+	Publication string
+	Database    string
+	// Target is "all tables" or "selected objects". The objects
+	// themselves are database content and are not rendered.
+	Target   string
+	Declared DeclaredView
+}
+
+// SubscriptionRowView is one declared subscription as displayed.
+type SubscriptionRowView struct {
+	Name            string
+	Subscription    string
+	Database        string
+	Publication     string
+	ExternalCluster string
+	Declared        DeclaredView
+}
+
+// DatabaseObjectsView is the declarative-objects section: four lists of
+// the same kind of claim, sharing one freshness because they come from
+// one merged observation.
+type DatabaseObjectsView struct {
+	// Origin attributes every claim in this section.
+	Origin Origin
+	// Meta is the section's own freshness.
+	Meta SectionMeta
+	// Truncated reports that any list was cut at its bound.
+	Truncated     bool
+	Databases     []DatabaseRowView
+	Roles         []DatabaseRoleRowView
+	Publications  []PublicationRowView
+	Subscriptions []SubscriptionRowView
+}
+
+// buildDatabaseObjectsView converts the declarative snapshot into
+// bounded display rows.
+func buildDatabaseObjectsView(snap observe.DatabaseObjectsSnapshot, now time.Time) *DatabaseObjectsView {
+	view := &DatabaseObjectsView{
+		Origin:    OriginOperator,
+		Meta:      buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+		Truncated: snap.Truncated,
+	}
+	for _, d := range snap.Databases {
+		view.Databases = append(view.Databases, DatabaseRowView{
+			Name: d.Name, Database: orUnknown(d.Database), Owner: orUnknown(d.Owner),
+			Encoding: orUnknown(d.Encoding), Ensure: orUnknown(d.Ensure),
+			Declared: buildDeclaredView(d.Declared),
+		})
+	}
+	for _, r := range snap.Roles {
+		view.Roles = append(view.Roles, DatabaseRoleRowView{
+			Name: r.Name, Role: orUnknown(r.Role),
+			Attributes:      roleAttributes(r),
+			ConnectionLimit: connectionLimit(r.ConnectionLimit),
+			InRoles:         joinOrNone(r.InRoles),
+			Password:        rolePassword(r.HasPasswordSecret),
+			ValidUntil:      validUntil(r.ValidUntil),
+			Declared:        buildDeclaredView(r.Declared),
+		})
+	}
+	for _, p := range snap.Publications {
+		target := "selected objects"
+		if p.AllTables {
+			target = "all tables"
+		}
+		view.Publications = append(view.Publications, PublicationRowView{
+			Name: p.Name, Publication: orUnknown(p.Publication), Database: orUnknown(p.Database),
+			Target: target, Declared: buildDeclaredView(p.Declared),
+		})
+	}
+	for _, sub := range snap.Subscriptions {
+		view.Subscriptions = append(view.Subscriptions, SubscriptionRowView{
+			Name: sub.Name, Subscription: orUnknown(sub.Subscription), Database: orUnknown(sub.Database),
+			Publication: orUnknown(sub.Publication), ExternalCluster: orUnknown(sub.ExternalCluster),
+			Declared: buildDeclaredView(sub.Declared),
+		})
+	}
+	return view
+}
+
+// roleAttributes lists the declared privilege flags, or "none".
+func roleAttributes(r observe.DatabaseRoleFacts) string {
+	var set []string
+	if r.Superuser {
+		set = append(set, "superuser")
+	}
+	if r.CreateDB {
+		set = append(set, "createdb")
+	}
+	if r.CreateRole {
+		set = append(set, "createrole")
+	}
+	return joinOrNone(set)
+}
+
+// connectionLimit renders the declared limit; PostgreSQL treats a
+// negative limit as unlimited.
+func connectionLimit(limit int64) string {
+	if limit < 0 {
+		return "unlimited"
+	}
+	return strconv.FormatInt(limit, 10)
+}
+
+// rolePassword states how the role authenticates. It reports only that
+// a Secret is referenced — never its name, and never its content.
+func rolePassword(hasSecret bool) string {
+	if hasSecret {
+		return "from a referenced Secret"
+	}
+	return "not declared here"
+}
+
+// validUntil renders the declared password expiry.
+func validUntil(t *time.Time) string {
+	if t == nil {
+		return "no expiry"
+	}
+	return formatTime(t)
+}
+
+// joinOrNone renders a bounded list, or the word none.
+func joinOrNone(values []string) string {
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, ", ")
 }
 
 // FailoverQuorumView is the failover-quorum panel. Every value is

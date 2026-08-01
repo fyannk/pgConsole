@@ -91,6 +91,14 @@ type ImageCatalogsSource interface {
 	CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool)
 }
 
+// DatabaseObjectsSource supplies the current declarative-object
+// snapshot.
+type DatabaseObjectsSource interface {
+	// CurrentDatabaseObjects returns the snapshot and whether one
+	// exists.
+	CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -113,6 +121,8 @@ type Sources struct {
 	FailoverQuorum FailoverQuorumSource
 	// ImageCatalogs supplies the ImageCatalog snapshot.
 	ImageCatalogs ImageCatalogsSource
+	// DatabaseObjects supplies the declarative-object snapshot.
+	DatabaseObjects DatabaseObjectsSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -221,6 +231,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /backups", h.handleBackupsOverview)
 	mux.HandleFunc("GET /backups/objects", h.handleBackupsObjects)
 	mux.HandleFunc("GET /backups/evidence", h.handleBackupsEvidence)
+	mux.HandleFunc("GET /databases", h.handleDatabases("databases-overview"))
+	mux.HandleFunc("GET /databases/roles", h.handleDatabases("databases-roles"))
+	mux.HandleFunc("GET /databases/publications", h.handleDatabases("databases-publications"))
+	mux.HandleFunc("GET /databases/subscriptions", h.handleDatabases("databases-subscriptions"))
 	mux.HandleFunc("GET /poolers", h.handlePoolers("poolers-overview"))
 	mux.HandleFunc("GET /poolers/pods", h.handlePoolers("poolers-pods"))
 	mux.HandleFunc("GET /poolers/logs", h.handlePoolers("poolers-logs"))
@@ -295,6 +309,7 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 	s.poolers, s.poolersOK = h.sources.Poolers.CurrentPoolers()
 	s.quorum, s.quorumOK = h.sources.FailoverQuorum.CurrentFailoverQuorum()
 	s.catalogs, s.catalogsOK = h.sources.ImageCatalogs.CurrentImageCatalogs()
+	s.declared, s.declaredOK = h.sources.DatabaseObjects.CurrentDatabaseObjects()
 	if h.sources.Evidence != nil {
 		s.evidence = h.sources.Evidence.CurrentEvidence()
 		s.evidenceEnabled = true
@@ -366,6 +381,18 @@ func (h *Handler) handleBackupsObjects(w http.ResponseWriter, r *http.Request) {
 // handleBackupsEvidence renders the repository-evidence section.
 func (h *Handler) handleBackupsEvidence(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "backups-evidence", "backups-evidence.html.tmpl", h.assemble(r, "backups-evidence"))
+}
+
+// handleDatabases renders the declarative-objects section. The four
+// entries share one screen and one snapshot: they are four lists of the
+// same kind of claim — what was declared and what the operator did with
+// it — and giving each its own freshness would let one screen disagree
+// with itself about how current it is. The named key sets which sidebar
+// entry reads as current and which list the screen opens on.
+func (h *Handler) handleDatabases(current string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.renderPage(w, current, "databases.html.tmpl", h.assemble(r, current))
+	}
 }
 
 // handlePoolers renders the poolers section. The three entries share one
@@ -577,4 +604,9 @@ func (EmptySnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, b
 // CurrentImageCatalogs reports no image-catalog snapshot.
 func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
 	return observe.ImageCatalogsSnapshot{}, false
+}
+
+// CurrentDatabaseObjects reports no declarative-object snapshot.
+func (EmptySnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool) {
+	return observe.DatabaseObjectsSnapshot{}, false
 }

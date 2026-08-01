@@ -84,6 +84,9 @@ type Deps struct {
 	FailoverQuorumSource observe.FailoverQuorumSource
 	// ImageCatalogSource observes the namespace's ImageCatalog set.
 	ImageCatalogSource observe.ImageCatalogSource
+	// DatabaseObjectsSource observes the cluster's declared databases,
+	// roles, publications and subscriptions.
+	DatabaseObjectsSource observe.DatabaseObjectsSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
@@ -116,13 +119,14 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 
 	var runners []runner
 	sources := web.Sources{
-		Cluster:        web.EmptySnapshots{},
-		Pods:           web.EmptySnapshots{},
-		Events:         web.EmptySnapshots{},
-		Backups:        web.EmptySnapshots{},
-		Poolers:        web.EmptySnapshots{},
-		FailoverQuorum: web.EmptySnapshots{},
-		ImageCatalogs:  web.EmptySnapshots{},
+		Cluster:         web.EmptySnapshots{},
+		Pods:            web.EmptySnapshots{},
+		Events:          web.EmptySnapshots{},
+		Backups:         web.EmptySnapshots{},
+		Poolers:         web.EmptySnapshots{},
+		FailoverQuorum:  web.EmptySnapshots{},
+		ImageCatalogs:   web.EmptySnapshots{},
+		DatabaseObjects: web.EmptySnapshots{},
 	}
 	if deps.Source != nil {
 		store := observe.NewStore()
@@ -158,6 +162,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		catalogStore := observe.NewImageCatalogStore()
 		sources.ImageCatalogs = catalogStore
 		runners = append(runners, observe.NewImageCatalogCollector(deps.ImageCatalogSource, catalogStore, deps.Clock, logger).Run)
+	}
+	if deps.DatabaseObjectsSource != nil {
+		declaredStore := observe.NewDatabaseObjectsStore()
+		sources.DatabaseObjects = declaredStore
+		runners = append(runners, observe.NewDatabaseObjectsCollector(deps.DatabaseObjectsSource, declaredStore, deps.Clock, logger).Run)
 	}
 	if deps.EvidenceFetcher != nil {
 		evidenceStore := evidence.NewStore()

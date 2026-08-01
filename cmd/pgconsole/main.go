@@ -73,6 +73,7 @@ func run() error {
 		deps.PoolerSource = client
 		deps.FailoverQuorumSource = client
 		deps.ImageCatalogSource = client
+		deps.DatabaseObjectsSource = client
 		deps.LogTailer = client
 		deps.Prober = client.NewProber()
 		// The writer is passed only when operations are enabled: in
