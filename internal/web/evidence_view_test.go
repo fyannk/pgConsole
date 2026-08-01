@@ -113,7 +113,7 @@ func observedCluster(stale bool) staticSnapshots {
 	}
 }
 
-func TestHandlerIndexRendersRepositoryEvidence(t *testing.T) {
+func TestHandlerBackupEvidenceRendersRepositoryEvidence(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{
 		HasReport: true,
@@ -124,7 +124,7 @@ func TestHandlerIndexRendersRepositoryEvidence(t *testing.T) {
 		},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	for _, want := range []string{
 		"Repository evidence",
 		"sha256:" + strings.Repeat("ab", 32),
@@ -147,19 +147,22 @@ func TestHandlerIndexRendersRepositoryEvidence(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositoryUnknownWithoutContact(t *testing.T) {
+func TestHandlerBackupEvidenceUnknownWithoutContact(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{Failure: evidence.FailureUnavailable}
 	h := newEvidenceHandler(t, observedCluster(false), status)
 
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "Repository evidence") {
 		t.Error("enabled consumer without contact renders no repository panel")
 	}
 	if !strings.Contains(body, "no successful sidecar contact yet (unavailable)") {
 		t.Error("panel does not carry the failure kind")
 	}
-	if !strings.Contains(body, "Cluster in healthy state") {
+	// The independence of the two sources is the point: a silent sidecar
+	// must not take the operator-reported cluster section down with it,
+	// and that section is now its own screen.
+	if cluster := get(t, h, http.MethodGet, "/cluster/status").Body.String(); !strings.Contains(cluster, "Cluster in healthy state") {
 		t.Error("sidecar absence degraded the cluster section")
 	}
 	if rec := get(t, h, http.MethodGet, "/readyz"); rec.Code != http.StatusOK {
@@ -167,7 +170,7 @@ func TestHandlerIndexRepositoryUnknownWithoutContact(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositoryStaleRetentionVisible(t *testing.T) {
+func TestHandlerBackupEvidenceStaleRetentionVisible(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{
 		HasReport: true,
@@ -181,7 +184,7 @@ func TestHandlerIndexRepositoryStaleRetentionVisible(t *testing.T) {
 		},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "sidecar contact: stale") || !strings.Contains(body, "timeout") {
 		t.Error("stale contact line missing its state or failure kind")
 	}
@@ -190,7 +193,7 @@ func TestHandlerIndexRepositoryStaleRetentionVisible(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositorySidecarStalenessIsDistinct(t *testing.T) {
+func TestHandlerBackupEvidenceSidecarStalenessIsDistinct(t *testing.T) {
 	t.Parallel()
 	report := completeReport()
 	report.SourceStale = true
@@ -204,7 +207,7 @@ func TestHandlerIndexRepositorySidecarStalenessIsDistinct(t *testing.T) {
 		},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "sidecar contact: current") {
 		t.Error("console contact staleness blended with the sidecar's")
 	}
@@ -213,7 +216,7 @@ func TestHandlerIndexRepositorySidecarStalenessIsDistinct(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositoryIdentityLines(t *testing.T) {
+func TestHandlerBackupEvidenceIdentityLines(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{
 		HasReport: true,
@@ -221,24 +224,24 @@ func TestHandlerIndexRepositoryIdentityLines(t *testing.T) {
 	}
 
 	noCluster := newEvidenceHandler(t, staticSnapshots{}, status)
-	if body := get(t, noCluster, http.MethodGet, "/").Body.String(); !strings.Contains(body, "no observed cluster identity to compare against") {
+	if body := get(t, noCluster, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "no observed cluster identity to compare against") {
 		t.Error("missing-observation identity line absent")
 	}
 
 	staleCluster := newEvidenceHandler(t, observedCluster(true), status)
-	if body := get(t, staleCluster, http.MethodGet, "/").Body.String(); !strings.Contains(body, "matches a stale cluster observation — not current agreement") {
+	if body := get(t, staleCluster, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "matches a stale cluster observation — not current agreement") {
 		t.Error("stale-observation identity line absent")
 	}
 
 	other := observedCluster(false)
 	other.snap.Cluster.UID = "uid-9999"
 	mismatch := newEvidenceHandler(t, other, status)
-	if body := get(t, mismatch, http.MethodGet, "/").Body.String(); !strings.Contains(body, "bound to a different cluster incarnation") {
+	if body := get(t, mismatch, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "bound to a different cluster incarnation") {
 		t.Error("mismatch identity line absent")
 	}
 }
 
-func TestHandlerIndexRepositoryUnknownVariantExplicit(t *testing.T) {
+func TestHandlerBackupEvidenceUnknownVariantExplicit(t *testing.T) {
 	t.Parallel()
 	report := completeReport()
 	report.Barman = nil
@@ -248,7 +251,7 @@ func TestHandlerIndexRepositoryUnknownVariantExplicit(t *testing.T) {
 		Snapshot:  evidence.Snapshot{Generation: 1, ObservedAt: testNow, Report: report},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "format details unknown: unrecognized variant pgbackrest/v9") {
 		t.Error("unknown variant not rendered explicitly")
 	}

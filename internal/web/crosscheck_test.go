@@ -270,7 +270,7 @@ func TestCrossCheckOrphanDisplayBound(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexCrossCheckRendersFindingsAndProhibitedLanguage(t *testing.T) {
+func TestHandlerBackupEvidenceCrossCheckFindingsAndProhibitedLanguage(t *testing.T) {
 	t.Parallel()
 	report := completeReport()
 	facts := healthyFacts()
@@ -293,7 +293,7 @@ func TestHandlerIndexCrossCheckRendersFindingsAndProhibitedLanguage(t *testing.T
 		},
 	}}
 	h := newEvidenceHandler(t, sources, status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 
 	for _, want := range []string{
 		"Backup cross-check",

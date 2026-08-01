@@ -129,8 +129,14 @@
     {{- if and (not .Repository) (not .CrossCheck)}}
     <section class="panel">
       <h2>Repository evidence</h2>
+      {{- with $.RepositoryUnavailable}}
+      <p class="state" data-state="{{stateToken .State}}">{{.Detail}}</p>
+      <div class="empty"><strong>The evidence sidecar has not answered</strong>The ObjectStoreViewer sidecar is wired into this deployment but has produced no report yet, so the console has no independent view of the repository. This is not a statement that the repository is empty or unreachable — only that the console has not heard from the sidecar.</div>
+      <p class="origin">source: {{.Origin.Label}}</p>
+      {{- else}}
       <div class="empty"><strong>Repository evidence is not configured</strong>The ObjectStoreViewer evidence sidecar is not wired into this deployment, so the console has no independent view of what the backup repository actually holds.</div>
       <p class="origin">source: repository-evidence</p>
+      {{- end}}
     </section>
     {{- end}}
 {{template "shell-close"}}

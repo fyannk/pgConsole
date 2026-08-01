@@ -97,7 +97,7 @@ func TestAssemblyWiresEvidencePollerIntoThePage(t *testing.T) {
 	base, stop := startWithFetcher(t, staticFetcher{report: report})
 	defer stop()
 
-	body := waitForBody(t, base+"/", "Repository evidence")
+	body := waitForBody(t, base+"/backups/evidence", "Repository evidence")
 	if !strings.Contains(body, "sha256:"+strings.Repeat("ab", 32)) {
 		t.Error("published report did not reach the page")
 	}
@@ -116,7 +116,7 @@ func TestAssemblyEvidenceFailureRendersUnknownPanel(t *testing.T) {
 	base, stop := startWithFetcher(t, staticFetcher{err: errors.New("dial refused")})
 	defer stop()
 
-	body := waitForBody(t, base+"/", "no successful sidecar contact yet")
+	body := waitForBody(t, base+"/backups/evidence", "no successful sidecar contact yet")
 	if !strings.Contains(body, "Repository evidence") {
 		t.Error("failing sidecar did not render the unknown panel")
 	}

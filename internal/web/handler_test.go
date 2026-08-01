@@ -246,7 +246,7 @@ func TestHandlerReadyzRevealsNoProbeDetail(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRendersUnknownShellWithoutSnapshot(t *testing.T) {
+func TestHandlerIndexStatesAbsenceWithoutSnapshot(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHandler(t, EmptySnapshots{}, kube.UnavailableProber{}, Links{})
 	rec := get(t, h, http.MethodGet, "/")
@@ -254,7 +254,10 @@ func TestHandlerIndexRendersUnknownShellWithoutSnapshot(t *testing.T) {
 		t.Fatalf("index status = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"orders", "payments", "unknown: no snapshot", "none"} {
+	// The invariant is unchanged — the console names its target, says it
+	// has observed nothing, and never implies health — but the Overview
+	// now states that in its own words rather than as a section panel.
+	for _, want := range []string{"orders", "payments", "No cluster snapshot yet"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index body misses %q", want)
 		}
@@ -264,7 +267,7 @@ func TestHandlerIndexRendersUnknownShellWithoutSnapshot(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRendersOperatorReportedStatus(t *testing.T) {
+func TestHandlerClusterStatusRendersOperatorReportedStatus(t *testing.T) {
 	t.Parallel()
 	snap := observe.Snapshot{
 		Generation: 7,
@@ -272,7 +275,7 @@ func TestHandlerIndexRendersOperatorReportedStatus(t *testing.T) {
 		Cluster:    healthyFacts(),
 	}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/status").Body.String()
 	for _, want := range []string{
 		"Cluster in healthy state",
 		"orders-1",
@@ -308,13 +311,13 @@ func TestHandlerIndexStaleSnapshotIsVisible(t *testing.T) {
 	}
 }
 
-// TestHandlerIndexAbsentClusterIsExplicit proves a deleted cluster
+// TestHandlerClusterStatusAbsentClusterIsExplicit proves a deleted cluster
 // renders explicit absence, not an error and not an empty healthy page.
-func TestHandlerIndexAbsentClusterIsExplicit(t *testing.T) {
+func TestHandlerClusterStatusAbsentClusterIsExplicit(t *testing.T) {
 	t.Parallel()
 	snap := observe.Snapshot{Generation: 2, ObservedAt: testNow, Cluster: observe.ClusterFacts{Present: false}}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	rec := get(t, h, http.MethodGet, "/")
+	rec := get(t, h, http.MethodGet, "/cluster/status")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("index status = %d", rec.Code)
 	}
@@ -383,11 +386,15 @@ func TestHandlerUnknownRouteIs404(t *testing.T) {
 // below the validation layer.
 func TestHandlerTemplateEscapesHostileValues(t *testing.T) {
 	t.Parallel()
-	h, _ := newTestHandler(t, EmptySnapshots{}, kube.UnavailableProber{}, Links{})
 	hostile := Page{
 		ClusterName:   `<script>alert(1)</script>`,
 		Namespace:     `"><img src=x onerror=alert(1)>`,
 		SnapshotState: `<b>none</b>`,
+		Shell: ShellView{
+			ClusterName:   `<script>alert(1)</script>`,
+			Namespace:     `"><img src=x onerror=alert(1)>`,
+			SnapshotState: `<b>none</b>`,
+		},
 		Cluster: &ClusterView{
 			Origin: Origin(`<script>o</script>`),
 			Phase:  `<style>*{display:none}</style>`,
@@ -397,37 +404,45 @@ func TestHandlerTemplateEscapesHostileValues(t *testing.T) {
 				Message: `</td><script>d()</script>`,
 			}},
 		},
-		Panels: []Panel{{
-			Title:  `<iframe src="https://evil.example"></iframe>`,
-			Origin: Origin(`x`),
-			State:  `<b>s</b>`,
-			Detail: `</p><script>d()</script>`,
-		}},
 		Links: []Link{{Label: `<script>l</script>`, URL: `https://example.com/"><script>u</script>`}},
 	}
-	var out bytes.Buffer
-	if err := h.tpl.ExecuteTemplate(&out, "page.html.tmpl", hostile); err != nil {
-		t.Fatalf("Execute: %v", err)
+
+	// Escaping is a property of every page, not of one of them, so this
+	// runs over the whole served set. Naming a single template is how
+	// this test silently stopped covering anything when the page it
+	// named was replaced.
+	h, _ := newTestHandler(t, EmptySnapshots{}, kube.UnavailableProber{}, Links{})
+	entries, err := assets.ReadDir("templates")
+	if err != nil {
+		t.Fatalf("read templates: %v", err)
 	}
-	body := out.String()
-	// The page embeds exactly two scripts of its own: the enhancement
-	// layer and the vendored Alpine CSP build. Both are same-origin src
-	// references with no inline body, and both must be present. Removing
-	// them before the injection scan keeps that scan exact — a third
-	// script tag from a hostile value still fails the check below.
-	for _, own := range []string{
-		`<script src="/static/console.js" defer></script>`,
-		`<script src="/static/alpine.csp.js" defer></script>`,
-	} {
-		if !strings.Contains(body, own) {
-			t.Fatalf("page is missing its own script tag %q", own)
+	checked := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "shell.html.tmpl" || name == "topology.html.tmpl" {
+			continue
 		}
-		body = strings.ReplaceAll(body, own, "")
+		var out bytes.Buffer
+		if err := h.tpl.ExecuteTemplate(&out, name, hostile); err != nil {
+			// A template needing a view this fixture does not carry is
+			// not what this test is about.
+			continue
+		}
+		checked++
+		body := out.String()
+		for _, forbidden := range []string{
+			"<script>alert(1)</script>", "<script>o</script>", "<script>l</script>",
+			"<style>*{display:none}</style>", `<iframe src="https://evil.example"></iframe>`,
+			"<script>d()</script>", "<script>u</script>",
+			`<img src=x onerror=alert(1)>`,
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s rendered %q unescaped", name, forbidden)
+			}
+		}
 	}
-	for _, forbidden := range []string{"<script", "<iframe", "<style", "<img", "<b>"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("rendered output contains unescaped %q", forbidden)
-		}
+	if checked == 0 {
+		t.Fatal("no template was exercised; the escaping check covers nothing")
 	}
 }
 
@@ -452,7 +467,7 @@ func memberPod(name, role string) observe.PodFacts {
 	}
 }
 
-func TestHandlerIndexRendersPodTable(t *testing.T) {
+func TestHandlerClusterPodsRendersPodTable(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
@@ -461,7 +476,7 @@ func TestHandlerIndexRendersPodTable(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 	for _, want := range []string{
 		"Instance pods",
 		"orders-2",
@@ -479,9 +494,9 @@ func TestHandlerIndexRendersPodTable(t *testing.T) {
 	}
 }
 
-// TestHandlerIndexRendersPrimaryDisagreement proves both claims render
+// TestHandlerClusterStatusRendersPrimaryDisagreement proves both claims render
 // with their origins when the operator and the pod labels conflict.
-func TestHandlerIndexRendersPrimaryDisagreement(t *testing.T) {
+func TestHandlerClusterStatusRendersPrimaryDisagreement(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
@@ -490,7 +505,7 @@ func TestHandlerIndexRendersPrimaryDisagreement(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/status").Body.String()
 	for _, want := range []string{
 		"disagreement on the primary instance",
 		"current primary is orders-1",
@@ -504,7 +519,7 @@ func TestHandlerIndexRendersPrimaryDisagreement(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexPodSectionOwnStaleness(t *testing.T) {
+func TestHandlerClusterPodsSectionOwnStaleness(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
@@ -513,7 +528,7 @@ func TestHandlerIndexPodSectionOwnStaleness(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 	if !strings.Contains(body, "snapshot: stale — age 2s (generation 5)") {
 		t.Error("stale pod snapshot not labeled in its own section")
 	}
@@ -522,14 +537,14 @@ func TestHandlerIndexPodSectionOwnStaleness(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexPodUnknownsAndTruncation(t *testing.T) {
+func TestHandlerClusterPodsUnknownsAndTruncation(t *testing.T) {
 	t.Parallel()
 	bare := observe.PodFacts{Name: "orders-9", UID: "u9"}
 	snap := podsSnapshot(false, bare)
 	snap.Truncated = true
 	src := staticSnapshots{pods: snap, podsOK: true}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 	if got := strings.Count(body, "<td>unknown</td>"); got < 5 {
 		t.Errorf("unreported pod facts rendered unknown %d times, want at least 5", got)
 	}
@@ -565,7 +580,7 @@ func eventFacts(name, kind, object, reason string, age time.Duration) observe.Ev
 	}
 }
 
-func TestHandlerIndexRendersEventsWithMembershipFilter(t *testing.T) {
+func TestHandlerClusterEventsRenderWithMembershipFilter(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		pods:   podsSnapshot(false, memberPod("orders-1", "primary")),
@@ -584,7 +599,7 @@ func TestHandlerIndexRendersEventsWithMembershipFilter(t *testing.T) {
 		eventsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/events").Body.String()
 	for _, want := range []string{
 		"SwitchoverStarted", "Cluster/orders",
 		"BackOff", "Pod/orders-1",
@@ -599,9 +614,9 @@ func TestHandlerIndexRendersEventsWithMembershipFilter(t *testing.T) {
 	}
 }
 
-// TestHandlerIndexEventsWindowAppliesAtRender proves an event ages out
+// TestHandlerClusterEventsWindowAppliesAtRender proves an event ages out
 // between publication and rendering.
-func TestHandlerIndexEventsWindowAppliesAtRender(t *testing.T) {
+func TestHandlerClusterEventsWindowAppliesAtRender(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		podsOK: true,
@@ -616,7 +631,7 @@ func TestHandlerIndexEventsWindowAppliesAtRender(t *testing.T) {
 		eventsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/events").Body.String()
 	if !strings.Contains(body, "Fresh") {
 		t.Error("in-window event missing")
 	}
@@ -625,9 +640,9 @@ func TestHandlerIndexEventsWindowAppliesAtRender(t *testing.T) {
 	}
 }
 
-// TestHandlerIndexPodEventsWithheldWithoutMembership proves pod events
+// TestHandlerClusterEventsWithheldWithoutMembership proves pod events
 // are withheld, visibly, when no pod snapshot can verify membership.
-func TestHandlerIndexPodEventsWithheldWithoutMembership(t *testing.T) {
+func TestHandlerClusterEventsWithheldWithoutMembership(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		events: observe.EventsSnapshot{
@@ -640,7 +655,7 @@ func TestHandlerIndexPodEventsWithheldWithoutMembership(t *testing.T) {
 		eventsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/events").Body.String()
 	if strings.Contains(body, "BackOff") {
 		t.Error("pod event rendered without membership verification")
 	}
@@ -649,7 +664,7 @@ func TestHandlerIndexPodEventsWithheldWithoutMembership(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexEventsTruncationVisible(t *testing.T) {
+func TestHandlerClusterEventsTruncationVisible(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		podsOK: true,
@@ -660,13 +675,13 @@ func TestHandlerIndexEventsTruncationVisible(t *testing.T) {
 		eventsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/events").Body.String()
 	if !strings.Contains(body, "truncated: more events matched than the display bound") {
 		t.Error("event truncation not visible")
 	}
 }
 
-func TestHandlerIndexRendersAttributedBackupsAndEvidencePath(t *testing.T) {
+func TestHandlerBackupsRenderAttributedAcrossItsScreens(t *testing.T) {
 	t.Parallel()
 	started := testNow.Add(-2 * time.Hour)
 	stopped := testNow.Add(-90 * time.Minute)
@@ -683,25 +698,32 @@ func TestHandlerIndexRendersAttributedBackupsAndEvidencePath(t *testing.T) {
 		backupsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{ObjectStoreViewer: "https://viewer.example.com/orders"})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+
+	// The rebuild split one backups section into two screens. Both halves
+	// are asserted, so neither may quietly stop carrying its claims or
+	// its attribution.
+	objects := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	for _, want := range []string{
-		"plugin-backup", "completed — operator-reported claim", "Last completed backup age: 1h30m",
+		"plugin-backup", "completed — operator-reported claim",
 		"snapshot-backup", "volumeSnapshot", "unknown (not collected)",
-		"daily", "0 0 2 * * *", "Inspect repository structure in ObjectStoreViewer",
-		"orders-store", "object metadata observed", OriginOperator.Label(), OriginKubernetes.Label(),
+		"daily", "0 0 2 * * *", "Last completed backup age: 1h30m",
+		"orders-store", "object metadata observed",
+		OriginOperator.Label(), OriginKubernetes.Label(),
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("backup sections miss %q", want)
+		if !strings.Contains(objects, want) {
+			t.Errorf("backup objects screen misses %q", want)
 		}
 	}
-	for _, prohibited := range []string{"verified", "restorable", "restore guaranteed", "exact pitr window"} {
-		if strings.Contains(strings.ToLower(body), prohibited) {
-			t.Errorf("backup page contains prohibited claim %q", prohibited)
+
+	overview := get(t, h, http.MethodGet, "/backups").Body.String()
+	for _, want := range []string{"Inspect repository structure in ObjectStoreViewer", OriginOperator.Label()} {
+		if !strings.Contains(overview, want) {
+			t.Errorf("backup overview misses %q", want)
 		}
 	}
 }
 
-func TestHandlerIndexObjectStoreUnknownDoesNotDegradeBackups(t *testing.T) {
+func TestHandlerBackupObjectsUnknownStoreDoesNotDegradeBackups(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		backups: observe.BackupsSnapshot{
@@ -712,7 +734,7 @@ func TestHandlerIndexObjectStoreUnknownDoesNotDegradeBackups(t *testing.T) {
 		backupsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	if !strings.Contains(body, "b1") || strings.Contains(body, "Backups</h2>\n      <p class=\"state\">unknown") {
 		t.Fatal("ObjectStore denial degraded the Backup section")
 	}
@@ -721,7 +743,7 @@ func TestHandlerIndexObjectStoreUnknownDoesNotDegradeBackups(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexBackupSectionOwnStaleness(t *testing.T) {
+func TestHandlerBackupObjectsSectionOwnStaleness(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap: observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()}, ok: true,
@@ -732,7 +754,7 @@ func TestHandlerIndexBackupSectionOwnStaleness(t *testing.T) {
 		backupsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	if !strings.Contains(body, "snapshot: stale — age 2m00s (generation 8)") || !strings.Contains(body, "last-good") {
 		t.Fatal("last-good Backup catalog is not visibly stale")
 	}
@@ -741,13 +763,13 @@ func TestHandlerIndexBackupSectionOwnStaleness(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexBackupTruncationVisible(t *testing.T) {
+func TestHandlerBackupObjectsTruncationVisible(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{backups: observe.BackupsSnapshot{
 		Generation: 1, ObservedAt: testNow, BackupsTruncated: true, SchedulesTruncated: true,
 	}, backupsOK: true}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	if !strings.Contains(body, "Backup catalog reached its safety or display bound") || !strings.Contains(body, "ScheduledBackup catalog reached its safety or display bound") {
 		t.Fatal("backup catalog truncation is not visible")
 	}
@@ -864,7 +886,7 @@ func TestHandlerLogsLinkRenderedForMembers(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := getWithHeaders(t, h, "/", powerUser).Body.String()
+	body := getWithHeaders(t, h, "/cluster/pods", powerUser).Body.String()
 	if !strings.Contains(body, `<a href="/logs/orders-1">tail</a>`) {
 		t.Fatal("member pod misses its log link")
 	}

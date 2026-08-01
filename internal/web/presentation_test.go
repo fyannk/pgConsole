@@ -47,11 +47,11 @@ func TestStateTokenClassifiesConservatively(t *testing.T) {
 	}
 }
 
-// TestIndexStateTokenAccompaniesTheStateWord proves the styling hook is
+// TestStateTokenAccompaniesTheStateWord proves the styling hook is
 // redundant reinforcement: wherever a data-state attribute appears the
 // state word is still rendered as text, so a reader who never receives
 // the stylesheet loses nothing.
-func TestIndexStateTokenAccompaniesTheStateWord(t *testing.T) {
+func TestStateTokenAccompaniesTheStateWord(t *testing.T) {
 	t.Parallel()
 	snap := observe.Snapshot{
 		Generation: 9,
@@ -65,7 +65,7 @@ func TestIndexStateTokenAccompaniesTheStateWord(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 
 	if !strings.Contains(body, `data-state="stale"`) {
 		t.Error("stale snapshot carries no presentation token")
@@ -79,14 +79,14 @@ func TestIndexStateTokenAccompaniesTheStateWord(t *testing.T) {
 	}
 }
 
-// TestIndexEnhancementIsAdditive proves the scripts are same-origin
+// TestEnhancementIsAdditive proves the scripts are same-origin
 // references with no inline body, that enhancement-only controls are
 // cloaked so they never appear when the script does not run, and that
 // the panel bodies carry no attribute that would hide them by default.
-func TestIndexEnhancementIsAdditive(t *testing.T) {
+func TestEnhancementIsAdditive(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHandler(t, fullPage(), kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 
 	for _, want := range []string{
 		`<script src="/static/console.js" defer></script>`,
@@ -221,6 +221,13 @@ func TestEveryPageRendersTheSharedShell(t *testing.T) {
 		}
 		body := string(raw)
 		if !strings.Contains(body, "<!DOCTYPE html>") {
+			continue
+		}
+		// shell.html.tmpl carries a doctype inside its page-head define,
+		// but it is the partial that *defines* the chrome rather than a
+		// page that composes it. Pages built on shell-open get the
+		// topbar and sidebar from it transitively.
+		if entry.Name() == "shell.html.tmpl" {
 			continue
 		}
 		for _, want := range []string{

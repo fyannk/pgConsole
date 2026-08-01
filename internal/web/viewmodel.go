@@ -715,6 +715,10 @@ type Page struct {
 	ImageCatalog *ImageCatalogView
 	// ObjectStore is the optional plugin reference lookup.
 	ObjectStore *ObjectStoreView
+	// RepositoryUnavailable explains why the evidence section carries no
+	// report while the consumer is configured. Nil when the consumer is
+	// disabled, which is a different claim, and nil when a report exists.
+	RepositoryUnavailable *RepositoryUnavailableView
 	// Repository is the repository-evidence section, nil when the
 	// consumer is disabled or has no report yet.
 	Repository *RepositoryView
@@ -787,8 +791,9 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 			if s.evidence.Failure != evidence.FailureNone {
 				detail += " (" + string(s.evidence.Failure) + ")"
 			}
-			page.Panels = append(page.Panels,
-				Panel{Title: "Repository evidence", Origin: OriginRepository, State: unknown, Detail: detail})
+			page.RepositoryUnavailable = &RepositoryUnavailableView{
+				Origin: OriginRepository, State: unknown, Detail: detail,
+			}
 		}
 		if s.backupsOK {
 			page.CrossCheck = buildCrossCheckView(crossCheckInputs{
@@ -1344,6 +1349,21 @@ func buildBackupsView(snap observe.BackupsSnapshot, now time.Time, evidenceURL s
 		})
 	}
 	return view
+}
+
+// RepositoryUnavailableView is the configured-but-silent evidence
+// state. It exists because "the sidecar is not wired into this
+// deployment" and "the sidecar is wired and has not answered" are
+// different claims, and rendering the first for the second tells an
+// operator to go look at configuration that is already correct. The
+// failure kind is what makes the second actionable.
+type RepositoryUnavailableView struct {
+	// Origin attributes the claim.
+	Origin Origin
+	// State is the section state token.
+	State string
+	// Detail names the failure kind the consumer last saw.
+	Detail string
 }
 
 // buildRepositoryView re-renders the validated evidence projection into
