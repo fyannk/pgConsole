@@ -174,6 +174,7 @@ rewrite() {
     -e 's|"/databases/publications"|"databases-publications.html"|g' \
     -e 's|"/databases/subscriptions"|"databases-subscriptions.html"|g' \
     -e 's|"/databases"|"databases-overview.html"|g' \
+    -e 's|"/poolers/logs/[^"]*"|"poolers-logs.html"|g' \
     -e 's|"/poolers/pods"|"poolers-pods.html"|g' \
     -e 's|"/poolers/logs"|"poolers-logs.html"|g' \
     -e 's|"/poolers"|"poolers-overview.html"|g' \
@@ -249,10 +250,10 @@ page $HEALTHY /databases/subscriptions "" "" databases-subscriptions.html Pages 
   "Databases — subscriptions" "Declared logical-replication subscriptions"
 page $HEALTHY /poolers          "" "" poolers-overview.html Pages \
   "Poolers — overview" "Connection poolers the operator reports for this cluster"
-page $HEALTHY /poolers/pods     "" "" poolers-pods.html Pages \
-  "Poolers — pods" "Pooler roster, reached from the pods entry"
-page $HEALTHY /poolers/logs     "" "" poolers-logs.html Pages \
-  "Poolers — logs" "Pooler roster, reached from the logs entry"
+page $HEALTHY /poolers/pods poweruser operator poolers-pods.html Pages \
+  "Poolers — pods" "Pods run by the cluster's poolers, membership proven by ownership"
+page $HEALTHY /poolers/logs poweruser operator poolers-logs.html Pages \
+  "Poolers — logs" "Choosing a pooler pod to tail its pgbouncer container"
 
 # The level-gated screens. The tail needs poweruser; the review panel
 # needs dba; the refusal is the same route asked for below its level.

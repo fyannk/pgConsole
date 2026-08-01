@@ -90,6 +90,7 @@ var (
 	_ feed[BackupCatalogState, BackupChange]            = (*BackupCollector)(nil)
 	_ feed[AccessReviewState, AccessRequestChange]      = (*AccessReviewCollector)(nil)
 	_ feed[string, PoolerChange]                        = (*PoolerCollector)(nil)
+	_ feed[string, PodEvent]                            = (*PoolerPodCollector)(nil)
 	_ feed[string, FailoverQuorumState]                 = (*FailoverQuorumCollector)(nil)
 	_ feed[string, ImageCatalogChange]                  = (*ImageCatalogCollector)(nil)
 	_ feed[DatabaseObjectsState, DatabaseObjectsChange] = (*DatabaseObjectsCollector)(nil)

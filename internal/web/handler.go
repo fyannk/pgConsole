@@ -79,6 +79,12 @@ type PoolersSource interface {
 	CurrentPoolers() (observe.PoolersSnapshot, bool)
 }
 
+// PoolerPodsSource supplies the current pooler pod snapshot.
+type PoolerPodsSource interface {
+	// CurrentPoolerPods returns the snapshot and whether one exists.
+	CurrentPoolerPods() (observe.PodsSnapshot, bool)
+}
+
 // FailoverQuorumSource supplies the current failover-quorum snapshot.
 type FailoverQuorumSource interface {
 	// CurrentFailoverQuorum returns the snapshot and whether one exists.
@@ -117,6 +123,8 @@ type Sources struct {
 	Backups BackupsSource
 	// Poolers supplies the Pooler snapshot.
 	Poolers PoolersSource
+	// PoolerPods supplies the pooler pod snapshot.
+	PoolerPods PoolerPodsSource
 	// FailoverQuorum supplies the failover-quorum snapshot.
 	FailoverQuorum FailoverQuorumSource
 	// ImageCatalogs supplies the ImageCatalog snapshot.
@@ -134,6 +142,9 @@ type Sources struct {
 // LogTailer performs one bounded, on-demand log fetch for a verified
 // member pod. It is one of the closed request-time API exceptions.
 type LogTailer interface {
+	// TailPoolerLogs performs the same bounded fetch for a pod proven to
+	// belong to one of the cluster's connection poolers.
+	TailPoolerLogs(ctx context.Context, pod string) (observe.LogTail, error)
 	// TailLogs fetches the bounded tail; a non-member pod is not found.
 	TailLogs(ctx context.Context, pod string) (observe.LogTail, error)
 }
@@ -244,6 +255,7 @@ func (h *Handler) Routes() http.Handler {
 	// poweruser level or above, and the affordance is hidden below it.
 	if h.cfg.AllowLogs {
 		mux.HandleFunc("GET /logs/{pod}", h.requireLevel(authz.TierPowerUser, "log access requires the poweruser or dba level", h.handleLogs))
+		mux.HandleFunc("GET /poolers/logs/{pod}", h.requireLevel(authz.TierPowerUser, "log access requires the poweruser or dba level", h.handlePoolerLogs))
 	}
 	// Operation routes exist only in operations mode with a wired
 	// executor: disabled mode registers no route to abuse. They require
@@ -307,6 +319,7 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 	s.events, s.eventsOK = h.sources.Events.CurrentEvents()
 	s.backups, s.backupsOK = h.sources.Backups.CurrentBackups()
 	s.poolers, s.poolersOK = h.sources.Poolers.CurrentPoolers()
+	s.poolerPods, s.poolerPodsOK = h.sources.PoolerPods.CurrentPoolerPods()
 	s.quorum, s.quorumOK = h.sources.FailoverQuorum.CurrentFailoverQuorum()
 	s.catalogs, s.catalogsOK = h.sources.ImageCatalogs.CurrentImageCatalogs()
 	s.declared, s.declaredOK = h.sources.DatabaseObjects.CurrentDatabaseObjects()
@@ -543,6 +556,57 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handlePoolerLogs serves one bounded, on-demand tail of a pooler pod's
+// pgbouncer container, on the same terms as the instance tail: the same
+// level gate, the same bounds, and membership re-verified live before
+// the fetch.
+func (h *Handler) handlePoolerLogs(w http.ResponseWriter, r *http.Request) {
+	pod := r.PathValue("pod")
+	if !podNamePattern.MatchString(pod) {
+		http.NotFound(w, r)
+		return
+	}
+	view := LogsView{
+		Shell:       h.shell(r, "poolers-logs"),
+		ClusterName: h.cfg.ClusterName,
+		Pod:         pod,
+		Origin:      OriginKubernetes,
+	}
+	status := http.StatusOK
+	if h.tailer == nil {
+		status = http.StatusServiceUnavailable
+		view.State = "unavailable: no Kubernetes access"
+	} else {
+		tail, err := h.tailer.TailPoolerLogs(r.Context(), pod)
+		switch {
+		case err == nil:
+			view.Bounds = fmt.Sprintf("last %d lines, at most %d bytes", tail.LineLimit, tail.ByteLimit)
+			view.Content = tail.Content
+			view.Truncated = tail.TruncatedByBytes
+		case redact.Categorize(err) == redact.CategoryNotFound:
+			status = http.StatusNotFound
+			view.State = "no such pooler pod"
+		case redact.Categorize(err) == redact.CategoryForbidden:
+			status = http.StatusServiceUnavailable
+			view.State = "not granted: pods/log"
+		default:
+			status = http.StatusServiceUnavailable
+			view.State = "unavailable: " + redact.Safe(err)
+		}
+		h.logger.Info("log tail",
+			slog.String("route", "logs"),
+			slog.String("pod", pod),
+			slog.String("category", redact.Safe(err)))
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := h.tpl.ExecuteTemplate(w, "logs.html.tmpl", view); err != nil {
+		h.logger.Error("render failed",
+			slog.String("route", "logs"),
+			slog.String("category", redact.Safe(err)))
+	}
+}
+
 // handleHealthz proves process liveness and nothing else.
 func (h *Handler) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -594,6 +658,11 @@ func (EmptySnapshots) CurrentBackups() (observe.BackupsSnapshot, bool) {
 // CurrentPoolers reports no pooler snapshot.
 func (EmptySnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
 	return observe.PoolersSnapshot{}, false
+}
+
+// CurrentPoolerPods reports no pooler pod snapshot.
+func (EmptySnapshots) CurrentPoolerPods() (observe.PodsSnapshot, bool) {
+	return observe.PodsSnapshot{}, false
 }
 
 // CurrentFailoverQuorum reports no failover-quorum snapshot.

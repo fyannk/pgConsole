@@ -80,6 +80,8 @@ type Deps struct {
 	BackupSource observe.BackupSource
 	// PoolerSource observes the target cluster's Pooler resources.
 	PoolerSource observe.PoolerSource
+	// PoolerPodSource observes the pods run by the cluster's poolers.
+	PoolerPodSource observe.PoolerPodSource
 	// FailoverQuorumSource observes the cluster's FailoverQuorum.
 	FailoverQuorumSource observe.FailoverQuorumSource
 	// ImageCatalogSource observes the namespace's ImageCatalog set.
@@ -124,6 +126,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		Events:          web.EmptySnapshots{},
 		Backups:         web.EmptySnapshots{},
 		Poolers:         web.EmptySnapshots{},
+		PoolerPods:      web.EmptySnapshots{},
 		FailoverQuorum:  web.EmptySnapshots{},
 		ImageCatalogs:   web.EmptySnapshots{},
 		DatabaseObjects: web.EmptySnapshots{},
@@ -152,6 +155,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		poolerStore := observe.NewPoolerStore()
 		sources.Poolers = poolerStore
 		runners = append(runners, observe.NewPoolerCollector(deps.PoolerSource, poolerStore, deps.Clock, logger).Run)
+	}
+	if deps.PoolerPodSource != nil {
+		poolerPodStore := observe.NewPoolerPodStore()
+		sources.PoolerPods = poolerPodStore
+		runners = append(runners, observe.NewPoolerPodCollector(deps.PoolerPodSource, poolerPodStore, deps.Clock, logger).Run)
 	}
 	if deps.FailoverQuorumSource != nil {
 		quorumStore := observe.NewFailoverQuorumStore()

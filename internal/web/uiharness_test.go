@@ -122,7 +122,9 @@ func uiPopulated(stale bool) staticSnapshots {
 				},
 			},
 		},
-		poolersOK: true,
+		poolersOK:    true,
+		poolerPods:   poolerPodFixture(),
+		poolerPodsOK: true,
 		quorum: observe.FailoverQuorumSnapshot{
 			Generation: 2, ObservedAt: testNow.Add(-4 * time.Second), Stale: stale,
 			Quorum: observe.FailoverQuorumFacts{
@@ -185,7 +187,7 @@ func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, autho
 		ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour,
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
 	}
-	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots,
+	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots,
 		Evidence: fakeEvidence{status: status}}
 	var executor OpsExecutor
 	var reviewer ReviewExecutor

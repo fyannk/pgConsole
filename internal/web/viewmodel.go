@@ -708,6 +708,10 @@ type Page struct {
 	// Databases is the declarative-objects section, nil when never
 	// observed.
 	Databases *DatabaseObjectsView
+	// PoolerPods is the pooler pod roster, nil when never observed. It
+	// reuses the instance pod view: the observations are the same, only
+	// the selection and the ownership proof differ.
+	PoolerPods *PodsView
 	// Quorum is the failover-quorum panel, nil when never observed.
 	Quorum *FailoverQuorumView
 	// ImageCatalog is the resolved catalog panel, nil when never
@@ -762,6 +766,8 @@ type snapshots struct {
 	backupsOK       bool
 	poolers         observe.PoolersSnapshot
 	poolersOK       bool
+	poolerPods      observe.PodsSnapshot
+	poolerPodsOK    bool
 	quorum          observe.FailoverQuorumSnapshot
 	quorumOK        bool
 	catalogs        observe.ImageCatalogsSnapshot
@@ -831,6 +837,9 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 		page.Panels = append(page.Panels,
 			Panel{Title: "Image catalog", Origin: OriginOperator, State: unknown, Detail: noSnapshot})
 	}
+	if s.poolerPodsOK {
+		page.PoolerPods = buildPodsView(s.poolerPods, now, s.allowLogs, "/poolers/logs/")
+	}
 	if s.poolersOK {
 		page.Poolers = buildPoolersView(s.poolers, now)
 	} else {
@@ -845,7 +854,7 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 		}}, page.Panels...)
 	}
 	if s.podsOK {
-		page.Pods = buildPodsView(s.pods, now, s.allowLogs)
+		page.Pods = buildPodsView(s.pods, now, s.allowLogs, "/logs/")
 	} else {
 		page.Panels = append([]Panel{{
 			Title: "Instance pods", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot,
@@ -1603,7 +1612,12 @@ func buildMeta(generation uint64, observedAt time.Time, stale bool, now time.Tim
 // buildPodsView converts the pod snapshot into bounded display rows.
 // With logs allowed, each member row links its bounded tail; the link
 // is an affordance only — the fetch re-verifies membership live.
-func buildPodsView(snap observe.PodsSnapshot, now time.Time, allowLogs bool) *PodsView {
+// buildPodsView converts a pod snapshot into display rows. logPrefix
+// routes the per-pod tail link: instance pods and pooler pods are
+// rendered by the same view but their tails are different routes,
+// verified against different ownership chains, and reading a pooler's
+// pgbouncer log through the instance route would be refused.
+func buildPodsView(snap observe.PodsSnapshot, now time.Time, allowLogs bool, logPrefix string) *PodsView {
 	view := &PodsView{
 		Origin:      OriginKubernetes,
 		Meta:        buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
@@ -1621,7 +1635,7 @@ func buildPodsView(snap observe.PodsSnapshot, now time.Time, allowLogs bool) *Po
 		}
 		logsURL := ""
 		if allowLogs && p.Name != "" {
-			logsURL = "/logs/" + url.PathEscape(p.Name)
+			logsURL = logPrefix + url.PathEscape(p.Name)
 		}
 		view.Rows = append(view.Rows, PodRowView{
 			Name:     orUnknown(p.Name),

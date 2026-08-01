@@ -118,6 +118,11 @@ func startEnv(t *testing.T) *integrationEnv {
 				Verbs:     []string{"get", "list", "watch"},
 			},
 			{
+				APIGroups: []string{"apps"},
+				Resources: []string{"replicasets", "deployments"},
+				Verbs:     []string{"get"},
+			},
+			{
 				APIGroups: []string{"postgresql.cnpg.io"},
 				Resources: []string{"databases", "databaseroles", "publications", "subscriptions"},
 				Verbs:     []string{"get", "list", "watch"},
@@ -823,5 +828,75 @@ func TestDatabaseObjectsAgainstRealAPIServer(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("declarative collector did not stop on cancellation")
+	}
+}
+
+// TestPoolerPodOwnershipAgainstRealRBAC proves the Pod -> ReplicaSet ->
+// Deployment -> Pooler walk works under the Role the deployment grants,
+// and that a pod wearing the right labels without the ownership behind
+// them is refused. The apps/get rules are what make the walk possible;
+// without them every pooler pod is excluded, and only this test says so.
+func TestPoolerPodOwnershipAgainstRealRBAC(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for _, obj := range []struct {
+		gvr schema.GroupVersionResource
+		o   *unstructured.Unstructured
+	}{
+		{deploymentGVR, ownedObject("Deployment", "orders-rw-pooler", "Pooler", "orders-rw-pooler", "postgresql.cnpg.io/v1")},
+		{replicaSetGVR, ownedObject("ReplicaSet", "orders-rw-pooler-abc", "Deployment", "orders-rw-pooler", "apps/v1")},
+	} {
+		// A Deployment needs a spec the API server will accept.
+		if obj.gvr == deploymentGVR {
+			obj.o.Object["spec"] = map[string]any{
+				"selector": map[string]any{"matchLabels": map[string]any{"app": "pooler"}},
+				"template": map[string]any{
+					"metadata": map[string]any{"labels": map[string]any{"app": "pooler"}},
+					"spec":     map[string]any{"containers": []any{map[string]any{"name": "pgbouncer", "image": "pgbouncer:1.24"}}},
+				},
+			}
+		}
+		if obj.gvr == replicaSetGVR {
+			obj.o.Object["spec"] = map[string]any{
+				"selector": map[string]any{"matchLabels": map[string]any{"app": "pooler"}},
+				"template": map[string]any{
+					"metadata": map[string]any{"labels": map[string]any{"app": "pooler"}},
+					"spec":     map[string]any{"containers": []any{map[string]any{"name": "pgbouncer", "image": "pgbouncer:1.24"}}},
+				},
+			}
+		}
+		if _, err := ie.adminDyn.Resource(obj.gvr).Namespace("payments").Create(ctx, obj.o, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create %s: %v", obj.o.GetName(), err)
+		}
+	}
+
+	podsGVR := clusterGVR
+	podsGVR.Group, podsGVR.Version, podsGVR.Resource = "", "v1", "pods"
+	for _, p := range []*unstructured.Unstructured{
+		poolerPodObject("orders-rw-pooler-abc-1", "orders-rw-pooler", "orders-rw-pooler-abc"),
+		poolerPodObject("impostor-1", "orders-rw-pooler", ""),
+	} {
+		if _, err := ie.adminDyn.Resource(podsGVR).Namespace("payments").Create(ctx, p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create pod %s: %v", p.GetName(), err)
+		}
+	}
+
+	pods, _, err := client.FetchPoolerPods(ctx)
+	if err != nil {
+		t.Fatalf("FetchPoolerPods under the deployed Role: %v", err)
+	}
+	if len(pods) != 1 || pods[0].Name != "orders-rw-pooler-abc-1" {
+		t.Fatalf("selected %+v, want only the pod with a whole chain to a Pooler", pods)
 	}
 }

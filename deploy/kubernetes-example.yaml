@@ -48,6 +48,15 @@ rules:
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["databases", "databaseroles", "publications", "subscriptions"]
     verbs: ["get", "list", "watch"]
+  # Pooler pod ownership. A pooler pod is not owned by its Pooler the
+  # way an instance pod is owned by its Cluster: CloudNativePG runs
+  # poolers as a Deployment, so proving membership means walking
+  # Pod -> ReplicaSet -> Deployment -> Pooler. Labels select; this walk
+  # is what decides. Get only, and nothing is read from these objects
+  # but their owner reference.
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "deployments"]
+    verbs: ["get"]
   # Failover quorum: one object named after the cluster, so the get is
   # pinned the same way the Cluster's is. RBAC cannot pin a watch by
   # name; the application uses a metadata.name field selector.

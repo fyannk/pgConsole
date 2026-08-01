@@ -10,6 +10,73 @@
 */ -}}
 {{template "page-head" "poolers"}}
 {{template "shell-open" .Shell}}
+    {{- if eq .Shell.Current "poolers-pods"}}
+    {{- with .PoolerPods}}
+    <section class="panel sectioned" id="pooler-pods" x-data="panel" data-panel="pooler-pods">
+      <div class="panel-head">
+        <h2>Pooler pods</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+        <button type="button" class="panel-toggle" x-cloak>Hide</button>
+      </div>
+      <div class="panel-body">
+      {{- if .Rows}}
+      <div class="table-scroll">
+      <table class="pods">
+        <caption>Pods run by this cluster&#39;s poolers</caption>
+        <thead><tr><th>Name</th><th>Pooler</th><th>Phase</th><th>Ready</th><th>Restarts</th><th>Node</th><th>Image</th>{{if .LogsEnabled}}<th>Logs</th>{{end}}</tr></thead>
+        <tbody>
+          {{- range .Rows}}
+          <tr>
+            <td>{{.Name}}</td><td>{{.Role}}</td><td>{{.Phase}}</td><td>{{.Ready}}</td>
+            <td>{{.Restarts}}</td><td>{{.Node}}</td><td>{{.Image}}</td>
+            {{- if $.PoolerPods.LogsEnabled}}<td>{{if .LogsURL}}<a href="{{.LogsURL}}">tail</a>{{end}}</td>{{end}}
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">More pooler pods matched than the display bound; the list above is cut.</p>
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>No pooler pods</strong>No pod owned by one of this cluster&#39;s poolers was observed. A pod merely labelled as a pooler&#39;s is not shown: membership is the ownership chain, not the label.</div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- else}}
+    <section class="panel">
+      <h2>Pooler pods</h2>
+      <div class="empty"><strong>No pooler pod snapshot yet</strong>Nothing has been observed about the pods behind this cluster&#39;s poolers, so this build makes no claim.</div>
+      <p class="origin">source: kubernetes-observed</p>
+    </section>
+    {{- end}}
+
+    {{- else if eq .Shell.Current "poolers-logs"}}
+    <section class="panel">
+      <h2>Pooler logs</h2>
+      {{- with .PoolerPods}}
+      {{- if not .LogsEnabled}}
+      <div class="empty"><strong>Log access is not available</strong>The bounded log tail is switched off in this deployment, or your authorization level does not reach it.</div>
+      {{- else if .Rows}}
+      <p class="state">Choose a pooler pod to tail its <code>pgbouncer</code> container. Each fetch is bounded, made on demand, and never stored.</p>
+      <ul>
+        {{- range .Rows}}
+        {{- if .LogsURL}}
+        <li><a href="{{.LogsURL}}">{{.Name}}</a> — {{.Role}}, {{.Phase}}</li>
+        {{- end}}
+        {{- end}}
+      </ul>
+      {{- else}}
+      <div class="empty"><strong>No pooler pods to tail</strong>No pod owned by one of this cluster&#39;s poolers was observed.</div>
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>No pooler pod snapshot yet</strong>Nothing has been observed about the pods behind this cluster&#39;s poolers, so there is nothing to tail.</div>
+      {{- end}}
+      <p class="origin">source: kubernetes-observed</p>
+    </section>
+
+    {{- else}}
     {{- with .Poolers}}
     <section class="panel sectioned" id="poolers" x-data="panel" data-panel="poolers">
       <div class="panel-head">
@@ -52,5 +119,6 @@
       <div class="empty"><strong>No pooler snapshot yet</strong>Nothing has been observed about connection poolers for this cluster, so this build makes no claim — neither that any exist nor that none do.</div>
       <p class="origin">source: operator-reported</p>
     </section>
+    {{- end}}
     {{- end}}
 {{template "shell-close"}}

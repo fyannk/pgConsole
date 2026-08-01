@@ -39,22 +39,24 @@ var testNow = time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 
 // staticSnapshots serves fixed snapshots for every section.
 type staticSnapshots struct {
-	snap       observe.Snapshot
-	ok         bool
-	pods       observe.PodsSnapshot
-	podsOK     bool
-	events     observe.EventsSnapshot
-	eventsOK   bool
-	backups    observe.BackupsSnapshot
-	backupsOK  bool
-	poolers    observe.PoolersSnapshot
-	poolersOK  bool
-	quorum     observe.FailoverQuorumSnapshot
-	quorumOK   bool
-	catalogs   observe.ImageCatalogsSnapshot
-	catalogsOK bool
-	declared   observe.DatabaseObjectsSnapshot
-	declaredOK bool
+	snap         observe.Snapshot
+	ok           bool
+	pods         observe.PodsSnapshot
+	podsOK       bool
+	events       observe.EventsSnapshot
+	eventsOK     bool
+	backups      observe.BackupsSnapshot
+	backupsOK    bool
+	poolers      observe.PoolersSnapshot
+	poolersOK    bool
+	poolerPods   observe.PodsSnapshot
+	poolerPodsOK bool
+	quorum       observe.FailoverQuorumSnapshot
+	quorumOK     bool
+	catalogs     observe.ImageCatalogsSnapshot
+	catalogsOK   bool
+	declared     observe.DatabaseObjectsSnapshot
+	declaredOK   bool
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {
@@ -77,6 +79,10 @@ func (s staticSnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
 	return s.poolers, s.poolersOK
 }
 
+func (s staticSnapshots) CurrentPoolerPods() (observe.PodsSnapshot, bool) {
+	return s.poolerPods, s.poolerPodsOK
+}
+
 func (s staticSnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
 	return s.quorum, s.quorumOK
 }
@@ -96,6 +102,7 @@ type allSources interface {
 	EventsSource
 	BackupsSource
 	PoolersSource
+	PoolerPodsSource
 	FailoverQuorumSource
 	ImageCatalogsSource
 	DatabaseObjectsSource
@@ -108,7 +115,7 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: allowLogs, LevelHeader: "X-PgToolBox-Level", Links: links},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
 		prober, tailer, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -124,7 +131,7 @@ func newLeveledHandler(t *testing.T, snapshots allSources) (*Handler, *bytes.Buf
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
@@ -561,6 +568,12 @@ func TestHandlerClusterPodsUnknownsAndTruncation(t *testing.T) {
 type fakeTailer struct {
 	tail observe.LogTail
 	err  error
+}
+
+// TailPoolerLogs answers on the same terms as TailLogs: the fake does
+// not model the ownership chain, only the call.
+func (f fakeTailer) TailPoolerLogs(ctx context.Context, pod string) (observe.LogTail, error) {
+	return f.TailLogs(ctx, pod)
 }
 
 func (f fakeTailer) TailLogs(_ context.Context, _ string) (observe.LogTail, error) {
@@ -1422,5 +1435,83 @@ func TestTopologyGraphEscapesHostileIdentifiers(t *testing.T) {
 	}
 	if strings.Contains(out.String(), `"><script>`) {
 		t.Fatalf("a hostile identifier broke out of the attribute: %s", out.String())
+	}
+}
+
+// poolerPodFixture is a two-pod pooler roster.
+func poolerPodFixture() observe.PodsSnapshot {
+	ready := true
+	restarts := 0
+	return observe.PodsSnapshot{
+		Generation: 5, ObservedAt: testNow.Add(-2 * time.Second),
+		Pods: []observe.PodFacts{
+			{Name: "orders-rw-pooler-abc-1", UID: "pp1", Role: "orders-rw-pooler", Phase: "Running",
+				Ready: &ready, Restarts: &restarts, Node: "node-a", Image: "pgbouncer:1.24"},
+			{Name: "orders-rw-pooler-abc-2", UID: "pp2", Role: "orders-rw-pooler", Phase: "Running",
+				Ready: &ready, Restarts: &restarts, Node: "node-b", Image: "pgbouncer:1.24"},
+		},
+	}
+}
+
+// TestPoolerScreensShowTheirOwnContent proves the three Poolers entries
+// are three screens. They rendered the same roster until pooler pods
+// were observed, which made two of the three sidebar names promises the
+// console could not keep.
+func TestPoolerScreensShowTheirOwnContent(t *testing.T) {
+	t.Parallel()
+	src := staticSnapshots{
+		poolers: observe.PoolersSnapshot{
+			Generation: 2, ObservedAt: testNow,
+			Poolers: []observe.PoolerFacts{{Name: "orders-rw-pooler", UID: "p1", Type: "rw", Phase: "active"}},
+		},
+		poolersOK:    true,
+		poolerPods:   poolerPodFixture(),
+		poolerPodsOK: true,
+	}
+	h, _ := newLeveledHandler(t, src)
+
+	overview := getWithHeaders(t, h, "/poolers", powerUser).Body.String()
+	if !strings.Contains(overview, "Pooler resources") {
+		t.Error("the poolers overview does not show the pooler roster")
+	}
+	if strings.Contains(overview, "Pods run by this cluster") {
+		t.Error("the overview also shows the pod roster, so it is not its own screen")
+	}
+
+	pods := getWithHeaders(t, h, "/poolers/pods", powerUser).Body.String()
+	for _, want := range []string{"Pods run by this cluster", "orders-rw-pooler-abc-1", "pgbouncer:1.24", "node-b"} {
+		if !strings.Contains(pods, want) {
+			t.Errorf("the pooler pods screen misses %q", want)
+		}
+	}
+	if strings.Contains(pods, "Pooler resources") {
+		t.Error("the pods screen also shows the pooler roster")
+	}
+
+	logs := getWithHeaders(t, h, "/poolers/logs", powerUser).Body.String()
+	if !strings.Contains(logs, "/poolers/logs/orders-rw-pooler-abc-1") {
+		t.Error("the pooler logs screen offers no per-pod tail")
+	}
+	// The pooler tail is a different route to a different container,
+	// verified against a different ownership chain.
+	if strings.Contains(logs, `href="/logs/orders-rw-pooler`) {
+		t.Error("a pooler pod links to the instance log route")
+	}
+}
+
+// TestPoolerLogsRouteTailsThePoolerContainer proves the route exists and
+// reaches the pooler tail rather than the instance one.
+func TestPoolerLogsRouteTailsThePoolerContainer(t *testing.T) {
+	t.Parallel()
+	src := staticSnapshots{poolerPods: poolerPodFixture(), poolerPodsOK: true}
+	h, _ := newTestHandlerFull(t, src, kube.FakeProber{}, Links{}, true,
+		fakeTailer{tail: observe.LogTail{Content: "pgbouncer ready", LineLimit: 200, ByteLimit: 1024}})
+
+	rec := getWithHeaders(t, h, "/poolers/logs/orders-rw-pooler-abc-1", powerUser)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pooler log route = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "pgbouncer ready") {
+		t.Error("the pooler tail content did not reach the page")
 	}
 }

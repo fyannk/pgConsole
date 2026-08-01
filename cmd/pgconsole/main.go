@@ -72,6 +72,7 @@ func run() error {
 		deps.EventSource = client
 		deps.BackupSource = client
 		deps.PoolerSource = client
+		deps.PoolerPodSource = client
 		deps.FailoverQuorumSource = client
 		deps.ImageCatalogSource = client
 		deps.DatabaseObjectsSource = client
