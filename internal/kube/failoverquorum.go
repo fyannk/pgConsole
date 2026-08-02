@@ -46,6 +46,7 @@ func (c *Client) FetchFailoverQuorum(ctx context.Context) (observe.FailoverQuoru
 	obj, err := c.dyn.Resource(failoverQuorumGVR).Namespace(c.opts.Namespace).
 		Get(ctx, c.opts.ClusterName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		c.seedRecord(scopeFailoverQuorum).commit(true)
 		return observe.FailoverQuorumState{Facts: observe.FailoverQuorumFacts{Present: false}}, nil
 	}
 	if err != nil {
@@ -55,6 +56,9 @@ func (c *Client) FetchFailoverQuorum(ctx context.Context) (observe.FailoverQuoru
 	if err != nil {
 		return observe.FailoverQuorumState{}, err
 	}
+	seed := c.seedRecord(scopeFailoverQuorum)
+	seed.add(obj.Object)
+	seed.commit(true)
 	return observe.FailoverQuorumState{Facts: facts, ResourceVersion: obj.GetResourceVersion()}, nil
 }
 
@@ -68,7 +72,7 @@ func (c *Client) WatchFailoverQuorum(ctx context.Context, fromResourceVersion st
 	if err != nil {
 		return nil, categorize("failover quorum watch", err)
 	}
-	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.FailoverQuorumState]{pumpFailoverQuorum})
+	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.FailoverQuorumState]{tap(c, scopeFailoverQuorum, pumpFailoverQuorum)})
 	return resultStream[observe.FailoverQuorumState]{stream[observe.FailoverQuorumState]{items: items, stop: stop}}, nil
 }
 

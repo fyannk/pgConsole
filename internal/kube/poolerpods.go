@@ -68,6 +68,7 @@ func (c *Client) FetchPoolerPods(ctx context.Context) ([]observe.PodFacts, strin
 	}
 
 	owners := newPoolerOwnership(c)
+	seed := c.seedRecord(scopePoolerPods)
 	var pods []observe.PodFacts
 	for i := range list.Items {
 		facts, member, err := c.convertPoolerPod(ctx, owners, list.Items[i].Object)
@@ -78,8 +79,10 @@ func (c *Client) FetchPoolerPods(ctx context.Context) ([]observe.PodFacts, strin
 			c.logExcludedPod(facts.Name)
 			continue
 		}
+		seed.add(list.Items[i].Object)
 		pods = append(pods, facts)
 	}
+	seed.commit(true)
 	return pods, list.GetResourceVersion(), nil
 }
 
@@ -92,7 +95,7 @@ func (c *Client) WatchPoolerPods(ctx context.Context, fromResourceVersion string
 	if err != nil {
 		return nil, categorize("pooler pods watch", err)
 	}
-	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.PodEvent]{c.pumpPoolerPod(ctx)})
+	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.PodEvent]{tap(c, scopePoolerPods, c.pumpPoolerPod(ctx))})
 	return eventStream[observe.PodEvent]{stream[observe.PodEvent]{items: items, stop: stop}}, nil
 }
 

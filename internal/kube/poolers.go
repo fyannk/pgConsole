@@ -48,6 +48,7 @@ func (c *Client) FetchPoolers(ctx context.Context) ([]observe.PoolerFacts, strin
 	examined := 0
 	opts := metav1.ListOptions{Limit: poolerListPageSize}
 	rv := ""
+	seed := c.seedRecord(scopePoolers)
 	for {
 		list, err := c.dyn.Resource(poolerGVR).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -60,6 +61,7 @@ func (c *Client) FetchPoolers(ctx context.Context) ([]observe.PoolerFacts, strin
 				return nil, "", false, err
 			}
 			if member {
+				seed.add(list.Items[i].Object)
 				poolers = append(poolers, facts)
 			}
 		}
@@ -71,10 +73,12 @@ func (c *Client) FetchPoolers(ctx context.Context) ([]observe.PoolerFacts, strin
 		// which is what protects against a namespace holding thousands
 		// of other clusters' poolers.
 		if len(poolers) > observe.MaxPoolers || examined >= maxPoolerCandidates {
+			seed.commit(false)
 			return poolers, rv, true, nil
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(true)
 	return poolers, rv, len(poolers) > observe.MaxPoolers, nil
 }
 
@@ -87,7 +91,7 @@ func (c *Client) WatchPoolers(ctx context.Context, fromResourceVersion string) (
 	if err != nil {
 		return nil, categorize("poolers watch", err)
 	}
-	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.PoolerChange]{c.pumpPooler})
+	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.PoolerChange]{tap(c, scopePoolers, c.pumpPooler)})
 	return changeStream[observe.PoolerChange]{stream[observe.PoolerChange]{items: items, stop: stop}}, nil
 }
 

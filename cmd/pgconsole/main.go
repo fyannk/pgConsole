@@ -28,6 +28,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/application"
 	"github.com/fyannk/pgConsole/internal/config"
 	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/kube"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
@@ -55,14 +56,27 @@ func run() error {
 	// stays the explicit unknown shell and readiness reports 503, which
 	// is the honest degraded state rather than a crash loop.
 	deps := application.Deps{Prober: kube.UnavailableProber{}, Clock: observe.RealClock{}}
-	client, err := kube.InClusterClient(kube.Options{
+	opts := kube.Options{
 		Namespace:            cfg.Namespace,
 		ClusterName:          cfg.ClusterName,
 		RequestTimeout:       cfg.APIRequestTimeout,
 		LogTailLines:         cfg.LogTailLines,
 		LogTailMaxBytes:      cfg.LogTailMaxBytes,
 		AllowClusterCatalogs: cfg.AllowClusterCatalogs,
-	}, logger)
+	}
+	// The history store rides the collectors' own watches through the
+	// client's capture taps; disabled means no recorder exists and no
+	// tap wraps any pump. The Recorder field is set only inside this
+	// branch so a disabled history is interface-nil, not a typed nil.
+	if cfg.HistoryEnabled {
+		opts.Recorder = history.NewStore(history.Limits{
+			PerObject:      cfg.HistoryPerObjectRevisions,
+			MaxRevisions:   cfg.HistoryMaxRevisions,
+			MaxBytes:       cfg.HistoryMaxBytes,
+			CoalesceWindow: cfg.HistoryCoalesceWindow,
+		}, observe.RealClock{})
+	}
+	client, err := kube.InClusterClient(opts, logger)
 	if err != nil {
 		logger.Warn("kubernetes access unavailable",
 			slog.String("category", redact.Safe(err)))

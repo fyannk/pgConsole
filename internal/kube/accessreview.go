@@ -69,6 +69,7 @@ func (c *Client) listAccessRequests(ctx context.Context) ([]observe.AccessReques
 	examined := 0
 	opts := metav1.ListOptions{Limit: accessRequestListPageSize}
 	rv := ""
+	seed := c.seedRecord(scopeAccessRequests)
 	for {
 		list, err := c.dyn.Resource(accessRequestGVR).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -76,6 +77,7 @@ func (c *Client) listAccessRequests(ctx context.Context) ([]observe.AccessReques
 		}
 		rv = list.GetResourceVersion()
 		for i := range list.Items {
+			seed.add(list.Items[i].Object)
 			requests = append(requests, convertAccessRequest(&list.Items[i]))
 		}
 		examined += len(list.Items)
@@ -83,10 +85,12 @@ func (c *Client) listAccessRequests(ctx context.Context) ([]observe.AccessReques
 			break
 		}
 		if len(requests) > observe.MaxAccessRequests || examined >= maxAccessRequestCandidates {
+			seed.commit(false)
 			return requests, rv, true, nil
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(true)
 	return requests, rv, len(requests) > observe.MaxAccessRequests, nil
 }
 
@@ -94,22 +98,30 @@ func (c *Client) listAccessRoles(ctx context.Context) ([]string, error) {
 	var roles []string
 	examined := 0
 	opts := metav1.ListOptions{Limit: accessRequestListPageSize}
+	seed := c.seedRecord(scopeAccessRoles)
+	complete := false
 	for {
 		list, err := c.dyn.Resource(accessRoleGVR).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
 			return nil, categorize("access roles list", err)
 		}
 		for i := range list.Items {
+			seed.add(list.Items[i].Object)
 			if name := list.Items[i].GetName(); name != "" {
 				roles = append(roles, name)
 			}
 		}
 		examined += len(list.Items)
-		if list.GetContinue() == "" || len(roles) >= observe.MaxAccessRoles || examined >= maxRoleCandidates {
+		if list.GetContinue() == "" {
+			complete = true
+			break
+		}
+		if len(roles) >= observe.MaxAccessRoles || examined >= maxRoleCandidates {
 			break
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(complete)
 	return roles, nil
 }
 
@@ -177,7 +189,7 @@ func (c *Client) WatchAccessReview(ctx context.Context, state observe.AccessRevi
 	}
 	items, stop := fanIn(ctx,
 		[]watch.Interface{w},
-		[]pump[observe.AccessRequestChange]{pumpAccessRequest})
+		[]pump[observe.AccessRequestChange]{tap(c, scopeAccessRequests, pumpAccessRequest)})
 	return changeStream[observe.AccessRequestChange]{stream[observe.AccessRequestChange]{items: items, stop: stop}}, nil
 }
 

@@ -53,19 +53,19 @@ func (c *Client) FetchDatabaseObjects(ctx context.Context) (observe.DatabaseObje
 	var truncated bool
 	var err error
 
-	if state.Databases, state.DatabaseResourceVersion, truncated, err = listDeclared(ctx, c, databaseGVR, "databases", c.convertDatabase); err != nil {
+	if state.Databases, state.DatabaseResourceVersion, truncated, err = listDeclared(ctx, c, databaseGVR, scopeDatabases, c.convertDatabase); err != nil {
 		return observe.DatabaseObjectsState{}, err
 	}
 	state.Truncated = state.Truncated || truncated
-	if state.Roles, state.RoleResourceVersion, truncated, err = listDeclared(ctx, c, databaseRoleGVR, "database roles", c.convertDatabaseRole); err != nil {
+	if state.Roles, state.RoleResourceVersion, truncated, err = listDeclared(ctx, c, databaseRoleGVR, scopeDatabaseRoles, c.convertDatabaseRole); err != nil {
 		return observe.DatabaseObjectsState{}, err
 	}
 	state.Truncated = state.Truncated || truncated
-	if state.Publications, state.PublicationResourceVersion, truncated, err = listDeclared(ctx, c, publicationGVR, "publications", c.convertPublication); err != nil {
+	if state.Publications, state.PublicationResourceVersion, truncated, err = listDeclared(ctx, c, publicationGVR, scopePublications, c.convertPublication); err != nil {
 		return observe.DatabaseObjectsState{}, err
 	}
 	state.Truncated = state.Truncated || truncated
-	if state.Subscriptions, state.SubscriptionResourceVersion, truncated, err = listDeclared(ctx, c, subscriptionGVR, "subscriptions", c.convertSubscription); err != nil {
+	if state.Subscriptions, state.SubscriptionResourceVersion, truncated, err = listDeclared(ctx, c, subscriptionGVR, scopeSubscriptions, c.convertSubscription); err != nil {
 		return observe.DatabaseObjectsState{}, err
 	}
 	state.Truncated = state.Truncated || truncated
@@ -75,7 +75,7 @@ func (c *Client) FetchDatabaseObjects(ctx context.Context) (observe.DatabaseObje
 // listDeclared pages one declarative kind, keeping what convert selects.
 // The two ceilings are independent: the kept set, and the items scanned,
 // which is what protects against a namespace holding thousands of other
-// clusters' declarations.
+// clusters' declarations. op doubles as the kind's history scope.
 func listDeclared[T any](
 	ctx context.Context,
 	c *Client,
@@ -87,6 +87,7 @@ func listDeclared[T any](
 	examined := 0
 	opts := metav1.ListOptions{Limit: databaseObjectPageSize}
 	rv := ""
+	seed := c.seedRecord(op)
 	for {
 		list, err := c.dyn.Resource(gvr).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -99,6 +100,7 @@ func listDeclared[T any](
 				return nil, "", false, err
 			}
 			if member {
+				seed.add(list.Items[i].Object)
 				kept = append(kept, facts)
 			}
 		}
@@ -107,10 +109,12 @@ func listDeclared[T any](
 			break
 		}
 		if len(kept) > observe.MaxDatabaseObjects || examined >= maxDatabaseObjectsScan {
+			seed.commit(false)
 			return kept, rv, true, nil
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(true)
 	return kept, rv, len(kept) > observe.MaxDatabaseObjects, nil
 }
 
@@ -154,7 +158,10 @@ func (c *Client) WatchDatabaseObjects(ctx context.Context, state observe.Databas
 		inner = append(inner, o.w)
 	}
 	items, stop := fanIn(ctx, inner, []pump[observe.DatabaseObjectsChange]{
-		c.pumpDatabase, c.pumpDatabaseRole, c.pumpPublication, c.pumpSubscription,
+		tap(c, scopeDatabases, c.pumpDatabase),
+		tap(c, scopeDatabaseRoles, c.pumpDatabaseRole),
+		tap(c, scopePublications, c.pumpPublication),
+		tap(c, scopeSubscriptions, c.pumpSubscription),
 	})
 	return changeStream[observe.DatabaseObjectsChange]{stream[observe.DatabaseObjectsChange]{items: items, stop: stop}}, nil
 }

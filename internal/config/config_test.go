@@ -96,6 +96,21 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.ObjectStoreViewerURL != "" || cfg.PgAdminURL != "" || cfg.MonitoringURL != "" || cfg.RepositoryEvidenceURL != "" {
 		t.Error("optional URLs must default to empty")
 	}
+	if !cfg.HistoryEnabled {
+		t.Error("HistoryEnabled must default to true")
+	}
+	if cfg.HistoryMaxRevisions != DefaultHistoryMaxRevisions {
+		t.Errorf("HistoryMaxRevisions = %d, want %d", cfg.HistoryMaxRevisions, DefaultHistoryMaxRevisions)
+	}
+	if cfg.HistoryMaxBytes != DefaultHistoryMaxBytes {
+		t.Errorf("HistoryMaxBytes = %d, want %d", cfg.HistoryMaxBytes, DefaultHistoryMaxBytes)
+	}
+	if cfg.HistoryPerObjectRevisions != DefaultHistoryPerObjectRevisions {
+		t.Errorf("HistoryPerObjectRevisions = %d, want %d", cfg.HistoryPerObjectRevisions, DefaultHistoryPerObjectRevisions)
+	}
+	if cfg.HistoryCoalesceWindow != DefaultHistoryCoalesceWindow {
+		t.Errorf("HistoryCoalesceWindow = %s, want %s", cfg.HistoryCoalesceWindow, DefaultHistoryCoalesceWindow)
+	}
 }
 
 func TestLoadMatrix(t *testing.T) {
@@ -240,6 +255,49 @@ func TestLoadMatrix(t *testing.T) {
 			name:    "api timeout above bound",
 			mutate:  map[string]string{EnvAPIRequestTimeout: "2m"},
 			wantErr: EnvAPIRequestTimeout + ": must be a duration between 1s and 1m0s",
+		},
+		{
+			name:   "history disabled explicitly",
+			mutate: map[string]string{EnvHistoryEnabled: "false"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryEnabled {
+					t.Error("HistoryEnabled = true, want false")
+				}
+			},
+		},
+		{
+			name:    "history flag not a strict boolean",
+			mutate:  map[string]string{EnvHistoryEnabled: "on"},
+			wantErr: EnvHistoryEnabled + `: must be "true" or "false"`,
+		},
+		{
+			name:    "history revisions below bound",
+			mutate:  map[string]string{EnvHistoryMaxRevisions: "99"},
+			wantErr: EnvHistoryMaxRevisions + ": must be an integer between 100 and 20000",
+		},
+		{
+			name:    "history bytes above bound",
+			mutate:  map[string]string{EnvHistoryMaxBytes: "67108865"},
+			wantErr: EnvHistoryMaxBytes + ": must be an integer between 1048576 and 67108864",
+		},
+		{
+			name:    "history per-object revisions above bound",
+			mutate:  map[string]string{EnvHistoryPerObjectRevisions: "201"},
+			wantErr: EnvHistoryPerObjectRevisions + ": must be an integer between 2 and 200",
+		},
+		{
+			name:    "history coalesce window malformed",
+			mutate:  map[string]string{EnvHistoryCoalesceWindow: "soon"},
+			wantErr: EnvHistoryCoalesceWindow + ": must be a duration between 1s and 1h0m0s",
+		},
+		{
+			name:   "history bounds accepted at the edges",
+			mutate: map[string]string{EnvHistoryMaxRevisions: "100", EnvHistoryCoalesceWindow: "1s"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryMaxRevisions != 100 || cfg.HistoryCoalesceWindow != time.Second {
+					t.Errorf("bounds not applied: %d, %s", cfg.HistoryMaxRevisions, cfg.HistoryCoalesceWindow)
+				}
+			},
 		},
 		{
 			name:   "https link accepted",

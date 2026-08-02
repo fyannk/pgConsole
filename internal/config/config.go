@@ -67,6 +67,20 @@ const (
 	EnvEventsMaxAge = "EVENTS_MAX_AGE"
 	// EnvAPIRequestTimeout bounds an individual Kubernetes API request.
 	EnvAPIRequestTimeout = "API_REQUEST_TIMEOUT"
+	// EnvHistoryEnabled enables the bounded in-memory revision history of
+	// the watched object definitions.
+	EnvHistoryEnabled = "HISTORY_ENABLED"
+	// EnvHistoryMaxRevisions bounds the retained revisions across all
+	// objects.
+	EnvHistoryMaxRevisions = "HISTORY_MAX_REVISIONS"
+	// EnvHistoryMaxBytes bounds the summed stored manifest bytes.
+	EnvHistoryMaxBytes = "HISTORY_MAX_BYTES"
+	// EnvHistoryPerObjectRevisions bounds the retained revisions of one
+	// object.
+	EnvHistoryPerObjectRevisions = "HISTORY_PER_OBJECT_REVISIONS"
+	// EnvHistoryCoalesceWindow folds consecutive status transitions of
+	// one object closer together than this into a single revision.
+	EnvHistoryCoalesceWindow = "HISTORY_COALESCE_WINDOW"
 	// EnvObjectStoreViewerURL is the link-out base URL to the cluster's
 	// ObjectStoreViewer.
 	EnvObjectStoreViewerURL = "OBJECTSTOREVIEWER_URL"
@@ -110,6 +124,28 @@ const (
 	MinAPIRequestTimeout = time.Second
 	// MaxAPIRequestTimeout is the longest accepted API_REQUEST_TIMEOUT.
 	MaxAPIRequestTimeout = time.Minute
+	// MinHistoryMaxRevisions is the lowest accepted HISTORY_MAX_REVISIONS.
+	MinHistoryMaxRevisions = 100
+	// MaxHistoryMaxRevisions is the highest accepted HISTORY_MAX_REVISIONS.
+	MaxHistoryMaxRevisions = 20000
+	// MinHistoryMaxBytes is the lowest accepted HISTORY_MAX_BYTES.
+	MinHistoryMaxBytes = 1024 * 1024
+	// MaxHistoryMaxBytes is the highest accepted HISTORY_MAX_BYTES. The
+	// ceiling exists because history shares the process memory budget
+	// with every snapshot store.
+	MaxHistoryMaxBytes = 64 * 1024 * 1024
+	// MinHistoryPerObjectRevisions is the lowest accepted
+	// HISTORY_PER_OBJECT_REVISIONS.
+	MinHistoryPerObjectRevisions = 2
+	// MaxHistoryPerObjectRevisions is the highest accepted
+	// HISTORY_PER_OBJECT_REVISIONS.
+	MaxHistoryPerObjectRevisions = 200
+	// MinHistoryCoalesceWindow is the shortest accepted
+	// HISTORY_COALESCE_WINDOW.
+	MinHistoryCoalesceWindow = time.Second
+	// MaxHistoryCoalesceWindow is the longest accepted
+	// HISTORY_COALESCE_WINDOW.
+	MaxHistoryCoalesceWindow = time.Hour
 )
 
 // Defaults of the optional variables.
@@ -135,6 +171,17 @@ const (
 	// DefaultAPIRequestTimeout is applied when API_REQUEST_TIMEOUT is
 	// unset.
 	DefaultAPIRequestTimeout = 10 * time.Second
+	// DefaultHistoryMaxRevisions is applied when HISTORY_MAX_REVISIONS is
+	// unset.
+	DefaultHistoryMaxRevisions = 2000
+	// DefaultHistoryMaxBytes is applied when HISTORY_MAX_BYTES is unset.
+	DefaultHistoryMaxBytes = 16 * 1024 * 1024
+	// DefaultHistoryPerObjectRevisions is applied when
+	// HISTORY_PER_OBJECT_REVISIONS is unset.
+	DefaultHistoryPerObjectRevisions = 20
+	// DefaultHistoryCoalesceWindow is applied when
+	// HISTORY_COALESCE_WINDOW is unset.
+	DefaultHistoryCoalesceWindow = time.Minute
 )
 
 // Config is the validated runtime configuration. A Config only exists in
@@ -168,6 +215,20 @@ type Config struct {
 	EventsMaxAge time.Duration
 	// APIRequestTimeout bounds an individual Kubernetes API request.
 	APIRequestTimeout time.Duration
+	// HistoryEnabled enables the bounded in-memory revision history of
+	// the watched object definitions.
+	HistoryEnabled bool
+	// HistoryMaxRevisions bounds the retained revisions across all
+	// objects.
+	HistoryMaxRevisions int
+	// HistoryMaxBytes bounds the summed stored manifest bytes.
+	HistoryMaxBytes int
+	// HistoryPerObjectRevisions bounds the retained revisions of one
+	// object.
+	HistoryPerObjectRevisions int
+	// HistoryCoalesceWindow folds consecutive status transitions of one
+	// object closer together than this into a single revision.
+	HistoryCoalesceWindow time.Duration
 	// ObjectStoreViewerURL is the ObjectStoreViewer link-out base URL;
 	// empty hides the link.
 	ObjectStoreViewerURL string
@@ -235,14 +296,19 @@ func Load(lookup Lookup) (Config, error) {
 	}
 
 	cfg := Config{
-		ListenAddr:         DefaultListenAddr,
-		TrustedUserHeader:  DefaultTrustedUserHeader,
-		TrustedLevelHeader: DefaultTrustedLevelHeader,
-		AllowLogs:          true,
-		LogTailLines:       DefaultLogTailLines,
-		LogTailMaxBytes:    DefaultLogTailMaxBytes,
-		EventsMaxAge:       DefaultEventsMaxAge,
-		APIRequestTimeout:  DefaultAPIRequestTimeout,
+		ListenAddr:                DefaultListenAddr,
+		TrustedUserHeader:         DefaultTrustedUserHeader,
+		TrustedLevelHeader:        DefaultTrustedLevelHeader,
+		AllowLogs:                 true,
+		LogTailLines:              DefaultLogTailLines,
+		LogTailMaxBytes:           DefaultLogTailMaxBytes,
+		EventsMaxAge:              DefaultEventsMaxAge,
+		APIRequestTimeout:         DefaultAPIRequestTimeout,
+		HistoryEnabled:            true,
+		HistoryMaxRevisions:       DefaultHistoryMaxRevisions,
+		HistoryMaxBytes:           DefaultHistoryMaxBytes,
+		HistoryPerObjectRevisions: DefaultHistoryPerObjectRevisions,
+		HistoryCoalesceWindow:     DefaultHistoryCoalesceWindow,
 	}
 
 	cfg.ClusterName = requiredLabel(lookup, EnvClusterName, fail)
@@ -287,6 +353,12 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.LogTailMaxBytes = int64(intVar(lookup, EnvLogTailMaxBytes, DefaultLogTailMaxBytes, MinLogTailMaxBytes, MaxLogTailMaxBytes, fail))
 	cfg.EventsMaxAge = durationVar(lookup, EnvEventsMaxAge, DefaultEventsMaxAge, MinEventsMaxAge, MaxEventsMaxAge, fail)
 	cfg.APIRequestTimeout = durationVar(lookup, EnvAPIRequestTimeout, DefaultAPIRequestTimeout, MinAPIRequestTimeout, MaxAPIRequestTimeout, fail)
+
+	cfg.HistoryEnabled = boolVar(lookup, EnvHistoryEnabled, true, fail)
+	cfg.HistoryMaxRevisions = intVar(lookup, EnvHistoryMaxRevisions, DefaultHistoryMaxRevisions, MinHistoryMaxRevisions, MaxHistoryMaxRevisions, fail)
+	cfg.HistoryMaxBytes = intVar(lookup, EnvHistoryMaxBytes, DefaultHistoryMaxBytes, MinHistoryMaxBytes, MaxHistoryMaxBytes, fail)
+	cfg.HistoryPerObjectRevisions = intVar(lookup, EnvHistoryPerObjectRevisions, DefaultHistoryPerObjectRevisions, MinHistoryPerObjectRevisions, MaxHistoryPerObjectRevisions, fail)
+	cfg.HistoryCoalesceWindow = durationVar(lookup, EnvHistoryCoalesceWindow, DefaultHistoryCoalesceWindow, MinHistoryCoalesceWindow, MaxHistoryCoalesceWindow, fail)
 
 	cfg.ObjectStoreViewerURL = linkVar(lookup, EnvObjectStoreViewerURL, cfg.AllowInsecureLinks, fail)
 	cfg.PgAdminURL = linkVar(lookup, EnvPgAdminURL, cfg.AllowInsecureLinks, fail)

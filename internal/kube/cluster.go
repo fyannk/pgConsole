@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
 )
@@ -54,6 +55,11 @@ type Options struct {
 	// console can be granted: the ClusterImageCatalog its Cluster
 	// references. False means the lookup is never attempted.
 	AllowClusterCatalogs bool
+	// Recorder receives the history capture of every accepted
+	// observation. Nil disables capture entirely: no tap wraps any pump
+	// and no seed is collected, so the disabled path holds no capture
+	// code at all.
+	Recorder history.Recorder
 }
 
 // Client accesses the one target cluster through the Kubernetes API.
@@ -100,6 +106,9 @@ func (c *Client) Fetch(ctx context.Context) (observe.ClusterState, error) {
 	defer cancel()
 	obj, err := c.dyn.Resource(clusterGVR).Namespace(c.opts.Namespace).Get(ctx, c.opts.ClusterName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		// An empty seed is itself a complete observation: a cluster known
+		// to history and absent here was deleted while unobserved.
+		c.seedRecord(scopeCluster).commit(true)
 		return observe.ClusterState{Facts: observe.ClusterFacts{Present: false}}, nil
 	}
 	if err != nil {
@@ -109,6 +118,9 @@ func (c *Client) Fetch(ctx context.Context) (observe.ClusterState, error) {
 	if err != nil {
 		return observe.ClusterState{}, err
 	}
+	seed := c.seedRecord(scopeCluster)
+	seed.add(obj.Object)
+	seed.commit(true)
 	return observe.ClusterState{Facts: facts, ResourceVersion: obj.GetResourceVersion()}, nil
 }
 
@@ -126,7 +138,7 @@ func (c *Client) Watch(ctx context.Context, fromResourceVersion string) (observe
 	}
 	items, stop := fanIn(ctx,
 		[]watch.Interface{w},
-		[]pump[observe.ClusterState]{pumpCluster})
+		[]pump[observe.ClusterState]{tap(c, scopeCluster, pumpCluster)})
 	return resultStream[observe.ClusterState]{stream[observe.ClusterState]{items: items, stop: stop}}, nil
 }
 

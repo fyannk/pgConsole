@@ -59,6 +59,8 @@ func (c *Client) FetchPods(ctx context.Context) ([]observe.PodFacts, string, err
 		Limit:         podListPageSize,
 	}
 	rv := ""
+	seed := c.seedRecord(scopePods)
+	complete := false
 	for {
 		list, err := c.dyn.Resource(podGVR).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -74,13 +76,19 @@ func (c *Client) FetchPods(ctx context.Context) ([]observe.PodFacts, string, err
 				c.logExcludedPod(facts.Name)
 				continue
 			}
+			seed.add(list.Items[i].Object)
 			pods = append(pods, facts)
 		}
-		if list.GetContinue() == "" || len(pods) > observe.MaxPods {
+		if list.GetContinue() == "" {
+			complete = true
+			break
+		}
+		if len(pods) > observe.MaxPods {
 			break
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(complete)
 	return pods, rv, nil
 }
 
@@ -95,7 +103,7 @@ func (c *Client) WatchPods(ctx context.Context, fromResourceVersion string) (obs
 	}
 	items, stop := fanIn(ctx,
 		[]watch.Interface{w},
-		[]pump[observe.PodEvent]{c.pumpPod})
+		[]pump[observe.PodEvent]{tap(c, scopePods, c.pumpPod)})
 	return eventStream[observe.PodEvent]{stream[observe.PodEvent]{items: items, stop: stop}}, nil
 }
 

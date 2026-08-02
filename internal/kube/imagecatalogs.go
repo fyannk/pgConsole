@@ -63,6 +63,10 @@ func (c *Client) FetchImageCatalogs(ctx context.Context) (observe.ImageCatalogsS
 	examined := 0
 	opts := metav1.ListOptions{Limit: imageCatalogListPageSize}
 	rv := ""
+	// The cluster-scoped catalog get above is deliberately not captured:
+	// history records the namespace's objects, and the one cross-scope
+	// read stays a render-time resolution.
+	seed := c.seedRecord(scopeImageCatalogs)
 	for {
 		list, err := c.dyn.Resource(imageCatalogGVR).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -74,6 +78,7 @@ func (c *Client) FetchImageCatalogs(ctx context.Context) (observe.ImageCatalogsS
 			if err != nil {
 				return observe.ImageCatalogsState{}, err
 			}
+			seed.add(list.Items[i].Object)
 			catalogs = append(catalogs, facts)
 		}
 		examined += len(list.Items)
@@ -81,6 +86,7 @@ func (c *Client) FetchImageCatalogs(ctx context.Context) (observe.ImageCatalogsS
 			break
 		}
 		if len(catalogs) > observe.MaxImageCatalogs || examined >= maxImageCatalogCandidates {
+			seed.commit(false)
 			return observe.ImageCatalogsState{
 				Catalogs: catalogs, ResourceVersion: rv, Truncated: true,
 				ClusterCatalog: clusterCatalog, ClusterCatalogState: clusterState,
@@ -88,6 +94,7 @@ func (c *Client) FetchImageCatalogs(ctx context.Context) (observe.ImageCatalogsS
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(true)
 	return observe.ImageCatalogsState{
 		Catalogs:            catalogs,
 		ResourceVersion:     rv,
@@ -172,7 +179,7 @@ func (c *Client) WatchImageCatalogs(ctx context.Context, fromResourceVersion str
 	if err != nil {
 		return nil, categorize("image catalogs watch", err)
 	}
-	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.ImageCatalogChange]{pumpImageCatalog})
+	items, stop := fanIn(ctx, []watch.Interface{w}, []pump[observe.ImageCatalogChange]{tap(c, scopeImageCatalogs, pumpImageCatalog)})
 	return changeStream[observe.ImageCatalogChange]{stream[observe.ImageCatalogChange]{items: items, stop: stop}}, nil
 }
 

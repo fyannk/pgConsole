@@ -75,6 +75,7 @@ func (c *Client) listBackups(ctx context.Context) ([]observe.BackupFacts, string
 	examined := 0
 	opts := metav1.ListOptions{Limit: backupListPageSize}
 	rv := ""
+	seed := c.seedRecord(scopeBackups)
 	for {
 		list, err := c.dyn.Resource(backupGVR).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -87,6 +88,7 @@ func (c *Client) listBackups(ctx context.Context) ([]observe.BackupFacts, string
 				return nil, "", false, err
 			}
 			if member {
+				seed.add(list.Items[i].Object)
 				backups = append(backups, facts)
 			}
 		}
@@ -95,10 +97,12 @@ func (c *Client) listBackups(ctx context.Context) ([]observe.BackupFacts, string
 			break
 		}
 		if len(backups) > observe.MaxBackups || examined >= maxBackupCandidates {
+			seed.commit(false)
 			return backups, rv, true, nil
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(true)
 	return backups, rv, len(backups) > observe.MaxBackups, nil
 }
 
@@ -107,6 +111,7 @@ func (c *Client) listScheduledBackups(ctx context.Context) ([]observe.ScheduledB
 	examined := 0
 	opts := metav1.ListOptions{Limit: backupListPageSize}
 	rv := ""
+	seed := c.seedRecord(scopeScheduledBackups)
 	for {
 		list, err := c.dyn.Resource(scheduledBackupGVR).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -119,6 +124,7 @@ func (c *Client) listScheduledBackups(ctx context.Context) ([]observe.ScheduledB
 				return nil, "", false, err
 			}
 			if member {
+				seed.add(list.Items[i].Object)
 				schedules = append(schedules, facts)
 			}
 		}
@@ -127,10 +133,12 @@ func (c *Client) listScheduledBackups(ctx context.Context) ([]observe.ScheduledB
 			break
 		}
 		if len(schedules) > observe.MaxScheduledBackups || examined >= maxScheduledCandidates {
+			seed.commit(false)
 			return schedules, rv, true, nil
 		}
 		opts.Continue = list.GetContinue()
 	}
+	seed.commit(true)
 	return schedules, rv, len(schedules) > observe.MaxScheduledBackups, nil
 }
 
@@ -150,10 +158,14 @@ func (c *Client) fetchObjectStoreReference(ctx context.Context) observe.ObjectSt
 		return observe.ObjectStoreReference{State: observe.ObjectStoreNotReferenced}
 	}
 	ref := observe.ObjectStoreReference{Name: name, State: observe.ObjectStoreUnknown}
-	if _, err := c.dyn.Resource(objectStoreGVR).Namespace(c.opts.Namespace).Get(ctx, name, metav1.GetOptions{}); err != nil {
+	store, err := c.dyn.Resource(objectStoreGVR).Namespace(c.opts.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
 		c.logObjectStoreUnavailable(err)
 		return ref
 	}
+	// A get, not a listing: it observes the one referenced store and
+	// implies nothing about any other, so it never claims seed semantics.
+	c.recordObject(scopeObjectStore, store.Object)
 	ref.State = observe.ObjectStorePresent
 	return ref
 }
@@ -237,7 +249,10 @@ func (c *Client) WatchBackupCatalog(ctx context.Context, state observe.BackupCat
 
 	items, stop := fanIn(ctx,
 		[]watch.Interface{backups, schedules},
-		[]pump[observe.BackupChange]{c.pumpBackup, c.pumpScheduledBackup})
+		[]pump[observe.BackupChange]{
+			tap(c, scopeBackups, c.pumpBackup),
+			tap(c, scopeScheduledBackups, c.pumpScheduledBackup),
+		})
 	return changeStream[observe.BackupChange]{stream[observe.BackupChange]{items: items, stop: stop}}, nil
 }
 

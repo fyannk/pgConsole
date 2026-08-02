@@ -171,6 +171,44 @@ Consequences that constrain every design decision here:
       be restored is not something either the operator or the repository
       scan reports, so the console does not say it.
 
+## Object definition history
+
+`internal/history` retains a bounded, in-memory revision timeline of the
+watched object definitions — what changed, when it was observed, and by
+which field manager. Capture rides the existing watches: `internal/kube`
+taps each pump after it accepts an event and hands each complete listing
+over as a seed, so membership filtering stays single-sourced and no
+second watch connection exists. Its invariants:
+
+- **In-memory and bounded, or absent.** History lives and dies with the
+  process — the stateless-process rule stands. Retention is bounded on
+  three axes (global revisions, global manifest bytes, revisions per
+  object) from validated configuration; `HISTORY_ENABLED=false` means no
+  recorder is constructed and no tap wraps any pump.
+- **Scrubbed at the boundary.** A stored manifest never contains managed
+  fields, the resource version, the last-applied annotation, or an
+  inline container environment value; env names and secret *references*
+  survive. The scrub is structural, not path-based, and its totality is
+  a tested negative case.
+- **Kubernetes-reported, and it says so.** A revision records what the
+  API server delivered and when this process observed it. Actor
+  attribution is the manager name from `managedFields` — self-declared,
+  never an authenticated identity — and observation times are this
+  process's clock, never server timestamps.
+- **Gaps are explicit.** A change or deletion discovered by a re-seed
+  after contact loss is recorded as having happened inside a named
+  unobserved window, never as if it happened at observation time. Only a
+  complete, fully-converted listing may claim seed semantics; a
+  truncated one degrades to per-item observations, which imply nothing
+  about what was not seen.
+- **Logs stay out.** Rule 6 is untouched: history stores object
+  definitions, never log content, and Kubernetes Events are excluded —
+  they are already a timeline of their own.
+
+The store is written for a durable backend to slide underneath later
+(`Snapshot` for the metadata timeline, `Revision` for one manifest); the
+rendering screen arrives with the design work and is not wired yet.
+
 ## Engineering conventions
 
 Match the surrounding code. `CONTRIBUTING.md` is the human-readable guide;
