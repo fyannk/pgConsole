@@ -50,6 +50,7 @@ func rev(seq uint64, uid string) history.Revision {
 		ObservedAt: time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
 		SpecHash:   "s1",
 		StatusHash: "t1",
+		Owners:     []history.FieldOwner{{Manager: "kubelet", Paths: []string{".status.phase"}}},
 		Manifest:   []byte(`{"kind":"Pod"}`),
 	}
 }
@@ -82,6 +83,9 @@ func TestRoundTrip(t *testing.T) {
 	got := contents.Revisions[0]
 	if got.UID != "a" || got.Kind != "Pod" || string(got.Manifest) != `{"kind":"Pod"}` || got.Actor.Manager != "kubelet" {
 		t.Fatalf("revision did not survive the round trip: %+v", got)
+	}
+	if len(got.Owners) != 1 || got.Owners[0].Paths[0] != ".status.phase" {
+		t.Fatalf("field ownership did not survive the round trip: %+v", got.Owners)
 	}
 	if rec, ok := contents.Objects["a"]; !ok || rec.SpecHash != "s1" {
 		t.Fatalf("object state did not survive: %+v", contents.Objects)

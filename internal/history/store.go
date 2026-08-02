@@ -123,7 +123,7 @@ func (s *Store) prime(contents Contents) {
 	for i := range contents.Revisions {
 		rev := contents.Revisions[i]
 		s.entries = append(s.entries, &rev)
-		s.totalBytes += len(rev.Manifest)
+		s.totalBytes += revisionSize(&rev)
 	}
 	s.seq = contents.Seq
 	// Generation resumes at the sequence: monotonic across the restart
@@ -271,13 +271,15 @@ func (s *Store) coalesce(obs Observation, state *objectState, now time.Time) boo
 	if now.Sub(last.ObservedAt) >= s.limits.CoalesceWindow {
 		return false
 	}
-	s.totalBytes += len(obs.Manifest) - len(last.Manifest)
+	s.totalBytes -= revisionSize(last)
 	last.Manifest = obs.Manifest
 	last.StatusHash = obs.StatusHash
 	last.Generation = obs.Generation
 	last.Actor = obs.Actor
+	last.Owners = obs.Owners
 	last.ObservedAt = now
 	last.Coalesced++
+	s.totalBytes += revisionSize(last)
 	if s.persist != nil {
 		s.persist.Update(*last)
 	}
@@ -354,7 +356,7 @@ func (s *Store) append(rev *Revision, state *objectState) {
 	s.seq++
 	rev.Seq = s.seq
 	s.entries = append(s.entries, rev)
-	s.totalBytes += len(rev.Manifest)
+	s.totalBytes += revisionSize(rev)
 	state.count++
 	state.last = rev
 	s.generation++
@@ -397,7 +399,7 @@ func (s *Store) enforceBounds() {
 func (s *Store) evict(i int) {
 	rev := s.entries[i]
 	s.entries = append(s.entries[:i], s.entries[i+1:]...)
-	s.totalBytes -= len(rev.Manifest)
+	s.totalBytes -= revisionSize(rev)
 	if s.persist != nil {
 		s.persist.Evict(rev.Seq)
 		if !s.evicted {
@@ -458,7 +460,37 @@ func (s *Store) Revision(seq uint64) (Revision, bool) {
 	}
 	rev := *s.entries[i]
 	rev.Manifest = append([]byte(nil), rev.Manifest...)
+	rev.Owners = copyOwners(rev.Owners)
 	return rev, true
+}
+
+// revisionSize is the retention cost of one revision: the manifest plus
+// the attribution strings, so the byte budget stays the whole truth.
+func revisionSize(rev *Revision) int {
+	size := len(rev.Manifest)
+	for i := range rev.Owners {
+		size += len(rev.Owners[i].Manager)
+		for _, path := range rev.Owners[i].Paths {
+			size += len(path)
+		}
+	}
+	return size
+}
+
+// copyOwners deep-copies an owner set, so a returned revision is the
+// caller's value.
+func copyOwners(owners []FieldOwner) []FieldOwner {
+	if owners == nil {
+		return nil
+	}
+	copied := make([]FieldOwner, len(owners))
+	for i := range owners {
+		copied[i] = FieldOwner{
+			Manager: owners[i].Manager,
+			Paths:   append([]string(nil), owners[i].Paths...),
+		}
+	}
+	return copied
 }
 
 // revisionOf builds the retained record of one observation.
@@ -479,6 +511,7 @@ func revisionOf(obs Observation, change Change, now, prev time.Time, afterGap bo
 		PrevObservedAt: prev,
 		SpecHash:       obs.SpecHash,
 		StatusHash:     obs.StatusHash,
+		Owners:         obs.Owners,
 		Manifest:       obs.Manifest,
 	}
 }

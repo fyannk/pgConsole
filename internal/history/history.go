@@ -49,9 +49,21 @@ type Actor struct {
 	Operation string
 }
 
+// FieldOwner maps one field manager to the paths it owned at one
+// observation, parsed from metadata.managedFields before the boundary
+// strips it. It is what turns "this manager touched the object" into
+// "this manager owned the field that changed". Paths use the same
+// encoding the differ produces, so attribution compares like with like.
+type FieldOwner struct {
+	// Manager is the manager's self-declared name.
+	Manager string
+	// Paths are the owned field paths, sorted and bounded at capture.
+	Paths []string
+}
+
 // Observation is one capture handed over by the kube boundary. The
 // manifest is opaque, already-normalized, already-scrubbed canonical
-// JSON; nothing in this package parses it.
+// JSON; nothing in this package parses it until a diff is requested.
 type Observation struct {
 	// Scope names the seed-and-watch unit this observation came through,
 	// such as "pods" or "scheduled backups". A complete seed of one scope
@@ -79,6 +91,10 @@ type Observation struct {
 	StatusHash string
 	// Actor is the last-touching field manager.
 	Actor Actor
+	// Owners are the per-manager owned field paths at this observation,
+	// bounded at capture. Empty attribution is honest: a change whose
+	// owner is unknown stays unattributed.
+	Owners []FieldOwner
 	// Deleted reports that the watch delivered a deletion.
 	Deleted bool
 }
@@ -141,6 +157,9 @@ type Revision struct {
 	// SpecHash and StatusHash are the observation's digests, retained so
 	// a later backend can deduplicate without reparsing manifests.
 	SpecHash, StatusHash string
+	// Owners are the per-manager owned field paths at this revision,
+	// consulted when a diff attributes its changes.
+	Owners []FieldOwner
 	// Manifest is the object definition at this revision; nil for
 	// deletions and unobserved deletions.
 	Manifest []byte

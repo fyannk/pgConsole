@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sort"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -197,9 +199,11 @@ func observationFrom(scope string, content map[string]any, deleted bool) (histor
 	}
 	if deleted {
 		// The last definition is the previous revision's word; a
-		// deletion contributes identity and nothing else.
+		// deletion contributes identity and nothing else — not even
+		// ownership, because there is no diff to attribute.
 		return obs, nil
 	}
+	obs.Owners = ownersOf(meta)
 
 	manifest := normalize(content)
 	specHash, statusHash, encoded, err := digest(manifest)
@@ -299,6 +303,133 @@ func digest(manifest map[string]any) (specHash, statusHash string, encoded []byt
 func hashOf(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// maxOwnedPaths bounds the owned field paths captured per observation,
+// across all managers. The bound lives here, at the boundary, like
+// every other bound: a pod's kubelet entry can own hundreds of status
+// leafs, and attribution beyond the budget degrades to "unattributed"
+// rather than to unbounded retention.
+const maxOwnedPaths = 128
+
+// ownersOf reads each field manager's owned paths from
+// metadata.managedFields, in the shared field-path encoding, before
+// normalize strips the managed fields away. Entries of one manager —
+// an Apply and an Update entry can coexist — are merged.
+func ownersOf(meta map[string]any) []history.FieldOwner {
+	fields, ok := meta["managedFields"].([]any)
+	if !ok {
+		return nil
+	}
+	budget := maxOwnedPaths
+	byManager := map[string][]string{}
+	var managers []string
+	for _, field := range fields {
+		entry, ok := field.(map[string]any)
+		if !ok {
+			continue
+		}
+		manager, _ := entry["manager"].(string)
+		fieldsV1, ok := entry["fieldsV1"].(map[string]any)
+		if manager == "" || !ok {
+			continue
+		}
+		var paths []string
+		collectOwned("", fieldsV1, &paths, &budget)
+		if len(paths) == 0 {
+			continue
+		}
+		if _, seen := byManager[manager]; !seen {
+			managers = append(managers, manager)
+		}
+		byManager[manager] = append(byManager[manager], paths...)
+	}
+	if len(managers) == 0 {
+		return nil
+	}
+	sort.Strings(managers)
+	owners := make([]history.FieldOwner, 0, len(managers))
+	for _, manager := range managers {
+		paths := byManager[manager]
+		sort.Strings(paths)
+		deduped := paths[:0]
+		for i, path := range paths {
+			if i == 0 || path != paths[i-1] {
+				deduped = append(deduped, path)
+			}
+		}
+		owners = append(owners, history.FieldOwner{Manager: manager, Paths: deduped})
+	}
+	return owners
+}
+
+// collectOwned walks one fieldsV1 tree. The format's markers: "f:NAME"
+// descends into a field, "k:{json}" into an associative-list element,
+// "v:..." claims a set member, and "." claims the node itself. An
+// associative key that is exactly a name renders as the differ's named
+// segment, so ownership and diffs meet on the same string.
+func collectOwned(prefix string, node map[string]any, paths *[]string, budget *int) {
+	keys := make([]string, 0, len(node))
+	for key := range node {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if *budget <= 0 {
+			return
+		}
+		switch {
+		case key == "." || strings.HasPrefix(key, "v:"):
+			if prefix != "" {
+				*paths = append(*paths, prefix)
+				*budget--
+			}
+		case strings.HasPrefix(key, "f:"):
+			child := history.FieldPathKey(prefix, strings.TrimPrefix(key, "f:"))
+			descend(child, node[key], paths, budget)
+		case strings.HasPrefix(key, "k:"):
+			child := prefix + associativeSegment(strings.TrimPrefix(key, "k:"))
+			descend(child, node[key], paths, budget)
+		}
+	}
+}
+
+// descend recurses into a non-empty subtree or claims the leaf.
+func descend(path string, value any, paths *[]string, budget *int) {
+	if sub, ok := value.(map[string]any); ok && len(sub) > 0 {
+		collectOwned(path, sub, paths, budget)
+		return
+	}
+	*paths = append(*paths, path)
+	*budget--
+}
+
+// associativeSegment renders one k: element key. A single "name" key
+// uses the differ's named encoding; anything else renders its merge
+// keys sorted, which the differ never produces and therefore never
+// falsely matches.
+func associativeSegment(raw string) string {
+	var keyFields map[string]any
+	if err := json.Unmarshal([]byte(raw), &keyFields); err != nil {
+		return "[" + raw + "]"
+	}
+	if name, ok := keyFields["name"].(string); ok && len(keyFields) == 1 {
+		return history.FieldPathNamed("", name)
+	}
+	keys := make([]string, 0, len(keyFields))
+	for key := range keyFields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		encoded, err := json.Marshal(keyFields[key])
+		if err != nil {
+			continue
+		}
+		parts = append(parts, key+"="+string(encoded))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // actorOf reads the most recently touching field manager. It is

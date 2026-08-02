@@ -213,9 +213,19 @@ second watch connection exists. Its invariants:
   definitions, never log content, and Kubernetes Events are excluded —
   they are already a timeline of their own.
 
-The read side is `Snapshot` for the metadata timeline and `Revision`
-for one manifest; the rendering screen arrives with the design work and
-is not wired yet.
+The read side is `Snapshot` for the metadata timeline, `Revision` for
+one manifest, and `Diff` for the changed paths between a revision and
+the previous retained definition of the same object. Diffs are computed
+on demand and never stored; named Kubernetes lists compare by their
+`name` merge key, so a reorder is not a change; the entry list and every
+rendered value are bounded. Each diff entry may attribute its path to
+the field manager that owned it — from `managedFields` ownership
+captured (bounded) at the boundary — and attributes to nobody when no
+manager, or more than one, plausibly owns the path: a guessed
+attribution is worse than an absent one. A revision whose baseline was
+evicted or never observed reports `HasBase` false rather than diffing
+against the wrong thing. The rendering screen arrives with the design
+work and is not wired yet.
 
 ## Engineering conventions
 

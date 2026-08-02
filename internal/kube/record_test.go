@@ -61,8 +61,38 @@ func rawPod(uid string) map[string]any {
 				"kept": "value",
 			},
 			"managedFields": []any{
-				map[string]any{"manager": "kubectl-client-side-apply", "operation": "Update", "time": "2026-08-01T10:00:00Z"},
-				map[string]any{"manager": "cloudnative-pg", "operation": "Update", "time": "2026-08-01T11:00:00Z"},
+				map[string]any{
+					"manager": "kubectl-client-side-apply", "operation": "Update", "time": "2026-08-01T10:00:00Z",
+					"fieldsV1": map[string]any{
+						"f:metadata": map[string]any{
+							"f:annotations": map[string]any{"f:kept": map[string]any{}},
+						},
+					},
+				},
+				map[string]any{
+					"manager": "cloudnative-pg", "operation": "Update", "time": "2026-08-01T11:00:00Z",
+					"fieldsV1": map[string]any{
+						"f:spec": map[string]any{
+							"f:containers": map[string]any{
+								`k:{"name":"postgres"}`: map[string]any{
+									".":       map[string]any{},
+									"f:image": map[string]any{},
+								},
+							},
+						},
+					},
+				},
+				map[string]any{
+					"manager": "kubelet", "operation": "Update", "time": "2026-08-01T09:00:00Z",
+					"fieldsV1": map[string]any{
+						"f:status": map[string]any{
+							"f:phase": map[string]any{},
+							"f:conditions": map[string]any{
+								`k:{"type":"Ready"}`: map[string]any{"f:status": map[string]any{}},
+							},
+						},
+					},
+				},
 			},
 		},
 		"spec": map[string]any{
@@ -162,6 +192,64 @@ func TestObservationHashesSplitSpecFromStatus(t *testing.T) {
 	}
 	if same.SpecHash != base.SpecHash || same.StatusHash != base.StatusHash {
 		t.Fatal("resource-version churn moved a hash")
+	}
+}
+
+func TestObservationCapturesFieldOwnership(t *testing.T) {
+	obs, err := observationFrom(scopePods, rawPod("u1"), false)
+	if err != nil {
+		t.Fatalf("observationFrom: %v", err)
+	}
+	if len(obs.Owners) != 3 {
+		t.Fatalf("owners = %+v, want 3 managers", obs.Owners)
+	}
+	// Sorted by manager name.
+	cnpg, kubectl, kubelet := obs.Owners[0], obs.Owners[1], obs.Owners[2]
+	if cnpg.Manager != "cloudnative-pg" ||
+		cnpg.Paths[0] != ".spec.containers[name=postgres]" ||
+		cnpg.Paths[1] != ".spec.containers[name=postgres].image" {
+		t.Fatalf("cnpg = %+v: named list elements must use the differ's encoding", cnpg)
+	}
+	if kubectl.Manager != "kubectl-client-side-apply" || kubectl.Paths[0] != ".metadata.annotations.kept" {
+		t.Fatalf("kubectl = %+v", kubectl)
+	}
+	if kubelet.Manager != "kubelet" || len(kubelet.Paths) != 2 || kubelet.Paths[1] != ".status.phase" {
+		t.Fatalf("kubelet = %+v", kubelet)
+	}
+	if kubelet.Paths[0] != `.status.conditions[type="Ready"].status` {
+		t.Fatalf("multi-key element = %q: must render merge keys, which the differ never matches", kubelet.Paths[0])
+	}
+}
+
+func TestOwnershipCaptureIsBounded(t *testing.T) {
+	wide := map[string]any{}
+	for i := 0; i < 300; i++ {
+		wide["f:field"+string(rune('a'+i%26))+string(rune('a'+(i/26)%26))+string(rune('a'+i%7))] = map[string]any{}
+	}
+	pod := rawPod("u1")
+	pod["metadata"].(map[string]any)["managedFields"] = []any{
+		map[string]any{"manager": "wide", "operation": "Update", "fieldsV1": map[string]any{"f:spec": wide}},
+	}
+	obs, err := observationFrom(scopePods, pod, false)
+	if err != nil {
+		t.Fatalf("observationFrom: %v", err)
+	}
+	total := 0
+	for _, owner := range obs.Owners {
+		total += len(owner.Paths)
+	}
+	if total > maxOwnedPaths {
+		t.Fatalf("captured %d owned paths, want at most %d", total, maxOwnedPaths)
+	}
+}
+
+func TestDeletionObservationCarriesNoOwnership(t *testing.T) {
+	obs, err := observationFrom(scopePods, rawPod("u1"), true)
+	if err != nil {
+		t.Fatalf("observationFrom: %v", err)
+	}
+	if obs.Owners != nil {
+		t.Fatalf("owners = %+v, want none on a deletion", obs.Owners)
 	}
 }
 
