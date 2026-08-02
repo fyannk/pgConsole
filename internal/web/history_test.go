@@ -133,7 +133,7 @@ func TestHistoryRevisionEscapesAndBoundsDefinition(t *testing.T) {
 		}},
 	}
 	h := newHistoryHandler(t, source)
-	rec := get(t, h, http.MethodGet, "/history/revisions/7")
+	rec := getWithHeaders(t, h, "/history/revisions/7", powerUserHeaders())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("revision status = %d, want 200", rec.Code)
 	}
@@ -154,7 +154,65 @@ func TestHistoryRejectsInvalidCursorAndUnknownRevision(t *testing.T) {
 	if got := get(t, h, http.MethodGet, "/history?before=not-a-number").Code; got != http.StatusBadRequest {
 		t.Fatalf("invalid cursor status = %d, want 400", got)
 	}
-	if got := get(t, h, http.MethodGet, "/history/revisions/99").Code; got != http.StatusNotFound {
+	if got := getWithHeaders(t, h, "/history/revisions/99", powerUserHeaders()).Code; got != http.StatusNotFound {
 		t.Fatalf("unknown revision status = %d, want 404", got)
+	}
+}
+
+// powerUserHeaders is the proxy assertion that clears the revision gate.
+func powerUserHeaders() map[string]string {
+	return map[string]string{"X-Forwarded-User": "operator", "X-PgToolBox-Level": "poweruser"}
+}
+
+func TestHistoryRevisionRequiresPowerUserWithIdentity(t *testing.T) {
+	t.Parallel()
+	source := fakeHistorySource{revisions: map[uint64]history.Revision{7: {
+		Seq: 7, Kind: "Pod", Name: "orders-1", Change: history.ChangeSpec,
+		ObservedAt: testNow, Manifest: []byte(`{"kind":"Pod"}`),
+	}}}
+	h := newHistoryHandler(t, source)
+
+	// The negative cases: no assertion at all, a level below the gate,
+	// and a level without a usable identity all refuse — a definition
+	// must never render below the bar the log tail already enforces.
+	for name, headers := range map[string]map[string]string{
+		"no headers":       {},
+		"viewer":           {"X-Forwarded-User": "viewer", "X-PgToolBox-Level": "view"},
+		"level, no user":   {"X-PgToolBox-Level": "poweruser"},
+		"identity untyped": {"X-Forwarded-User": "operator"},
+	} {
+		rec := getWithHeaders(t, h, "/history/revisions/7", headers)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: status = %d, want 403", name, rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), `"kind":"Pod"`) {
+			t.Errorf("%s: refused response leaked the definition", name)
+		}
+	}
+
+	if got := getWithHeaders(t, h, "/history/revisions/7", powerUserHeaders()).Code; got != http.StatusOK {
+		t.Fatalf("poweruser status = %d, want 200", got)
+	}
+}
+
+func TestHistoryTimelineLinksOnlyAboveTheGate(t *testing.T) {
+	t.Parallel()
+	source := fakeHistorySource{snap: history.Snapshot{Entries: []history.Entry{{
+		Seq: 7, Kind: "Pod", Name: "orders-1", Change: history.ChangeSpec,
+		ObservedAt: testNow, HasManifest: true,
+	}}}, ok: true}
+	h := newHistoryHandler(t, source)
+
+	baseline := get(t, h, http.MethodGet, "/history").Body.String()
+	if strings.Contains(baseline, `href="/history/revisions/`) {
+		t.Fatal("baseline timeline links a revision the route would refuse")
+	}
+	if !strings.Contains(baseline, "details require the poweruser or dba level") {
+		t.Fatal("baseline timeline does not state why the detail is absent")
+	}
+
+	elevated := getWithHeaders(t, h, "/history", powerUserHeaders()).Body.String()
+	if !strings.Contains(elevated, `href="/history/revisions/7"`) {
+		t.Fatal("poweruser timeline misses the revision link")
 	}
 }

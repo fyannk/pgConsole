@@ -265,9 +265,15 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /poolers", h.handlePoolers("poolers-overview"))
 	mux.HandleFunc("GET /poolers/pods", h.handlePoolers("poolers-pods"))
 	mux.HandleFunc("GET /poolers/logs", h.handlePoolers("poolers-logs"))
+	// The timeline is manifest-free metadata and stays at the baseline;
+	// the revision detail is the object's definition verbatim minus the
+	// scrub — more revealing than any other screen — so it sits behind
+	// the same gate as the log tail, and the timeline hides the links
+	// below that level.
 	if h.sources.History != nil {
 		mux.HandleFunc("GET /history", h.handleHistory)
-		mux.HandleFunc("GET /history/revisions/{seq}", h.handleHistoryRevision)
+		mux.HandleFunc("GET /history/revisions/{seq}", h.requireLevel(authz.TierPowerUser,
+			"revision details require the poweruser or dba level", h.handleHistoryRevision))
 	}
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
 	mux.HandleFunc("GET /readyz", h.handleReadyz)

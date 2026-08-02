@@ -34,7 +34,7 @@
             <td>{{.Change}}{{if .Coalesced}}<br><span class="meta">{{.Coalesced}} additional transitions coalesced</span>{{end}}{{if .GapWindow}}<br><span class="state">discovered after a gap {{.GapWindow}}</span>{{end}}</td>
             <td>{{.Manager}}{{if .Operation}} — {{.Operation}}{{end}}<br><span class="meta">self-declared field manager</span></td>
             <td>{{.Scope}}</td>
-            <td>{{if .HasManifest}}<a href="/history/revisions/{{.Seq}}">revision {{.Seq}}</a>{{else}}definition not retained for deletion{{end}}</td>
+            <td>{{if not .HasManifest}}definition not retained for deletion{{else if $.CanInspect}}<a href="/history/revisions/{{.Seq}}">revision {{.Seq}}</a>{{else}}<span class="meta">revision {{.Seq}} — details require the poweruser or dba level</span>{{end}}</td>
           </tr>
         {{- end}}
         </tbody>

@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/fyannk/pgConsole/internal/authz"
 	"github.com/fyannk/pgConsole/internal/history"
 )
 
@@ -48,6 +49,10 @@ type HistoryView struct {
 	Before uint64
 	// NextURL requests the next retained page when HasMore is true.
 	NextURL string
+	// CanInspect reports that this request clears the revision-detail
+	// gate, so the timeline links only where the route would answer — the
+	// same affordance rule the log tail follows.
+	CanInspect bool
 }
 
 // HistoryEntryView is one manifest-free timeline entry.
@@ -136,6 +141,8 @@ func (h *Handler) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	snap, _ := h.sources.History.Snapshot()
 	view := h.buildHistoryView(snap, before)
+	access := h.requestAccess(r)
+	view.CanInspect = access.hasIdentity && access.level >= authz.TierPowerUser
 	view.Shell = h.shell(r, "history")
 	h.renderPage(w, "history", "history.html.tmpl", view)
 }

@@ -90,7 +90,13 @@ async function audit(page) {
  * @returns {Promise<void>}
  */
 async function checkEnhancement(browser) {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
+  // The proxy always asserts identity and level in production; this
+  // context mirrors that, and it is what clears the revision-detail
+  // gate the history flow below exercises.
+  const ctx = await browser.newContext({
+    viewport: { width: 1440, height: 1200 },
+    extraHTTPHeaders: { 'X-Forwarded-User': 'operator', 'X-PgToolBox-Level': 'poweruser' },
+  });
   const page = await ctx.newPage();
   const errors = watch(page);
   await page.goto(STATES.healthy, { waitUntil: 'networkidle' });

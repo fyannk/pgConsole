@@ -183,6 +183,8 @@ rewrite() {
     -e 's|/static/console\.js|console.js|g' \
     -e 's|/static/topology-force\.js|topology-force.js|g' \
     -e 's|/static/alpine\.csp\.js|alpine.csp.js|g' \
+    -e 's|/static/htmx-2\.0\.10\.min\.js|htmx-2.0.10.min.js|g' \
+    -e 's|/static/history-timeline\.js|history-timeline.js|g' \
     -e 's|/static/favicon\.svg|favicon.svg|g' \
     -e 's|action="/operations/[^"]*"|action="operations-result.html"|g' \
     -e 's|action="/access-requests/[^"]*/approve"|action="access-result.html"|g' \
@@ -202,6 +204,9 @@ rewrite() {
     -e 's|"/poolers/pods"|"poolers-pods.html"|g' \
     -e 's|"/poolers/logs"|"poolers-logs.html"|g' \
     -e 's|"/poolers"|"poolers-overview.html"|g' \
+    -e 's|"/history/revisions/[^"]*"|"history-revision.html"|g' \
+    -e 's|"/history?[^"]*"|"history-timeline.html"|g' \
+    -e 's|"/history"|"history-timeline.html"|g' \
     -e 's|"/operations/[^"]*"|"operations-confirm.html"|g' \
     -e 's|"/operations"|"operations-index.html"|g' \
     -e 's|"/access-requests"|"access-requests.html"|g' \
@@ -230,6 +235,8 @@ cp internal/web/static/app.css "$OUT/pages/console.css"
 cp internal/web/static/console.js "$OUT/pages/console.js"
 cp internal/web/static/topology-force.js "$OUT/pages/topology-force.js"
 cp internal/web/static/alpine.csp.js "$OUT/pages/alpine.csp.js"
+cp internal/web/static/htmx-2.0.10.min.js "$OUT/pages/htmx-2.0.10.min.js"
+cp internal/web/static/history-timeline.js "$OUT/pages/history-timeline.js"
 cp internal/web/static/favicon.svg "$OUT/pages/favicon.svg"
 
 log "capturing the pages"
@@ -294,11 +301,22 @@ page $HEALTHY "/operations/promote?instance=orders-2" poweruser operator \
 page $HEALTHY /access-requests dba dba@corp access-requests.html Pages \
   "Access requests — queue" "Pending and already-decided requests with approve/deny forms"
 
+# The object-definition history. The timeline is baseline metadata, but
+# it is captured at poweruser so the revision links render; the revision
+# detail requires that level, and its refusal is a designed screen.
+page $HEALTHY /history poweruser operator history-timeline.html Pages \
+  "Object history — timeline" "Observed revisions of watched object definitions, newest first"
+page $HEALTHY /history/revisions/2 poweruser operator history-revision.html Pages \
+  "Object history — revision" "One scrubbed retained definition with its bounded structural diff"
+
 # A refusal is a designed screen, not an error page: the route exists,
 # the level does not clear it, and the reason is stated.
 refused $HEALTHY /operations view viewer 403 \
   | emit denied.html Pages \
       "Denied" "Level gate refusing a route, with the reason stated"
+refused $HEALTHY /history/revisions/2 view viewer 403 \
+  | emit history-revision-gated.html Pages \
+      "Object history — revision denied" "A retained definition refused below the poweruser level"
 
 # Observed and empty. Every "there are none" branch the console can take
 # is a distinct claim from "nothing observed yet", worded differently on
