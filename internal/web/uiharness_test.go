@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
 	"github.com/fyannk/pgConsole/internal/kube"
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -65,6 +66,29 @@ var uiLinks = Links{
 	ObjectStoreViewer: "https://viewer.example.com/orders",
 	PgAdmin:           "https://pgadmin.example.com",
 	Monitoring:        "https://grafana.example.com/d/pg",
+}
+
+type uiHistoryClock struct{ now time.Time }
+
+func (c *uiHistoryClock) Now() time.Time { return c.now }
+
+func uiHistorySource() *history.Store {
+	clock := &uiHistoryClock{now: testNow.Add(-2 * time.Minute)}
+	store := history.NewStore(history.Limits{PerObject: 20, MaxRevisions: 100, MaxBytes: 1024 * 1024}, clock)
+	base := history.Observation{
+		Scope: "cluster", Group: "postgresql.cnpg.io", Version: "v1", Kind: "Cluster",
+		Namespace: "payments", Name: "orders", UID: "cluster-uid", Generation: 4,
+		Manifest: []byte(`{"apiVersion":"postgresql.cnpg.io/v1","kind":"Cluster","metadata":{"name":"orders","namespace":"payments"},"spec":{"instances":2}}`),
+		SpecHash: "instances-2", StatusHash: "ready", Actor: history.Actor{Manager: "cloudnative-pg", Operation: "Update"},
+	}
+	store.Observe(base)
+	clock.now = testNow.Add(-time.Minute)
+	base.Generation = 5
+	base.Manifest = []byte(`{"apiVersion":"postgresql.cnpg.io/v1","kind":"Cluster","metadata":{"name":"orders","namespace":"payments"},"spec":{"instances":3}}`)
+	base.SpecHash = "instances-3"
+	base.Actor = history.Actor{Manager: "gitops", Operation: "Apply"}
+	store.Observe(base)
+	return store
 }
 
 // uiPopulated is the everything-reported source set, current or stale.
@@ -272,7 +296,7 @@ func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, autho
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
 	}
 	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots,
-		Evidence: fakeEvidence{status: status}}
+		Evidence: fakeEvidence{status: status}, History: uiHistorySource()}
 	var executor OpsExecutor
 	var reviewer ReviewExecutor
 	if authorized {

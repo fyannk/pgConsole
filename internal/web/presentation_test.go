@@ -15,6 +15,8 @@
 package web
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -90,7 +92,9 @@ func TestEnhancementIsAdditive(t *testing.T) {
 
 	for _, want := range []string{
 		`<script src="/static/console.js" defer></script>`,
+		`<script src="/static/htmx-2.0.10.min.js" defer></script>`,
 		`<script src="/static/alpine.csp.js" defer></script>`,
+		`<script src="/static/history-timeline.js" defer></script>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page misses %q", want)
@@ -159,7 +163,9 @@ func TestStaticAssetsAreServed(t *testing.T) {
 	for _, path := range []string{
 		"/static/app.css",
 		"/static/console.js",
+		"/static/htmx-2.0.10.min.js",
 		"/static/alpine.csp.js",
+		"/static/history-timeline.js",
 		// Without this the browser requests /favicon.ico on every page
 		// load, takes a 404, and logs a console error. img-src 'self'
 		// rules out a data: URI, so it has to be a served asset.
@@ -179,29 +185,13 @@ func TestStaticAssetsAreServed(t *testing.T) {
 // to the implicit /favicon.ico request, which the router answers 404.
 func TestEveryPageReferencesTheFavicon(t *testing.T) {
 	t.Parallel()
-	entries, err := assets.ReadDir("templates")
+	raw, err := assets.ReadFile("templates/shell.html.tmpl")
 	if err != nil {
-		t.Fatalf("read templates: %v", err)
+		t.Fatalf("read shared shell: %v", err)
 	}
 	const want = `<link rel="icon" href="/static/favicon.svg">`
-	pages := 0
-	for _, entry := range entries {
-		raw, err := assets.ReadFile("templates/" + entry.Name())
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
-		// Partials define shared blocks and have no document head of
-		// their own; only whole pages can carry the link.
-		if !strings.Contains(string(raw), "<!DOCTYPE html>") {
-			continue
-		}
-		pages++
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("%s does not reference the favicon", entry.Name())
-		}
-	}
-	if pages == 0 {
-		t.Fatal("no page templates found; the partial filter is wrong")
+	if !strings.Contains(string(raw), want) {
+		t.Error("shared page head does not reference the favicon")
 	}
 }
 
@@ -215,25 +205,18 @@ func TestEveryPageRendersTheSharedShell(t *testing.T) {
 		t.Fatalf("read templates: %v", err)
 	}
 	for _, entry := range entries {
+		if entry.Name() == "shell.html.tmpl" || entry.Name() == "topology.html.tmpl" {
+			continue
+		}
 		raw, err := assets.ReadFile("templates/" + entry.Name())
 		if err != nil {
 			t.Fatalf("read %s: %v", entry.Name(), err)
 		}
 		body := string(raw)
-		if !strings.Contains(body, "<!DOCTYPE html>") {
-			continue
-		}
-		// shell.html.tmpl carries a doctype inside its page-head define,
-		// but it is the partial that *defines* the chrome rather than a
-		// page that composes it. Pages built on shell-open get the
-		// topbar and sidebar from it transitively.
-		if entry.Name() == "shell.html.tmpl" {
-			continue
-		}
 		for _, want := range []string{
-			`{{template "topbar" .Shell}}`,
-			`{{template "sidebar" .Shell}}`,
-			`<div class="shell">`,
+			`{{template "page-head"`,
+			`{{template "shell-open" .Shell}}`,
+			`{{template "shell-close"}}`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s misses %q", entry.Name(), want)
@@ -339,6 +322,20 @@ func TestVendoredAlpineIsTheCSPBuild(t *testing.T) {
 		if strings.Contains(src, forbidden) {
 			t.Errorf("vendored Alpine contains %q; the CSP build must not", forbidden)
 		}
+	}
+}
+
+// TestVendoredHTMXIsPinned makes a dependency update an explicit source
+// change rather than an unnoticed replacement of executable browser code.
+func TestVendoredHTMXIsPinned(t *testing.T) {
+	t.Parallel()
+	raw, err := assets.ReadFile("static/htmx-2.0.10.min.js")
+	if err != nil {
+		t.Fatalf("read vendored htmx: %v", err)
+	}
+	const want = "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de"
+	if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != want {
+		t.Fatalf("vendored htmx digest = %s, want %s", got, want)
 	}
 }
 

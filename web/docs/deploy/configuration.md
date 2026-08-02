@@ -52,6 +52,18 @@ writer — it is provably absent, not merely refused.
 Kubernetes API request. Every value has a validated minimum and maximum;
 see the reference.
 
+## Object-definition history
+
+`HISTORY_ENABLED` defaults to `true`. Capture taps the lists and watches the
+console already owns, so it adds no Kubernetes connection or RBAC verb. The
+retained revision count, manifest bytes, per-object count, and status
+coalescing window are independently bounded by the `HISTORY_*` settings.
+
+History is in memory by default and restarts empty. `HISTORY_PATH` opts into a
+bbolt journal on an explicitly mounted writable PVC. That deployment must use
+one replica; an unusable or locked journal fails before listen. The commented
+PVC example in `deploy/kubernetes-example.yaml` shows the required mount.
+
 ## Link-outs
 
 `OBJECTSTOREVIEWER_URL`, `PGADMIN_URL`, and `MONITORING_URL` add sibling

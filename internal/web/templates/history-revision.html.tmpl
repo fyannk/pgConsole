@@ -1,0 +1,37 @@
+{{- /* One scrubbed retained definition and its bounded structural diff. */ -}}
+{{template "page-head" "history revision"}}
+{{template "shell-open" .Shell}}
+  <header>
+    <div class="header-bar">
+      <h1>Object definition history</h1>
+      <p><a href="/history" hx-boost="true">Back to retained revisions</a></p>
+    </div>
+  </header>
+  <section class="panel" id="history-detail">
+    <h2>{{.Object}} — revision {{.Seq}}</h2>
+    <dl>
+      <dt>Change</dt><dd>{{.Change}}</dd>
+      <dt>Observed</dt><dd><time datetime="{{.ObservedAt}}">{{.ObservedAt}}</time> by this pgConsole process</dd>
+      <dt>Field manager</dt><dd>{{.Manager}}{{if .Operation}} — {{.Operation}}{{end}} (Kubernetes-reported, self-declared)</dd>
+    </dl>
+    <h3>Structural diff</h3>
+    {{- if not .DiffAvailable}}
+    <p class="state">the revision was no longer retained when its diff was requested</p>
+    {{- else if not .HasBase}}
+    <p class="state">no previous retained definition is available; pgConsole will not compare against the wrong baseline</p>
+    {{- else}}
+    <p class="meta">compared with revision {{.BaseSeq}}, observed {{.BaseObservedAt}}</p>
+    {{- if .DiffTruncated}}<p class="state">the diff reached its 256-entry display bound</p>{{end}}
+    {{- if .DiffEntries}}
+    <div class="table-scroll"><table>
+      <thead><tr><th>Path</th><th>Operation</th><th>Before</th><th>After</th><th>Manager</th></tr></thead>
+      <tbody>{{range .DiffEntries}}<tr><td><code>{{.Path}}</code></td><td>{{.Operation}}</td><td><code>{{.Before}}</code></td><td><code>{{.After}}</code></td><td>{{if .Manager}}{{.Manager}}{{else}}unattributed{{end}}</td></tr>{{end}}</tbody>
+    </table></div>
+    {{- else}}<p class="state">no changed paths were reported by the bounded structural comparison</p>{{end}}
+    {{- end}}
+    <h3>Scrubbed manifest</h3>
+    {{- if .ManifestTruncated}}<p class="state">the manifest display was truncated at 256 KiB</p>{{end}}
+    <pre class="manifest"><code>{{.Manifest}}</code></pre>
+    <p class="origin">source: Kubernetes-reported definition, structurally scrubbed at the capture boundary</p>
+  </section>
+{{template "shell-close"}}

@@ -6,28 +6,14 @@
   reviewer's decision on the request status only — the operator's
   controller materializes the user after an approval.
 */ -}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pgConsole — access requests {{.ClusterName}}</title>
-  <link rel="icon" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  {{template "icons"}}
-  {{template "topbar" .Shell}}
-  <div class="shell">
-  {{template "sidebar" .Shell}}
-  <div class="content">
+{{template "page-head" "access requests"}}
+{{template "shell-open" .Shell}}
   <header>
     <div class="header-bar">
       <h1>pgConsole — access requests</h1>
     <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
     </div>
   </header>
-  <main>
     <section class="panel">
       <h2>Pending requests</h2>
       <p class="origin">source: Kubernetes ({{.Meta.State}}, observed {{.Meta.Age}} ago, generation {{.Meta.Generation}})</p>
@@ -46,7 +32,7 @@
             <td>{{.Message}}</td>
             <td>{{.Age}}</td>
             <td>
-              <form method="POST" action="/access-requests/{{.Name}}/approve">
+              <form method="POST" action="/access-requests/{{.Name}}/approve" hx-boost="false">
                 <input type="hidden" name="csrf" value="{{.ApproveToken}}">
                 <label>Role
                   <select name="role" required>
@@ -58,7 +44,7 @@
                 </label>
                 <button type="submit">Approve</button>
               </form>
-              <form method="POST" action="/access-requests/{{.Name}}/deny">
+              <form method="POST" action="/access-requests/{{.Name}}/deny" hx-boost="false">
                 <input type="hidden" name="csrf" value="{{.DenyToken}}">
                 <button type="submit" class="danger">Deny</button>
               </form>
@@ -87,8 +73,4 @@
       <p class="state">no decided requests</p>
       {{- end}}
     </section>
-  </main>
-  </div>
-  </div>
-</body>
-</html>
+{{template "shell-close"}}

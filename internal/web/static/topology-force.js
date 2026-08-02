@@ -187,24 +187,29 @@
     svg.setAttribute('data-layout', 'force');
   }
 
-  function start() {
-    var svg = document.querySelector('svg.topo');
-    if (!svg) return;
-    var src = svg.getAttribute('data-topo');
-    if (!src) return;
-    var data;
-    try {
-      data = JSON.parse(src);
-    } catch (e) {
-      // The served drawing stays exactly as it is.
-      return;
-    }
-    build(svg, data);
+  function start(root) {
+	var scope = root && root.querySelectorAll ? root : document;
+	var svgs = scope.querySelectorAll('svg.topo:not([data-layout="force"])');
+	Array.prototype.forEach.call(svgs, function (svg) {
+	  var src = svg.getAttribute('data-topo');
+	  if (!src) return;
+	  var data;
+	  try {
+		data = JSON.parse(src);
+	  } catch (e) {
+		// The served drawing stays exactly as it is.
+		return;
+	  }
+	  build(svg, data);
+	});
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start);
+	document.addEventListener('DOMContentLoaded', function () { start(document); });
   } else {
-    start();
+	start(document);
   }
+	document.addEventListener('htmx:afterSwap', function (event) {
+	  start(event.detail && event.detail.elt);
+	});
 })();

@@ -69,6 +69,30 @@ func (e *recordingExecutor) Execute(_ context.Context, id ops.ID, target string,
 // gate, so every request they issue carries it.
 var powerUser = map[string]string{"X-Forwarded-User": "operator", "X-PgToolBox-Level": "poweruser"}
 
+func TestOperationsNavigationRequiresIdentityAndPowerUserLevel(t *testing.T) {
+	t.Parallel()
+	h := newOpsHandler(t, newRecordingExecutor())
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    bool
+	}{
+		{name: "poweruser", headers: powerUser, want: true},
+		{name: "dba", headers: map[string]string{"X-Forwarded-User": "dba", "X-PgToolBox-Level": "dba"}, want: true},
+		{name: "view", headers: map[string]string{"X-Forwarded-User": "viewer", "X-PgToolBox-Level": "view"}},
+		{name: "level without identity", headers: map[string]string{"X-PgToolBox-Level": "poweruser"}},
+		{name: "identity without level", headers: map[string]string{"X-Forwarded-User": "operator"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := getWithHeaders(t, h, "/", tc.headers).Body.String()
+			if got := strings.Contains(body, `href="/operations"`); got != tc.want {
+				t.Errorf("operations navigation present = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // newOpsHandler builds an operations-enabled handler over the executor,
 // with the trusted level header configured so poweruser requests reach
 // the routes.

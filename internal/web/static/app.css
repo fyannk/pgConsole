@@ -105,6 +105,26 @@ body {
    flashes in and never lingers when the script fails to load. */
 [x-cloak] { display: none !important; }
 
+.refresh-error { color: var(--bad); }
+
+.history-visual {
+  overflow-x: auto;
+  margin: .75rem 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.history-visual svg { display: block; width: 100%; min-width: 620px; height: auto; }
+.history-axis { stroke: var(--border-strong); stroke-width: 2; }
+.history-point circle { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.history-point-deleted circle,
+.history-point-deleted-unobserved circle { fill: var(--bad); }
+.history-point-spec-changed circle { fill: var(--warn); }
+.history-point text,
+.history-visual-label { fill: var(--text-muted); font-size: 11px; }
+.manifest { max-height: 34rem; overflow: auto; }
+
 /* The inline icon sprite defines <symbol>s for <use>; it must render
    nothing and take no flow space, or its line box pushes the shell down
    below the fixed top bar. Kept referenceable (not display:none) so the

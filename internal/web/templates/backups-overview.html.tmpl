@@ -27,7 +27,7 @@
         </div>
       </div>
       {{- with .EvidenceLink}}
-      <p><a href="{{.URL}}" rel="noopener noreferrer">{{.Label}}</a></p>
+      <p><a href="{{.URL}}" hx-boost="false" rel="noopener noreferrer">{{.Label}}</a></p>
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
     </section>

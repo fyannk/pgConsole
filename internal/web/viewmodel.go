@@ -653,6 +653,10 @@ type ShellView struct {
 	ClusterName string
 	// Namespace is the configured target namespace.
 	Namespace string
+	// CurrentURL is the same-origin request URI that rendered this shell.
+	// The refresh control requests it again; it is server-derived rather
+	// than accepted from client markup.
+	CurrentURL string
 	// SnapshotState is "none", "current", or "stale"; empty on pages
 	// that render no snapshot at all.
 	SnapshotState string
@@ -665,10 +669,23 @@ type ShellView struct {
 	Identity *IdentityView
 	// Links are the configured link-outs, possibly empty.
 	Links []Link
-	// OperationsEnabled reports that the operations destination is live.
-	OperationsEnabled bool
-	// AccessReviewEnabled reports that the review destination is live.
-	AccessReviewEnabled bool
+	// OperationsAvailable reports that this deployment serves the
+	// operations route. It is separate from CanOperate so a disabled
+	// deployment can stay legible without exposing a destination to a user
+	// whose asserted level cannot reach it.
+	OperationsAvailable bool
+	// CanOperate reports that this request carries both a usable forwarded
+	// identity and the poweruser-or-higher level needed by the route.
+	CanOperate bool
+	// AccessReviewAvailable reports that this deployment serves the access
+	// review route.
+	AccessReviewAvailable bool
+	// CanReviewAccess reports that this request carries both a usable
+	// forwarded identity and the dba level needed by the route.
+	CanReviewAccess bool
+	// HistoryAvailable reports that the in-memory history read side is
+	// constructed and its route is registered.
+	HistoryAvailable bool
 	// Current is the key of the page being rendered, used for
 	// aria-current. Empty on pages outside the map.
 	Current string
@@ -736,8 +753,6 @@ type Page struct {
 	// Identity is the display-only identity line, nil when no identity
 	// was forwarded or display is disabled.
 	Identity *IdentityView
-	// OperationsEnabled reports that the operations entry link renders.
-	OperationsEnabled bool
 }
 
 // Links are the operator-configured link-out URLs; empty entries hide

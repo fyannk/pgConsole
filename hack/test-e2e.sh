@@ -103,6 +103,7 @@ node_port=$(kubectl -n payments get svc pgconsole-e2e-access -o jsonpath='{.spec
 base="http://${node_ip}:${node_port}"
 
 page() { curl -fsS --max-time 5 "$base/" 2>/dev/null || true; }
+page_at() { curl -fsS --max-time 5 "$base$1" 2>/dev/null || true; }
 
 i=0
 until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
@@ -132,6 +133,21 @@ wait_page_contains() {
   done
 }
 
+wait_path_contains() {
+  path="$1"; needle="$2"; timeout="$3"; artifact="$4"
+  i=0
+  while :; do
+    body=$(page_at "$path")
+    if echo "$body" | grep -qF "$needle"; then
+      echo "$body" > "$OUT/$artifact"
+      return 0
+    fi
+    i=$((i + 2))
+    [ "$i" -le "$timeout" ] || { echo "$body" > "$OUT/$artifact"; log "timed out waiting for $path to contain: $needle"; return 1; }
+    sleep 2
+  done
+}
+
 log "creating a Backup resource (operator will report its phase)"
 cat <<'YAML' | kubectl apply -f - > /dev/null
 apiVersion: postgresql.cnpg.io/v1
@@ -146,20 +162,23 @@ YAML
 
 log "baseline: real operator-reported state renders"
 wait_page_contains "Cluster in healthy state" 120 baseline.html
-# The milestone demands every section render real rows: status,
-# conditions, pods, events, and backups.
-for needle in \
-  "orders-1" \
-  "current — age" \
-  "manual-1" \
-  "Conditions" \
-  "<td>Ready</td>" \
-  "source: operator-reported" \
-  "source: kubernetes-observed"; do
-  grep -qF "$needle" "$OUT/baseline.html" || { log "baseline misses: $needle"; exit 1; }
-done
-grep -qF "no events in the window" "$OUT/baseline.html" && { log "no event row rendered for the live cluster"; exit 1; }
-grep -qF "Pod/orders-1" "$OUT/baseline.html" || { log "member pod event not rendered"; exit 1; }
+# The overview and the section screens together must render real rows. Wait
+# independently for each snapshot: cluster health can already be present when
+# the Backup is created, and the overview intentionally summarizes rather than
+# repeating the section tables.
+wait_path_contains "/cluster/status" "Conditions" 120 baseline-status.html
+wait_path_contains "/cluster/pods" "orders-1" 120 baseline-pods.html
+wait_path_contains "/cluster/events" "Pod/orders-1" 120 baseline-events.html
+wait_path_contains "/backups/objects" "manual-1" 120 baseline-backups.html
+grep -qF "orders-1" "$OUT/baseline.html" || { log "overview misses: orders-1"; exit 1; }
+grep -qF "<td>Ready</td>" "$OUT/baseline-status.html" || { log "status screen misses the Ready condition"; exit 1; }
+grep -qF "source: operator-reported" "$OUT/baseline-status.html" || { log "status screen misses operator attribution"; exit 1; }
+grep -qF "current — age" "$OUT/baseline-pods.html" || { log "pods screen misses current snapshot age"; exit 1; }
+grep -qF "source: kubernetes-observed" "$OUT/baseline-pods.html" || { log "pods screen misses Kubernetes attribution"; exit 1; }
+grep -qF "manual-1" "$OUT/baseline-backups.html" || { log "backup objects screen misses: manual-1"; exit 1; }
+grep -qF "source: operator-reported" "$OUT/baseline-backups.html" || { log "backup objects screen misses operator attribution"; exit 1; }
+grep -qF "no events in the window" "$OUT/baseline-events.html" && { log "no event row rendered for the live cluster"; exit 1; }
+grep -qF "source: kubernetes-observed" "$OUT/baseline-events.html" || { log "events screen misses Kubernetes attribution"; exit 1; }
 grep -qF 'href="https://viewer.example.com/repo"' "$OUT/baseline.html" || { log "configured evidence link-out not rendered"; exit 1; }
 grep -qE 'verified|restorable' "$OUT/baseline.html" && { log "prohibited language rendered"; exit 1; }
 log "baseline ok (status, conditions, pods, events, backups, link-out all render)"

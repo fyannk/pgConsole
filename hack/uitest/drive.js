@@ -100,6 +100,9 @@ async function checkEnhancement(browser) {
 
   const version = await page.evaluate(() => (window.Alpine || {}).version || '');
   check('Alpine started under script-src self', version !== '', `version ${version || 'absent'}`);
+  const htmxVersion = await page.evaluate(() => (window.htmx || {}).version || '');
+  check('htmx started under script-src self', htmxVersion === '2.0.10',
+    `version ${htmxVersion || 'absent'}`);
 
   const others = errors.filter((e) => !/Content Security Policy|Refused to/i.test(e));
   check('no console errors or failed requests', others.length === 0, others.slice(0, 4).join(' | '));
@@ -181,6 +184,45 @@ async function checkEnhancement(browser) {
   await page.locator('.sidebar-toggle').click();
   await page.waitForTimeout(150);
   check('sidebar expands again', (await widthOf()) === expanded);
+
+  // Enhanced navigation replaces one application root while preserving
+  // the document, then the manual refresh uses the same atomic path.
+  await page.evaluate(() => { window.__pgconsoleDocumentMarker = 'survives-root-swaps'; });
+  const navigationCount = await page.evaluate(() => performance.getEntriesByType('navigation').length);
+  await page.locator('a.sidebar-link[title="Object history"]').click();
+  await page.waitForURL(/\/history$/);
+  await page.waitForTimeout(200);
+  const enhanced = await page.evaluate(() => ({
+    marker: window.__pgconsoleDocumentMarker,
+    navigations: performance.getEntriesByType('navigation').length,
+    roots: document.querySelectorAll('#pgconsole-app').length,
+  }));
+  check('sidebar navigation swaps one application root without reloading the document',
+    enhanced.marker === 'survives-root-swaps' && enhanced.navigations === navigationCount && enhanced.roots === 1,
+    `${enhanced.navigations} navigation entries, ${enhanced.roots} app roots`);
+  check('history timeline enhancement draws from the served rows',
+    await page.locator('[data-history-visual] svg .history-point').count() === 2);
+
+  const refreshed = page.evaluate(() => new Promise((resolve) => {
+    document.addEventListener('htmx:afterSwap', () => resolve(true), { once: true });
+  }));
+  await page.locator('.refresh-now').click();
+  await refreshed;
+  check('manual refresh preserves the browser document',
+    await page.evaluate(() => window.__pgconsoleDocumentMarker === 'survives-root-swaps'));
+
+  const cachedHistory = await page.evaluate(() => Object.keys(localStorage)
+    .filter((key) => key.toLowerCase().includes('htmx'))
+    .map((key) => [key, localStorage.getItem(key)]));
+  check('htmx stores no page history in localStorage', cachedHistory.length === 0,
+    JSON.stringify(cachedHistory));
+
+  await page.locator('a[href^="/history/revisions/"]').first().click();
+  await page.waitForURL(/\/history\/revisions\/\d+$/);
+  check('revision detail loads into the live history screen',
+    (await page.locator('#history-detail').innerText()).includes('Structural diff'));
+  check('refresh follows the selected revision URL',
+    (await page.locator('.refresh-now').getAttribute('hx-get')) === new URL(page.url()).pathname);
 
   // A destination this build does not serve is present but inert: shown
   // so the map stays complete, never a link that would 404.

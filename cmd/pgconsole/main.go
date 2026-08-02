@@ -92,9 +92,12 @@ func run() error {
 				return err
 			}
 			opts.Recorder = store
+			deps.HistorySource = store
 			deps.HistoryRunner = journal.Run
 		} else {
-			opts.Recorder = history.NewStore(limits, observe.RealClock{})
+			store := history.NewStore(limits, observe.RealClock{})
+			opts.Recorder = store
+			deps.HistorySource = store
 		}
 	}
 	client, err := kube.InClusterClient(opts, logger)

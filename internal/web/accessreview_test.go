@@ -65,6 +65,29 @@ func (f fakeAccessReview) CurrentAccessReview() (observe.AccessReviewSnapshot, b
 // dba is the header set that admits the review routes.
 var dba = map[string]string{"X-Forwarded-User": "dba@corp", "X-PgToolBox-Level": "dba"}
 
+func TestAccessReviewNavigationRequiresIdentityAndDBALevel(t *testing.T) {
+	t.Parallel()
+	h, _, _, _ := newReviewHandler(t, pendingSnapshot())
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    bool
+	}{
+		{name: "dba", headers: dba, want: true},
+		{name: "poweruser", headers: map[string]string{"X-Forwarded-User": "operator", "X-PgToolBox-Level": "poweruser"}},
+		{name: "view", headers: map[string]string{"X-Forwarded-User": "viewer", "X-PgToolBox-Level": "view"}},
+		{name: "level without identity", headers: map[string]string{"X-PgToolBox-Level": "dba"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := getWithHeaders(t, h, "/", tc.headers).Body.String()
+			if got := strings.Contains(body, `href="/access-requests"`); got != tc.want {
+				t.Errorf("access-review navigation present = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func newReviewHandler(t *testing.T, source AccessReviewSource) (*Handler, *reviewWriter, *review.Executor, *bytes.Buffer) {
 	t.Helper()
 	logs := &bytes.Buffer{}

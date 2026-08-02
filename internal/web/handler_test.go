@@ -184,7 +184,7 @@ var requiredHeaders = map[string]string{
 	"X-Content-Type-Options":  "nosniff",
 	"X-Frame-Options":         "DENY",
 	"Referrer-Policy":         "no-referrer",
-	"Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+	"Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
 }
 
 func TestHandlerSecurityHeadersOnEveryResponse(t *testing.T) {

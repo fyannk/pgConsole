@@ -35,6 +35,7 @@ test-integration:
 test-scale:
 	$(GO) test -race ./internal/observe -run '^Test(PodStoreBoundsAndFlagsTruncation|EventCollectorBoundsRetentionAndRendering|BackupStoreBoundsAndFlagsTruncation|PoolerStoreBoundsAndFlagsTruncation|ImageCatalogStoreBoundsAndFlagsTruncation)$$' -count=1
 	$(GO) test -race ./internal/web -run '^TestHandler(ClusterPodsUnknownsAndTruncation|ClusterEventsTruncationVisible|BackupObjectsTruncationVisible)$$' -count=1
+	$(GO) test -race ./internal/web -run '^TestHistoryViewBoundsLargeTimeline$$' -count=1
 
 test-container: docker-build
 	./hack/test-container.sh $(IMAGE)

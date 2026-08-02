@@ -4,28 +4,14 @@
   the cluster view, where the operator's reported progress appears. No
   client-side polling or orchestration.
 */ -}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pgConsole — {{.Op.Title}}</title>
-  <link rel="icon" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  {{template "icons"}}
-  {{template "topbar" .Shell}}
-  <div class="shell">
-  {{template "sidebar" .Shell}}
-  <div class="content">
+{{template "page-head" "operation result"}}
+{{template "shell-open" .Shell}}
   <header>
     <div class="header-bar">
       <h1>pgConsole — operation requested</h1>
     <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
     </div>
   </header>
-  <main>
     <section class="panel">
       <h2>{{.Op.Title}}</h2>
       {{- if .Accepted}}
@@ -34,8 +20,4 @@
       <p class="state">not accepted: {{.Outcome}}. Nothing was changed by this console beyond the attempt.</p>
       {{- end}}
     </section>
-  </main>
-  </div>
-  </div>
-</body>
-</html>
+{{template "shell-close"}}

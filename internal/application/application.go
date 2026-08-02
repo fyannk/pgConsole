@@ -97,6 +97,9 @@ type Deps struct {
 	// loop, owning the journal file's lifecycle. Nil means history is
 	// in-memory or disabled and no loop runs.
 	HistoryRunner func(ctx context.Context) error
+	// HistorySource reads the same bounded store that the Kubernetes watch
+	// recorder writes. Nil means history is disabled and no UI route exists.
+	HistorySource web.HistorySource
 	// Prober answers the readiness endpoint.
 	Prober web.ReadinessProber
 	// Clock supplies time to the collectors and the page ages.
@@ -134,6 +137,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		FailoverQuorum:  web.EmptySnapshots{},
 		ImageCatalogs:   web.EmptySnapshots{},
 		DatabaseObjects: web.EmptySnapshots{},
+		History:         deps.HistorySource,
 	}
 	if deps.Source != nil {
 		store := observe.NewStore()

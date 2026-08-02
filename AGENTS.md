@@ -257,9 +257,13 @@ scans, and the tests. In short:
   `test-scale`, `test-container`, `test-multiarch`, `test-ui`, `test-e2e`,
   `lint`, `check`, `docker-build`, `supply-chain`, and `release-check`.
 - The console UI is server-rendered `html/template` plus one embedded
-  stylesheet and an embedded progressive-enhancement layer (the Alpine
-  CSP build, vendored — never the standard build, which would require
-  `script-src 'unsafe-eval'`). Content is never gated behind scripting:
+  stylesheet and two narrowly separated, vendored enhancement layers:
+  htmx 2.x owns same-origin HTML navigation and atomic screen refresh;
+  the Alpine CSP build owns local component state (never the standard
+  Alpine build, which would require `script-src 'unsafe-eval'`). Both are
+  served from the binary, htmx evaluation and browser history caching are
+  disabled, and neither layer decides authorization or interprets cluster
+  state. Content is never gated behind scripting:
   the document is complete before any script runs, enhancement-only
   controls carry `x-cloak`, and no state word is ever replaced by a
   colour or a mark. `make test-ui` enforces all of that in a browser.

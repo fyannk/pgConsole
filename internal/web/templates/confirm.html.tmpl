@@ -4,32 +4,18 @@
   CSRF token; the route is never GET. For instance operations the
   chosen instance is submitted with the confirmation.
 */ -}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pgConsole — confirm {{.Op.Title}}</title>
-  <link rel="icon" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  {{template "icons"}}
-  {{template "topbar" .Shell}}
-  <div class="shell">
-  {{template "sidebar" .Shell}}
-  <div class="content">
+{{template "page-head" "confirm operation"}}
+{{template "shell-open" .Shell}}
   <header>
     <div class="header-bar">
       <h1>pgConsole — confirm operation</h1>
     <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
     </div>
   </header>
-  <main>
     <section class="panel">
       <h2>{{.Op.Title}}</h2>
       <p class="state">{{.Op.Summary}}</p>
-      <form method="POST" action="/operations/{{.Op.ID}}">
+      <form method="POST" action="/operations/{{.Op.ID}}" hx-boost="false">
         <input type="hidden" name="csrf" value="{{.CSRFToken}}">
         {{- if .Op.NeedsInstance}}
         <p><label>Instance <input type="text" name="instance" value="{{.Target}}" required pattern="[a-z0-9][-a-z0-9.]*"></label></p>
@@ -38,8 +24,4 @@
       </form>
       <p class="origin">This requests the operation; the operator reports its progress on the console.</p>
     </section>
-  </main>
-  </div>
-  </div>
-</body>
-</html>
+{{template "shell-close"}}

@@ -32,6 +32,7 @@ import (
 
 	"github.com/fyannk/pgConsole/internal/authz"
 	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
@@ -111,6 +112,18 @@ type EvidenceSource interface {
 	CurrentEvidence() evidence.Status
 }
 
+// HistorySource supplies the bounded object-definition timeline and its
+// on-demand revision details. Reads are in-memory snapshots; they never call
+// Kubernetes and never create another watch.
+type HistorySource interface {
+	// Snapshot returns the retained manifest-free timeline.
+	Snapshot() (history.Snapshot, bool)
+	// Revision resolves one retained, scrubbed definition.
+	Revision(seq uint64) (history.Revision, bool)
+	// Diff compares a revision with its previous retained definition.
+	Diff(seq uint64) (history.Diff, bool)
+}
+
 // Sources bundles the snapshot suppliers of the page.
 type Sources struct {
 	// Cluster supplies the cluster snapshot.
@@ -137,6 +150,9 @@ type Sources struct {
 	// AccessReview supplies the access-request review snapshot. Nil means
 	// the review panel is disabled: no source, no route, no writer.
 	AccessReview AccessReviewSource
+	// History supplies the object-definition timeline. Nil means history is
+	// disabled and no history route is registered.
+	History HistorySource
 }
 
 // LogTailer performs one bounded, on-demand log fetch for a verified
@@ -249,6 +265,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /poolers", h.handlePoolers("poolers-overview"))
 	mux.HandleFunc("GET /poolers/pods", h.handlePoolers("poolers-pods"))
 	mux.HandleFunc("GET /poolers/logs", h.handlePoolers("poolers-logs"))
+	if h.sources.History != nil {
+		mux.HandleFunc("GET /history", h.handleHistory)
+		mux.HandleFunc("GET /history/revisions/{seq}", h.handleHistoryRevision)
+	}
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
 	mux.HandleFunc("GET /readyz", h.handleReadyz)
 	// The instance log tail sits above the baseline: it requires the
@@ -293,10 +313,12 @@ func securityHeaders(next http.Handler) http.Handler {
 		// served from this binary, never fetched. 'unsafe-eval' is
 		// deliberately absent — the vendored Alpine is the CSP build,
 		// which parses its own restricted expression grammar instead of
-		// calling new Function(). connect-src stays at default-src 'none'
-		// so the scripts cannot originate a request of any kind.
+		// calling new Function(). Browser-originated requests are confined
+		// to this application: htmx uses them for enhanced GET navigation
+		// and refresh, while selfRequestsOnly independently enforces the
+		// same boundary.
 		header.Set("Content-Security-Policy",
-			"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+			"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("X-Frame-Options", "DENY")
 		header.Set("Referrer-Policy", "no-referrer")
@@ -312,7 +334,8 @@ func securityHeaders(next http.Handler) http.Handler {
 func (h *Handler) assemble(r *http.Request, current string) Page {
 	// The log affordance follows the same poweruser gate as the route, so
 	// a viewer never sees a link that would deny.
-	logsVisible := h.cfg.AllowLogs && h.level(r) >= authz.TierPowerUser
+	access := h.requestAccess(r)
+	logsVisible := h.cfg.AllowLogs && access.hasIdentity && access.level >= authz.TierPowerUser
 	s := snapshots{window: h.cfg.EventsWindow, allowLogs: logsVisible}
 	s.cluster, s.ok = h.sources.Cluster.Current()
 	s.pods, s.podsOK = h.sources.Pods.CurrentPods()
@@ -329,7 +352,6 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 	}
 	page := buildPage(h.cfg.ClusterName, h.cfg.Namespace, s, h.now(), h.cfg.Links)
 	page.Identity = h.buildIdentityView(r)
-	page.OperationsEnabled = h.cfg.AllowOperations && h.executor != nil
 	page.Shell = h.shell(r, current)
 	page.Shell.SnapshotState = page.SnapshotState
 	page.Shell.SnapshotAge = page.SnapshotAge
@@ -424,15 +446,49 @@ func (h *Handler) handlePoolers(current string) http.HandlerFunc {
 // it after calling this, and pages that do not simply leave those fields
 // empty so the top bar renders no snapshot line rather than a false one.
 func (h *Handler) shell(r *http.Request, current string) ShellView {
+	access := h.requestAccess(r)
 	return ShellView{
-		ClusterName:         h.cfg.ClusterName,
-		Namespace:           h.cfg.Namespace,
-		Identity:            h.buildIdentityView(r),
-		Links:               buildLinks(h.cfg.Links),
-		OperationsEnabled:   h.cfg.AllowOperations && h.executor != nil,
-		AccessReviewEnabled: h.cfg.AllowAccessReview && h.reviewer != nil,
-		Current:             current,
+		ClusterName:           h.cfg.ClusterName,
+		Namespace:             h.cfg.Namespace,
+		CurrentURL:            r.URL.RequestURI(),
+		Identity:              h.buildIdentityView(r),
+		Links:                 buildLinks(h.cfg.Links),
+		OperationsAvailable:   h.cfg.AllowOperations && h.executor != nil,
+		CanOperate:            access.canOperate(h),
+		AccessReviewAvailable: h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil,
+		CanReviewAccess:       access.canReviewAccess(h),
+		HistoryAvailable:      h.sources.History != nil,
+		Current:               current,
 	}
+}
+
+// requestAccess is the request-scoped input to UI capability rendering.
+// It deliberately carries only the proxy assertions the route gates already
+// consume: rendering never probes Kubernetes RBAC and never widens the
+// ServiceAccount's authority.
+type requestAccess struct {
+	level       authz.Tier
+	hasIdentity bool
+}
+
+// requestAccess resolves the forwarded identity and asserted level once for
+// capability decisions. A level without a usable identity exposes no gated
+// affordance because the corresponding route would refuse it for lack of an
+// auditable actor.
+func (h *Handler) requestAccess(r *http.Request) requestAccess {
+	access := requestAccess{level: h.level(r)}
+	if h.auth.Extractor != nil {
+		_, access.hasIdentity = h.auth.Extractor.FromRequest(r)
+	}
+	return access
+}
+
+func (a requestAccess) canOperate(h *Handler) bool {
+	return a.hasIdentity && a.level >= authz.TierPowerUser && h.cfg.AllowOperations && h.executor != nil
+}
+
+func (a requestAccess) canReviewAccess(h *Handler) bool {
+	return a.hasIdentity && a.level >= authz.TierDBA && h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil
 }
 
 // requireLevel gates a route on a minimum proxy-asserted level. A usable

@@ -36,7 +36,7 @@ reached by an unrecognized value.
 
 | Level | Reaches |
 |---|---|
-| *baseline* (any authenticated request) | the read-only status console: status, conditions, pods, events, backups |
+| *baseline* (any authenticated request) | the read-only status console: status, conditions, pods, events, backups, and object-definition history when enabled |
 | `view` | the read-only baseline, explicitly |
 | `poweruser` | additionally the bounded log tail, and the day-2 operations when `ALLOW_OPERATIONS=true` |
 | `dba` | additionally the access-request review panel |
@@ -45,6 +45,12 @@ The read-only status baseline is **ungated** — reaching the console means
 the proxy already authenticated the request, so status renders for everyone
 admitted. Only routes *above* the baseline — the log tail, operations, and
 the review panel — require an explicit level.
+
+The server derives navigation affordances from the same identity and level
+inputs as the route gates. A level without a usable forwarded identity does
+not render a gated link because the route would refuse the unauditable actor.
+This remains presentation only: direct requests always pass through the
+route gate.
 
 ## What it costs, stated plainly
 

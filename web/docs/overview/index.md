@@ -39,8 +39,10 @@ health, data integrity, or backup usability. A `Backup` in phase
   configuration cannot express more.
 - **Not a dashboard, installer, or fleet manager.** pgConsole does not
   install CloudNativePG, does not manage clusters across a fleet, and is not
-  a general Kubernetes dashboard. It stores nothing — no logs, no metrics,
-  no history; every page is a live render of the current snapshots.
+  a general Kubernetes dashboard. It stores no logs or metrics. Its one
+  retained data set is a bounded, scrubbed object-definition history captured
+  from the existing watches: in-memory by default, durable only through an
+  explicit single-replica journal mount.
 
 ## The pgtoolbox family
 

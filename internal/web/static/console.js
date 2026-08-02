@@ -1,7 +1,7 @@
 /* Progressive enhancement for the console. Every page is complete and
-   usable before this file runs: the server renders the full document,
-   and nothing here fetches, mutates, or interprets cluster state. These
-   components only re-arrange and hide markup the server already sent.
+   usable before this file runs: the server renders the full document.
+   Alpine components own local controls; refresh delegates a same-origin
+   GET and whole-root swap to htmx. Nothing here interprets cluster state.
 
    Loaded before the Alpine CSP build so the alpine:init registrations
    below exist by the time Alpine starts. Both tags are deferred, which
@@ -18,6 +18,20 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('autoRefresh', autoRefresh);
   Alpine.data('sidebar', sidebar);
 });
+
+/**
+ * Reports an enhanced-request failure without replacing the last complete
+ * server-rendered screen. The message is constant: response bodies and
+ * transport errors are never reflected into the document.
+ * @returns {void}
+ */
+function reportRefreshFailure() {
+  const target = document.querySelector('.refresh-error');
+  if (target) target.textContent = 'Refresh failed; the previous snapshot remains visible.';
+}
+
+document.addEventListener('htmx:responseError', reportRefreshFailure);
+document.addEventListener('htmx:sendError', reportRefreshFailure);
 
 /**
  * Reads a persisted preference, tolerating storage being unavailable
@@ -298,10 +312,10 @@ function dataTable() {
 }
 
 /**
- * Optional periodic full-page reload. This deliberately reloads rather
- * than patching the DOM: the page is a server-rendered snapshot, and a
- * reload is the only refresh that cannot show a mix of two snapshots or
- * invent state the server did not send. Off by default.
+ * Optional periodic application-root refresh. The response is still one
+ * complete server-rendered Page; htmx selects and replaces the root in one
+ * swap so the browser never assembles individual cards from different
+ * responses. Off by default.
  * @returns {object} Alpine component.
  */
 function autoRefresh() {
@@ -310,12 +324,17 @@ function autoRefresh() {
     period: 30,
     remaining: 30,
     timer: null,
+	button: null,
 
     /**
      * Restores the persisted choice and starts the timer if enabled.
      * @returns {void}
      */
     init() {
+	  this.button = this.$el.querySelector('.refresh-now');
+	  if (this.button) {
+	    this.button.addEventListener('click', () => this.refresh());
+	  }
       this.on = readPref('pgconsole.autorefresh', 'off') === 'on';
       this.$watch('on', (value) => {
         writePref('pgconsole.autorefresh', value ? 'on' : 'off');
@@ -345,10 +364,22 @@ function autoRefresh() {
     tick() {
       this.remaining -= 1;
       if (this.remaining > 0) return;
-      window.clearInterval(this.timer);
-      this.timer = null;
-      window.location.reload();
+	  this.remaining = this.period;
+	  this.refresh();
     },
+
+	/**
+	 * Requests the current route through the declarative htmx trigger. The
+	 * response replaces the one application root; hx-sync on the document
+	 * makes a newer navigation or refresh supersede this request.
+	 * @returns {void}
+	 */
+	refresh() {
+	  if (!this.button || !window.htmx) return;
+	  const error = this.$el.querySelector('.refresh-error');
+	  if (error) error.textContent = '';
+	  window.htmx.trigger(this.button, 'pgconsole:refresh');
+	},
 
     /**
      * Stops the timer when the component leaves the DOM.

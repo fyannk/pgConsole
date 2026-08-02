@@ -7,9 +7,10 @@ title: Upgrade and uninstall
 
 ## Upgrade
 
-pgConsole is **stateless** — no database, no session store, no persistent
-volume, no external state. Upgrading is rolling the Deployment to a new
-image tag.
+pgConsole is stateless by default — no database, session store, or persistent
+volume. The optional `HISTORY_PATH` journal is the explicit exception. Without
+it, upgrading is simply rolling the Deployment to a new image tag and the
+bounded history honestly starts empty.
 
 - **Operator-managed**: bump the image in the `PgConsole` object (or the
   operator's default image) and let it roll the pod once via its
@@ -19,8 +20,10 @@ image tag.
 
 In-flight CSRF confirmation tokens are minted from a random per-process key
 and are invalidated by the restart. This is harmless: a reviewer or
-operator simply reloads the confirmation page for a fresh token. There is
-no migration and no data to carry across versions.
+operator simply reloads the confirmation page for a fresh token. A
+journal-enabled deployment keeps one replica and carries its PVC across the
+rollout. The journal is opened before listen; an unusable file fails the new
+pod instead of silently discarding retained history.
 
 Compatibility with CloudNativePG is pinned per release: the day-2
 operations reproduce the exact `kubectl cnpg` plugin interactions for the
@@ -34,7 +37,9 @@ kubectl delete -f deploy/kubernetes-example.yaml
 ```
 
 Deleting the Deployment stops the process; deleting the Role removes its
-only authority. There is nothing else to clean up — no PVC, no CRD owned by
-the console, no cluster-scoped object. When the operator manages the
+only authority. A default in-memory deployment has nothing else to clean up.
+If `HISTORY_PATH` was enabled, delete or retain its explicitly created PVC
+according to the site's retention policy. There is no CRD owned by the
+console and no cluster-scoped object. When the operator manages the
 console, deleting the `PgConsole` tears down the pod, its RBAC, its
 NetworkPolicy, and its exposure.
