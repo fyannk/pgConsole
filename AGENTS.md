@@ -180,11 +180,19 @@ taps each pump after it accepts an event and hands each complete listing
 over as a seed, so membership filtering stays single-sourced and no
 second watch connection exists. Its invariants:
 
-- **In-memory and bounded, or absent.** History lives and dies with the
-  process — the stateless-process rule stands. Retention is bounded on
-  three axes (global revisions, global manifest bytes, revisions per
-  object) from validated configuration; `HISTORY_ENABLED=false` means no
-  recorder is constructed and no tap wraps any pump.
+- **In-memory and bounded; durable only by explicit mount.** Retention
+  is bounded on three axes (global revisions, global manifest bytes,
+  revisions per object) from validated configuration, and the in-memory
+  store is always authoritative; `HISTORY_ENABLED=false` means no
+  recorder is constructed and no tap wraps any pump. By default history
+  lives and dies with the process — the stateless-process rule stands.
+  `HISTORY_PATH` opts into a bbolt journal (`internal/history/bolt`)
+  that mirrors mutations write-behind and reloads them at boot; it
+  implies a PVC and a single replica, an unusable journal fails before
+  listen, and a hard kill loses at most the flush interval of history,
+  never the file's integrity. On boot the first seeds reconcile against
+  the journal's state, so a change made while the process was down is an
+  explicit after-gap revision, not a silent first observation.
 - **Scrubbed at the boundary.** A stored manifest never contains managed
   fields, the resource version, the last-applied annotation, or an
   inline container environment value; env names and secret *references*
@@ -205,9 +213,9 @@ second watch connection exists. Its invariants:
   definitions, never log content, and Kubernetes Events are excluded —
   they are already a timeline of their own.
 
-The store is written for a durable backend to slide underneath later
-(`Snapshot` for the metadata timeline, `Revision` for one manifest); the
-rendering screen arrives with the design work and is not wired yet.
+The read side is `Snapshot` for the metadata timeline and `Revision`
+for one manifest; the rendering screen arrives with the design work and
+is not wired yet.
 
 ## Engineering conventions
 

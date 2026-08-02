@@ -93,6 +93,10 @@ type Deps struct {
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
 	EvidenceFetcher evidence.Fetcher
+	// HistoryRunner is the durable history journal's background flush
+	// loop, owning the journal file's lifecycle. Nil means history is
+	// in-memory or disabled and no loop runs.
+	HistoryRunner func(ctx context.Context) error
 	// Prober answers the readiness endpoint.
 	Prober web.ReadinessProber
 	// Clock supplies time to the collectors and the page ages.
@@ -180,6 +184,9 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		evidenceStore := evidence.NewStore()
 		sources.Evidence = evidenceStore
 		runners = append(runners, evidence.NewPoller(deps.EvidenceFetcher, evidenceStore, deps.Clock, logger).Run)
+	}
+	if deps.HistoryRunner != nil {
+		runners = append(runners, deps.HistoryRunner)
 	}
 	// The access-review collector runs only in review mode with a wired
 	// source: disabled mode observes nothing and renders no panel.

@@ -29,6 +29,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/config"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
+	"github.com/fyannk/pgConsole/internal/history/bolt"
 	"github.com/fyannk/pgConsole/internal/kube"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
@@ -68,13 +69,33 @@ func run() error {
 	// client's capture taps; disabled means no recorder exists and no
 	// tap wraps any pump. The Recorder field is set only inside this
 	// branch so a disabled history is interface-nil, not a typed nil.
+	//
+	// With a journal path configured, the store is primed from the file
+	// and mirrors into it, and the journal's flush loop joins the
+	// background runners. An unusable journal fails before listen: a
+	// deployment that mounted one expects history to survive restarts,
+	// and half that contract must not half-work.
 	if cfg.HistoryEnabled {
-		opts.Recorder = history.NewStore(history.Limits{
+		limits := history.Limits{
 			PerObject:      cfg.HistoryPerObjectRevisions,
 			MaxRevisions:   cfg.HistoryMaxRevisions,
 			MaxBytes:       cfg.HistoryMaxBytes,
 			CoalesceWindow: cfg.HistoryCoalesceWindow,
-		}, observe.RealClock{})
+		}
+		if cfg.HistoryPath != "" {
+			journal, err := bolt.Open(cfg.HistoryPath, observe.RealClock{}, logger)
+			if err != nil {
+				return err
+			}
+			store, err := history.NewPersistedStore(limits, observe.RealClock{}, journal)
+			if err != nil {
+				return err
+			}
+			opts.Recorder = store
+			deps.HistoryRunner = journal.Run
+		} else {
+			opts.Recorder = history.NewStore(limits, observe.RealClock{})
+		}
 	}
 	client, err := kube.InClusterClient(opts, logger)
 	if err != nil {

@@ -291,6 +291,37 @@ func TestLoadMatrix(t *testing.T) {
 			wantErr: EnvHistoryCoalesceWindow + ": must be a duration between 1s and 1h0m0s",
 		},
 		{
+			name:   "history path accepted",
+			mutate: map[string]string{EnvHistoryPath: "/var/lib/pgconsole/history.db"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryPath != "/var/lib/pgconsole/history.db" {
+					t.Errorf("HistoryPath = %q", cfg.HistoryPath)
+				}
+			},
+		},
+		{
+			name:   "history path defaults to empty",
+			mutate: map[string]string{},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryPath != "" {
+					t.Errorf("HistoryPath = %q, want empty", cfg.HistoryPath)
+				}
+			},
+		},
+		{
+			name:    "history path must be absolute",
+			mutate:  map[string]string{EnvHistoryPath: "history.db"},
+			wantErr: EnvHistoryPath + ": must be an absolute file path",
+		},
+		{
+			name: "history path with history disabled is conflicting intent",
+			mutate: map[string]string{
+				EnvHistoryEnabled: "false",
+				EnvHistoryPath:    "/var/lib/pgconsole/history.db",
+			},
+			wantErr: EnvHistoryPath + ": requires " + EnvHistoryEnabled + "=true",
+		},
+		{
 			name:   "history bounds accepted at the edges",
 			mutate: map[string]string{EnvHistoryMaxRevisions: "100", EnvHistoryCoalesceWindow: "1s"},
 			check: func(t *testing.T, cfg Config) {

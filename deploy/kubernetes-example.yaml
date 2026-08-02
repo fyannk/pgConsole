@@ -223,3 +223,48 @@ spec:
                     - path: namespace
                       fieldRef:
                         fieldPath: metadata.namespace
+---
+# Optional: a durable history journal.
+#
+# By default the object-definition history is in-memory and the console
+# stays a stateless process: history restarts empty, honestly, with the
+# pod. Mounting a journal makes history survive restarts — the first
+# seeds of a new process life reconcile against the previous one, so a
+# change made while the console was down appears as an explicit
+# after-gap revision instead of vanishing.
+#
+# The trade is stated: this Deployment then owns a PersistentVolumeClaim
+# and must keep replicas at 1 (the journal file takes an exclusive
+# lock; a second replica fails fast at startup). The container filesystem
+# stays read-only — only this mount is writable. A hard kill loses at
+# most the last couple of seconds of history, never the file's
+# integrity.
+#
+# To enable, create the claim and add to the Deployment above:
+#
+#   env:
+#     - name: HISTORY_PATH
+#       value: /var/lib/pgconsole/history.db
+#   volumeMounts:
+#     - name: history
+#       mountPath: /var/lib/pgconsole
+#   volumes:
+#     - name: history
+#       persistentVolumeClaim:
+#         claimName: pgconsole-orders-history
+#
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: pgconsole-orders-history
+#   namespace: payments
+#   labels:
+#     app.kubernetes.io/name: pgconsole
+#     app.kubernetes.io/instance: orders
+# spec:
+#   accessModes: ["ReadWriteOnce"]
+#   resources:
+#     requests:
+#       # Comfortably above HISTORY_MAX_BYTES (default 16Mi): the journal
+#       # holds the bounded timeline plus bbolt's structural overhead.
+#       storage: 256Mi

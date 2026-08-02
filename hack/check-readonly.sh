@@ -10,10 +10,25 @@ status=0
 # permits: internal/ops originates mutations, and internal/kube/ops.go
 # is the transport that executes them (the narrow writer). No other call
 # site may create, update, patch, delete, or apply.
+#
+# internal/history is excluded: its Update/Delete call sites are the
+# local journal's (bbolt transactions and bucket writes), not the
+# Kubernetes API's. That exclusion is sound only while the history
+# packages cannot reach a Kubernetes client at all, which the scan
+# below this one enforces.
 if grep -rEn --include='*.go' --exclude='*_test.go' \
     '\.(Create|Update|Patch|Delete|Apply|DeleteCollection)\(' \
-    cmd internal | grep -v '^internal/ops/' | grep -v '^internal/kube/ops.go:'; then
+    cmd internal | grep -v '^internal/ops/' | grep -v '^internal/kube/ops.go:' \
+  | grep -v '^internal/history/'; then
   echo "mutation-shaped call site outside internal/ops and the kube transport" >&2
+  status=1
+fi
+
+# The exclusion's precondition: internal/history is pure domain plus a
+# local storage engine, and must never import a Kubernetes client or
+# API type.
+if grep -rEn --include='*.go' 'k8s\.io/(client-go|api|apimachinery)|cloudnative-pg/api' internal/history; then
+  echo "internal/history imports a Kubernetes client or API type" >&2
   status=1
 fi
 

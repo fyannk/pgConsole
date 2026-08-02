@@ -215,3 +215,58 @@ type Recorder interface {
 	// listing must go through Observe instead, item by item.
 	Seed(scope string, obs []Observation)
 }
+
+// ObjectRecord is the persisted classification state of one live object
+// incarnation: what the store must know to fold the next observation
+// even when every retained revision of the object was evicted, and to
+// name an object a later seed reports gone.
+type ObjectRecord struct {
+	// Scope names the seed-and-watch unit that observes the object.
+	Scope string
+	// Group, Version and Kind identify the object's API type.
+	Group, Version, Kind string
+	// Namespace and Name identify the object alongside its UID key.
+	Namespace, Name string
+	// SpecHash and StatusHash are the digests of the last observation.
+	SpecHash, StatusHash string
+	// LastObservedAt is when the object was last observed.
+	LastObservedAt time.Time
+}
+
+// Contents is everything a persister reloads at boot: the retained
+// revisions oldest first, the live objects' classification state, and
+// the counters the store resumes from.
+type Contents struct {
+	// Revisions are the retained revisions, oldest first.
+	Revisions []Revision
+	// Objects is the live incarnations' classification state by UID.
+	Objects map[string]ObjectRecord
+	// Seq is the highest sequence ever assigned.
+	Seq uint64
+	// Evicted reports that retention had already dropped history.
+	Evicted bool
+}
+
+// Persister mirrors store mutations to a durable medium and reloads
+// them at boot. Mutation methods are called under the store's lock and
+// must only enqueue — durable writes belong to the persister's own
+// flush loop, so capture latency never includes disk latency. The store
+// with no persister is the default and mirrors nothing.
+type Persister interface {
+	// Load returns everything persisted so far. It is called once,
+	// before any mutation.
+	Load() (Contents, error)
+	// Append mirrors one new revision.
+	Append(rev Revision)
+	// Update mirrors the rewrite of an existing revision, which
+	// coalescing performs; the sequence identifies it.
+	Update(rev Revision)
+	// Evict mirrors the removal of one revision.
+	Evict(seq uint64)
+	// PutObject mirrors one live object's classification state.
+	PutObject(uid string, rec ObjectRecord)
+	// DeleteObject mirrors the end of one live incarnation.
+	DeleteObject(uid string)
+	// MarkEvicted mirrors the fact that retention has dropped history.
+	MarkEvicted()
+}

@@ -21,10 +21,13 @@ import (
 )
 
 // objectState is the classification state of one live object
-// incarnation. It outlives the object's retained revisions: dedup and
-// classification need the last hashes even after the revisions carrying
-// them were evicted.
+// incarnation. It outlives the object's retained revisions: dedup,
+// classification and the naming of an unobserved deletion need the last
+// observation even after the revisions carrying it were evicted.
 type objectState struct {
+	scope                string
+	group, version, kind string
+	namespace, name      string
 	specHash, statusHash string
 	lastObservedAt       time.Time
 	// count is the number of retained revisions of this incarnation.
@@ -32,6 +35,21 @@ type objectState struct {
 	// last points at the newest retained revision, the coalescing
 	// target. Nil when that revision was evicted.
 	last *Revision
+}
+
+// record is the persisted form of this state.
+func (o *objectState) record() ObjectRecord {
+	return ObjectRecord{
+		Scope:          o.scope,
+		Group:          o.group,
+		Version:        o.version,
+		Kind:           o.kind,
+		Namespace:      o.namespace,
+		Name:           o.name,
+		SpecHash:       o.specHash,
+		StatusHash:     o.statusHash,
+		LastObservedAt: o.lastObservedAt,
+	}
 }
 
 // Store folds observations into the bounded revision timeline. Writers
@@ -42,10 +60,15 @@ type objectState struct {
 // on the existing per-resource watches, so the store's liveness is
 // exactly the collectors' liveness and there is no second set of watch
 // connections to keep honest.
+//
+// Retained state lives in memory either way — the bounds guarantee it
+// fits — and an optional persister mirrors every mutation so a restart
+// resumes instead of forgetting. Reads never touch the persister.
 type Store struct {
-	mu     sync.Mutex
-	limits Limits
-	clock  Clock
+	mu      sync.Mutex
+	limits  Limits
+	clock   Clock
+	persist Persister
 
 	seq        uint64
 	generation uint64
@@ -61,7 +84,8 @@ type Store struct {
 // The store is the Recorder the kube boundary consumes.
 var _ Recorder = (*Store)(nil)
 
-// NewStore returns an empty store bounded by limits.
+// NewStore returns an empty store bounded by limits, retained in memory
+// only.
 func NewStore(limits Limits, clock Clock) *Store {
 	return &Store{
 		limits:  limits,
@@ -69,6 +93,71 @@ func NewStore(limits Limits, clock Clock) *Store {
 		objects: map[string]*objectState{},
 		scopes:  map[string]map[string]bool{},
 	}
+}
+
+// NewPersistedStore returns a store primed from the persister's
+// contents and mirroring every further mutation into it. Priming
+// re-enforces the configured limits, so a persisted timeline larger
+// than the current bounds is trimmed — and the trim is mirrored — before
+// the first observation arrives.
+//
+// A load failure is returned, not degraded around: a deployment that
+// mounted a journal expects history to survive restarts, and silently
+// starting empty would violate exactly the promise the mount makes.
+func NewPersistedStore(limits Limits, clock Clock, persist Persister) (*Store, error) {
+	contents, err := persist.Load()
+	if err != nil {
+		return nil, err
+	}
+	s := NewStore(limits, clock)
+	s.persist = persist
+	s.prime(contents)
+	return s, nil
+}
+
+// prime rebuilds the retained state from persisted contents. The next
+// seeds then classify against the previous process life's state, which
+// is what turns "changed while this console was down" into an explicit
+// after-gap revision instead of a silent first observation.
+func (s *Store) prime(contents Contents) {
+	for i := range contents.Revisions {
+		rev := contents.Revisions[i]
+		s.entries = append(s.entries, &rev)
+		s.totalBytes += len(rev.Manifest)
+	}
+	s.seq = contents.Seq
+	// Generation resumes at the sequence: monotonic across the restart
+	// without persisting a second counter.
+	s.generation = contents.Seq
+	s.evicted = contents.Evicted
+
+	for uid, rec := range contents.Objects {
+		s.objects[uid] = &objectState{
+			scope:          rec.Scope,
+			group:          rec.Group,
+			version:        rec.Version,
+			kind:           rec.Kind,
+			namespace:      rec.Namespace,
+			name:           rec.Name,
+			specHash:       rec.SpecHash,
+			statusHash:     rec.StatusHash,
+			lastObservedAt: rec.LastObservedAt,
+		}
+		s.scopeSet(rec.Scope)[uid] = true
+	}
+	// Counts and coalescing targets are derived from the revisions
+	// rather than persisted: the newest retained revision of a live UID
+	// is its coalescing target by definition.
+	for _, rev := range s.entries {
+		if state := s.objects[rev.UID]; state != nil {
+			state.count++
+			state.last = rev
+		}
+	}
+	for uid, state := range s.objects {
+		s.enforcePerObject(uid, state)
+	}
+	s.enforceBounds()
 }
 
 // Observe records one watch delivery.
@@ -102,7 +191,7 @@ func (s *Store) Seed(scope string, obs []Observation) {
 	}
 	sort.Strings(gone)
 	for _, uid := range gone {
-		s.deleteUnobserved(scope, uid, now)
+		s.deleteUnobserved(uid, now)
 	}
 	for i := range obs {
 		s.observe(obs[i], now, true)
@@ -122,7 +211,14 @@ func (s *Store) observe(obs Observation, now time.Time, seed bool) {
 		if seed {
 			change = ChangeFirstObserved
 		}
-		state = &objectState{}
+		state = &objectState{
+			scope:     obs.Scope,
+			group:     obs.Group,
+			version:   obs.Version,
+			kind:      obs.Kind,
+			namespace: obs.Namespace,
+			name:      obs.Name,
+		}
 		s.objects[obs.UID] = state
 		s.scopeSet(obs.Scope)[obs.UID] = true
 		s.append(revisionOf(obs, change, now, time.Time{}, false), state)
@@ -132,8 +228,12 @@ func (s *Store) observe(obs Observation, now time.Time, seed bool) {
 
 	if obs.SpecHash == state.specHash && obs.StatusHash == state.statusHash {
 		// The definition is exactly what the last revision recorded; the
-		// only news is that it was seen again.
+		// only news is that it was seen again — which still moves the
+		// object's gap window, so it is mirrored.
 		state.lastObservedAt = now
+		if s.persist != nil {
+			s.persist.PutObject(obs.UID, state.record())
+		}
 		return
 	}
 
@@ -150,11 +250,14 @@ func (s *Store) observe(obs Observation, now time.Time, seed bool) {
 }
 
 // commit records the observation's hashes and time as the object's
-// current classification state.
+// current classification state and mirrors it.
 func (s *Store) commit(obs Observation, state *objectState, now time.Time) {
 	state.specHash = obs.SpecHash
 	state.statusHash = obs.StatusHash
 	state.lastObservedAt = now
+	if s.persist != nil {
+		s.persist.PutObject(obs.UID, state.record())
+	}
 }
 
 // coalesce folds a status transition into the previous one when both
@@ -175,6 +278,9 @@ func (s *Store) coalesce(obs Observation, state *objectState, now time.Time) boo
 	last.Actor = obs.Actor
 	last.ObservedAt = now
 	last.Coalesced++
+	if s.persist != nil {
+		s.persist.Update(*last)
+	}
 	s.commit(obs, state, now)
 	s.generation++
 	s.enforceBounds()
@@ -198,23 +304,26 @@ func (s *Store) deleteObserved(obs Observation, now time.Time) {
 
 // deleteUnobserved synthesizes the deletion of an object a complete
 // seed no longer contains. The revision's honest content is the window:
-// last seen at PrevObservedAt, gone by ObservedAt.
-func (s *Store) deleteUnobserved(scope, uid string, now time.Time) {
+// last seen at PrevObservedAt, gone by ObservedAt. Identity comes from
+// the classification state, so the revision stays named even when every
+// revision of the object was already evicted.
+func (s *Store) deleteUnobserved(uid string, now time.Time) {
 	state := s.objects[uid]
 	if state == nil {
 		return
 	}
 	rev := &Revision{
-		Scope:          scope,
+		Scope:          state.scope,
+		Group:          state.group,
+		Version:        state.version,
+		Kind:           state.kind,
+		Namespace:      state.namespace,
+		Name:           state.name,
 		UID:            uid,
 		Change:         ChangeDeletedUnobserved,
 		AfterGap:       true,
 		ObservedAt:     now,
 		PrevObservedAt: state.lastObservedAt,
-	}
-	if last := state.last; last != nil {
-		rev.Group, rev.Version, rev.Kind = last.Group, last.Version, last.Kind
-		rev.Namespace, rev.Name = last.Namespace, last.Name
 	}
 	s.append(rev, state)
 	s.forget(uid)
@@ -235,9 +344,12 @@ func (s *Store) forget(uid string) {
 	for _, set := range s.scopes {
 		delete(set, uid)
 	}
+	if s.persist != nil {
+		s.persist.DeleteObject(uid)
+	}
 }
 
-// append retains one revision and enforces the bounds.
+// append retains one revision, mirrors it, and enforces the bounds.
 func (s *Store) append(rev *Revision, state *objectState) {
 	s.seq++
 	rev.Seq = s.seq
@@ -246,6 +358,9 @@ func (s *Store) append(rev *Revision, state *objectState) {
 	state.count++
 	state.last = rev
 	s.generation++
+	if s.persist != nil {
+		s.persist.Append(*rev)
+	}
 	s.enforcePerObject(rev.UID, state)
 	s.enforceBounds()
 }
@@ -277,11 +392,18 @@ func (s *Store) enforceBounds() {
 	}
 }
 
-// evict removes the retained revision at index i.
+// evict removes the retained revision at index i and mirrors the
+// removal.
 func (s *Store) evict(i int) {
 	rev := s.entries[i]
 	s.entries = append(s.entries[:i], s.entries[i+1:]...)
 	s.totalBytes -= len(rev.Manifest)
+	if s.persist != nil {
+		s.persist.Evict(rev.Seq)
+		if !s.evicted {
+			s.persist.MarkEvicted()
+		}
+	}
 	s.evicted = true
 	if state := s.objects[rev.UID]; state != nil {
 		state.count--

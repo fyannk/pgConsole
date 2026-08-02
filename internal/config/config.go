@@ -81,6 +81,12 @@ const (
 	// EnvHistoryCoalesceWindow folds consecutive status transitions of
 	// one object closer together than this into a single revision.
 	EnvHistoryCoalesceWindow = "HISTORY_COALESCE_WINDOW"
+	// EnvHistoryPath is the journal file the history is mirrored into so
+	// it survives restarts. Empty keeps history in memory only — the
+	// default, which preserves the stateless deployment. Setting it
+	// implies a writable volume and a single replica, and requires
+	// history to be enabled.
+	EnvHistoryPath = "HISTORY_PATH"
 	// EnvObjectStoreViewerURL is the link-out base URL to the cluster's
 	// ObjectStoreViewer.
 	EnvObjectStoreViewerURL = "OBJECTSTOREVIEWER_URL"
@@ -229,6 +235,9 @@ type Config struct {
 	// HistoryCoalesceWindow folds consecutive status transitions of one
 	// object closer together than this into a single revision.
 	HistoryCoalesceWindow time.Duration
+	// HistoryPath is the durable journal file; empty keeps history in
+	// memory only.
+	HistoryPath string
 	// ObjectStoreViewerURL is the ObjectStoreViewer link-out base URL;
 	// empty hides the link.
 	ObjectStoreViewerURL string
@@ -359,6 +368,18 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.HistoryMaxBytes = intVar(lookup, EnvHistoryMaxBytes, DefaultHistoryMaxBytes, MinHistoryMaxBytes, MaxHistoryMaxBytes, fail)
 	cfg.HistoryPerObjectRevisions = intVar(lookup, EnvHistoryPerObjectRevisions, DefaultHistoryPerObjectRevisions, MinHistoryPerObjectRevisions, MaxHistoryPerObjectRevisions, fail)
 	cfg.HistoryCoalesceWindow = durationVar(lookup, EnvHistoryCoalesceWindow, DefaultHistoryCoalesceWindow, MinHistoryCoalesceWindow, MaxHistoryCoalesceWindow, fail)
+	if raw, ok := lookup(EnvHistoryPath); ok && raw != "" {
+		switch {
+		case !strings.HasPrefix(raw, "/") || len(raw) < 2 || strings.ContainsAny(raw, "\x00\r\n"):
+			fail(EnvHistoryPath, "must be an absolute file path")
+		case !cfg.HistoryEnabled:
+			// A mounted journal with history switched off is conflicting
+			// intent, not a silent no-op.
+			fail(EnvHistoryPath, "requires "+EnvHistoryEnabled+"=true")
+		default:
+			cfg.HistoryPath = raw
+		}
+	}
 
 	cfg.ObjectStoreViewerURL = linkVar(lookup, EnvObjectStoreViewerURL, cfg.AllowInsecureLinks, fail)
 	cfg.PgAdminURL = linkVar(lookup, EnvPgAdminURL, cfg.AllowInsecureLinks, fail)
