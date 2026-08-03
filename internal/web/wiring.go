@@ -134,11 +134,11 @@ func buildClusterWiring(p *Page) *TopologyView {
 	// caption says so.
 	rwRows := []TopoGraphText{
 		{C: "label", T: p.ClusterName + "-rw"},
-		{C: "sub", T: "writes — routes to the current primary"},
+		{C: "sub", T: "routes to the current primary"},
 	}
 	roRows := []TopoGraphText{
 		{C: "label", T: p.ClusterName + "-ro"},
-		{C: "sub", T: "reads — routes to the read-only copies"},
+		{C: "sub", T: "routes to the read-only copies"},
 	}
 	rwNode := wireNode("endpoint", "", wireWSvc, rwRows)
 	rwNode.X, rwNode.Y = wireColSvc, mid-8-wireNodeHeight(len(rwRows))
@@ -194,28 +194,30 @@ func buildClusterWiring(p *Page) *TopologyView {
 
 	view.Nodes = nodes
 
-	// Flows, recorded in the drawing and the graph in one step so the
-	// two can never describe different diagrams.
-	link := func(kind, label string, from, to *TopoNode) {
-		view.Edges = append(view.Edges, edge(kind, label, *from, *to))
+	// Flows: the graph records them and the router draws every one, so
+	// the served drawing and the enhanced re-layout can never describe
+	// different diagrams.
+	link := func(kind string, from, to *TopoNode) {
 		view.Graph.Links = append(view.Graph.Links,
-			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind, Label: label})
+			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind})
 	}
 	if primary != nil {
-		link("write", "", rw, primary)
+		link("write", rw, primary)
 	}
 	for _, r := range replicas {
-		link("read", "", ro, r)
+		link("read", ro, r)
 		if primary != nil {
-			link("replicate", "", primary, r)
+			link("replicate", primary, r)
 		}
 	}
 	if primary != nil && storeN != nil {
-		link("archive", "continuous backup", primary, storeN)
+		link("archive", primary, storeN)
 	}
 	if primary != nil && snapshotN != nil {
-		link("archive", "snapshots", primary, snapshotN)
+		link("archive", primary, snapshotN)
 	}
+	view.Edges = routeEdges(view.Nodes, view.Graph.Links)
+	view.Legend = topoLegend(view.Graph.Links)
 
 	for _, n := range view.Nodes {
 		rows := make([]TopoGraphText, 0, len(n.Lines))

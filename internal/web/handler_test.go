@@ -1406,7 +1406,9 @@ func TestTopologyRendersWithoutScriptAndCarriesItsGraph(t *testing.T) {
 	if got, want := strings.Count(body, `class="topo-node`), len(graph.Nodes); got != want {
 		t.Errorf("the drawing has %d boxes, the graph has %d", got, want)
 	}
-	if got, want := strings.Count(body, `class="topo-edge`), len(graph.Links); got != want {
+	// Flows carry arrowheads; the legend swatches share the edge classes
+	// but not the marker.
+	if got, want := strings.Count(body, `marker-end="url(#topo-arrow)"`), len(graph.Links); got != want {
 		t.Errorf("the drawing has %d flows, the graph has %d", got, want)
 	}
 }

@@ -44,6 +44,9 @@ type TopologyView struct {
 	Edges []TopoEdge
 	// Caption states what is observed versus standard wiring.
 	Caption string
+	// Legend keys the line styles actually drawn, so the wires carry no
+	// labels of their own.
+	Legend []LegendItem
 	// Graph is the same diagram with the layout removed: which boxes
 	// exist, which tier each sits in, and what connects to what.
 	//
@@ -265,33 +268,34 @@ func buildTopology(p *Page) *TopologyView {
 	apps, rw, ro := view.Nodes[0], view.Nodes[1], view.Nodes[2]
 
 	// Flows. Apps reach the two doors; the doors reach the servers; the
-	// primary copies to the replicas and streams backups to storage.
-	// link draws the flow and records it in the graph in one step, so the
-	// served drawing and the graph the enhancement re-lays out can never
-	// describe different diagrams.
-	link := func(kind, label string, from, to TopoNode) {
-		view.Edges = append(view.Edges, edge(kind, label, from, to))
+	// primary copies to the replicas and streams backups to storage. The
+	// graph records the flows and the router draws every one of them, so
+	// the served drawing and the graph the enhancement re-lays out can
+	// never describe different diagrams.
+	link := func(kind string, from, to TopoNode) {
 		view.Graph.Links = append(view.Graph.Links,
-			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind, Label: label})
+			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind})
 	}
 
-	link("write", "writes", apps, rw)
-	link("read", "reads", apps, ro)
+	link("write", apps, rw)
+	link("read", apps, ro)
 	if primary != nil {
-		link("write", "", rw, *primary)
+		link("write", rw, *primary)
 	}
 	for _, r := range replicas {
-		link("read", "", ro, *r)
+		link("read", ro, *r)
 		if primary != nil {
-			link("replicate", "", *primary, *r)
+			link("replicate", *primary, *r)
 		}
 	}
 	if storeN != nil && primary != nil {
-		link("archive", "continuous backup", *primary, *storeN)
+		link("archive", *primary, *storeN)
 	}
 	if snapshotN != nil && primary != nil {
-		link("archive", "snapshots", *primary, *snapshotN)
+		link("archive", *primary, *snapshotN)
 	}
+	view.Edges = routeEdges(view.Nodes, view.Graph.Links)
+	view.Legend = topoLegend(view.Graph.Links)
 
 	for _, n := range view.Nodes {
 		view.Graph.Nodes = append(view.Graph.Nodes, TopoGraphNode{
@@ -406,20 +410,4 @@ func topoStorageConfigured(p *Page) (cloud, snap bool) {
 		}
 	}
 	return cloud, snap
-}
-
-// edge resolves a flow between two nodes into a smooth horizontal bezier
-// and a midpoint for its label. Sources exit the right edge; targets
-// enter the left edge.
-func edge(kind, label string, from, to TopoNode) TopoEdge {
-	sx, sy := from.Right(), from.CenterY()
-	tx, ty := to.X, to.CenterY()
-	dx := (tx - sx) / 2
-	return TopoEdge{
-		Kind:   kind,
-		Label:  label,
-		Path:   fmt.Sprintf("M%d %d C%d %d %d %d %d %d", sx, sy, sx+dx, sy, tx-dx, ty, tx, ty),
-		LabelX: (sx + tx) / 2,
-		LabelY: (sy+ty)/2 - 6,
-	}
 }

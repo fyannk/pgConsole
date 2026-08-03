@@ -1325,3 +1325,11 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-edge-replicate { stroke: var(--ok); stroke-dasharray: 5 4; }
 .topo-edge-archive { stroke: var(--accent); stroke-dasharray: 2 4; }
 #topo-arrow path { fill: var(--border-strong); }
+
+/* The legend keys the line styles the router took off the wires; the
+   swatches reuse the edge classes, so a style can never drift from the
+   line it names. */
+.topo-legend { color: var(--text-muted); display: flex; flex-wrap: wrap; font-size: var(--text-xs); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.topo-legend span { align-items: center; display: flex; gap: var(--space-2); }
+.topo-legend svg { display: block; height: 8px; width: 26px; }
+.topo-legend svg path { fill: none; stroke-width: 1.5; }

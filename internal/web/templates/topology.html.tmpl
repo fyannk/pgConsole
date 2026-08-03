@@ -49,6 +49,13 @@
     {{- end}}
   </svg>
   </div>
+  {{- if .Legend}}
+  <div class="topo-legend">
+    {{- range .Legend}}
+    <span><svg viewBox="0 0 26 8"><path class="topo-edge topo-edge-{{.Kind}}" d="M0 4H26"></path></svg> {{.Label}}</span>
+    {{- end}}
+  </div>
+  {{- end}}
   <p class="origin">{{.Caption}}</p>
 </section>
 {{- end -}}

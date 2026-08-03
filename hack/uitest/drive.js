@@ -123,7 +123,7 @@ async function checkEnhancement(browser) {
     return { layout: svg.getAttribute('data-layout'), boxes, dup: boxes - ids.size };
   });
   check('wiring diagram is re-laid out when the enhancement runs',
-    topo.layout === 'force' && topo.boxes > 0, `layout ${topo.layout}, ${topo.boxes} boxes`);
+    topo.layout === 'routed' && topo.boxes > 0, `layout ${topo.layout}, ${topo.boxes} boxes`);
   // Appending instead of replacing would double every box.
   check('re-layout replaces the served drawing rather than adding to it',
     topo.dup === 0, `${topo.dup} duplicated boxes`);
