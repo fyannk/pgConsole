@@ -169,6 +169,11 @@ body {
 .sidebar[data-collapsed="true"] .sidebar-link { justify-content: center; padding-inline: 0; }
 
 .sidebar-top { align-items: center; display: flex; gap: var(--space-2); justify-content: space-between; }
+/* A second top-level section heading sits away from the list above it; when
+   the rail is collapsed the heading is hidden, so a hairline keeps the two
+   sections legible as separate. */
+.sidebar-heading.is-section { margin-top: var(--space-3); }
+.sidebar[data-collapsed="true"] .sidebar-nav.is-external { border-top: 1px solid var(--border); padding-top: var(--space-2); }
 
 .sidebar-heading {
   color: var(--text-muted);
@@ -716,6 +721,7 @@ button.danger:hover, input[type="submit"].danger:hover { background: var(--bad-w
   .sidebar .sidebar-label, .sidebar .sidebar-heading,
   .sidebar .sidebar-group > .sidebar-group-label span { display: none; }
   .sidebar .sidebar-sub { padding-left: 0; }
+  .sidebar .sidebar-nav.is-external { border-top: 1px solid var(--border); padding-top: var(--space-2); }
   .sidebar .sidebar-link { justify-content: center; padding-inline: 0; }
   header h1 { font-size: var(--text-xl); }
   dl.facts { grid-template-columns: 1fr; }
@@ -903,8 +909,10 @@ h2.section-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: 
 /* The viewBox is the server's fixed geometry until the enhancement layer
    refits it to the settled layout, so the drawing adapts to any width it
    is given. The floor exists only to stop the type going illegible on a
-   phone, where the scroll shell then earns its keep. */
-svg.topo { display: block; height: auto; min-width: 420px; width: 100%; }
+   phone, where the scroll shell then earns its keep; the ceiling stops a
+   wide screen inflating the box labels to headline size. Once capped the
+   drawing centres in the panel rather than hugging the left edge. */
+svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; min-width: 420px; width: 100%; }
 
 .topo text { font-family: var(--font-ui); }
 .topo-label { fill: var(--text); font-size: 13px; font-weight: 600; }
