@@ -63,6 +63,33 @@ function writePref(key, value) {
   }
 }
 
+/* ---------------------------------------------------------------- Theme
+
+   Two themes only: Navy Chrome (light) and Midnight Console (dark).
+   data-theme on <html> pins one; with no attribute the OS decides.
+   Applied as early as this file runs so the pinned theme wins the first
+   paint, and the click is delegated so an htmx swap keeps working. */
+
+function currentThemeIsDark() {
+  const root = document.documentElement;
+  if (root.dataset.theme === 'dark') return true;
+  if (root.dataset.theme === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+const storedTheme = readPref('pgconsole.theme', '');
+if (storedTheme === 'light' || storedTheme === 'dark') {
+  document.documentElement.dataset.theme = storedTheme;
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest && event.target.closest('.theme-toggle');
+  if (!button) return;
+  const next = currentThemeIsDark() ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  writePref('pgconsole.theme', next);
+});
+
 /**
  * Collapsible panel. The body is visible by default and stays visible
  * when this never runs, so collapsing is additive. The open/closed

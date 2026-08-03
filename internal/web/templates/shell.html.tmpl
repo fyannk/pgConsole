@@ -37,6 +37,8 @@
 <symbol id="i-logs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M2.5 7h11M2.5 10h7.5M2.5 13h5"></path></symbol>
 <symbol id="i-operations" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"></circle><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"></path></symbol>
 <symbol id="i-access" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 13.5v-1a2.5 2.5 0 0 0-2.5-2.5h-3A2.5 2.5 0 0 0 3 12.5v1"></path><circle cx="7" cy="5" r="2.5"></circle></symbol>
+<symbol id="i-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"></circle><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"></path></symbol>
+<symbol id="i-moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"></path></symbol>
 </defs></svg>
 {{- end -}}
 
@@ -45,7 +47,7 @@
        and forwarded identity join them only when the page carries them. */ -}}
 {{- define "topbar" -}}
 <header class="topbar">
-  <h1>pgConsole</h1>
+  <span class="brand"><img class="brand-mark" src="/static/logo.png" alt="" width="34" height="26"><h1>pg<span class="console">Console</span></h1></span>
   <dl class="target">
     {{- if .Namespace}}
     <dt>Namespace</dt><dd>{{.Namespace}}</dd>
@@ -64,6 +66,7 @@
     <button type="button" class="refresh-now" hx-get="{{.CurrentURL}}" hx-trigger="pgconsole:refresh">Refresh now</button>
     <span class="refresh-error" role="status" aria-live="polite"></span>
   </div>
+  <button type="button" class="theme-toggle" aria-label="Switch between light and dark theme" title="Switch theme"><svg class="i-moon" aria-hidden="true"><use href="#i-moon"></use></svg><svg class="i-sun" aria-hidden="true"><use href="#i-sun"></use></svg></button>
 </header>
 {{- end -}}
 
@@ -76,15 +79,11 @@
 {{- define "sidebar" -}}
 <aside class="sidebar" x-data="sidebar" data-collapsed="false" aria-label="Console sections">
   <div class="sidebar-top">
-    <span class="sidebar-heading">Sections</span>
+    <span class="sidebar-heading">CloudNative-PG</span>
     <button type="button" class="sidebar-toggle" x-cloak aria-label="Collapse navigation"></button>
   </div>
   <nav class="sidebar-nav" hx-boost="true">
     <a class="sidebar-link" href="/"{{if eq .Current "overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
-
-    {{- range .Links}}
-    <a class="sidebar-link" href="{{.URL}}" hx-boost="false" target="_blank" rel="noopener noreferrer" title="{{.Label}} (new tab)"><svg><use href="#i-external"></use></svg><span class="sidebar-label">{{.Label}}</span></a>
-    {{- end}}
 
     <div class="sidebar-group">
       <a class="sidebar-link sidebar-group-label" href="/cluster/status" title="Cluster"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></a>
@@ -141,6 +140,14 @@
     <span class="sidebar-link" aria-disabled="true" title="Access requests — disabled in this deployment"><svg><use href="#i-access"></use></svg><span class="sidebar-label">Access requests</span></span>
     {{- end}}
   </nav>
+  {{- if .Links}}
+  <span class="sidebar-heading is-section">External</span>
+  <nav class="sidebar-nav is-external" hx-boost="true">
+    {{- range .Links}}
+    <a class="sidebar-link" href="{{.URL}}" hx-boost="false" target="_blank" rel="noopener noreferrer" title="{{.Label}} (new tab)"><svg><use href="#i-external"></use></svg><span class="sidebar-label">{{.Label}}</span></a>
+    {{- end}}
+  </nav>
+  {{- end}}
 </aside>
 {{- end -}}
 

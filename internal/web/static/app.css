@@ -51,8 +51,16 @@
   --border: oklch(90% 0.006 260);
   --border-strong: oklch(80% 0.008 260);
 
-  --accent: oklch(50% 0.13 245);
-  --accent-weak: oklch(95% 0.03 245);
+  --accent: oklch(50% 0.15 252);
+  --accent-weak: oklch(94.5% 0.038 248);
+  --logo-blue: oklch(76% 0.11 232);
+
+  /* Navy Chrome: the topbar takes the mark's outline navy, so the logo sits
+     on its own colour while the content area stays light. */
+  --topbar-bg: oklch(32% 0.10 258);
+  --topbar-border: oklch(28% 0.09 258);
+  --topbar-text: oklch(97% 0.01 250);
+  --topbar-muted: oklch(78% 0.05 248);
 
   /* Status. Each pairs with a word in the markup and a mark in ::before. */
   --ok: oklch(47% 0.12 152);
@@ -65,19 +73,29 @@
   --unknown: var(--text-muted);
 }
 
+/* The two retained directions are the only themes: Navy Chrome above,
+   Midnight Console here. With no data-theme the OS preference decides;
+   data-theme on <html> pins one, so both sets are also declared under
+   their own attribute scope. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: oklch(18.5% 0.012 260);
-    --surface: oklch(22% 0.013 260);
-    --surface-2: oklch(25.5% 0.014 260);
-    --text: oklch(93% 0.006 260);
-    --text-muted: oklch(71% 0.011 260);
-    --text-faint: oklch(60% 0.012 260);
-    --border: oklch(31% 0.012 260);
-    --border-strong: oklch(43% 0.014 260);
+    color-scheme: only dark;
+    --bg: oklch(19% 0.030 258);
+    --surface: oklch(23% 0.032 258);
+    --surface-2: oklch(27% 0.034 258);
+    --text: oklch(93% 0.012 250);
+    --text-muted: oklch(72% 0.025 250);
+    --text-faint: oklch(60% 0.025 252);
+    --border: oklch(32% 0.035 258);
+    --border-strong: oklch(44% 0.045 255);
 
-    --accent: oklch(76% 0.11 235);
-    --accent-weak: oklch(30% 0.05 240);
+    --accent: oklch(74% 0.115 240);
+    --accent-weak: oklch(31% 0.06 250);
+
+    --topbar-bg: var(--surface);
+    --topbar-border: var(--border);
+    --topbar-text: var(--text);
+    --topbar-muted: var(--text-muted);
 
     --ok: oklch(76% 0.14 155);
     --warn: oklch(80% 0.12 80);
@@ -85,6 +103,58 @@
     --bad: oklch(73% 0.15 25);
     --bad-weak: oklch(30% 0.07 25);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: only dark;
+  --bg: oklch(19% 0.030 258);
+  --surface: oklch(23% 0.032 258);
+  --surface-2: oklch(27% 0.034 258);
+  --text: oklch(93% 0.012 250);
+  --text-muted: oklch(72% 0.025 250);
+  --text-faint: oklch(60% 0.025 252);
+  --border: oklch(32% 0.035 258);
+  --border-strong: oklch(44% 0.045 255);
+
+  --accent: oklch(74% 0.115 240);
+  --accent-weak: oklch(31% 0.06 250);
+
+  --topbar-bg: var(--surface);
+  --topbar-border: var(--border);
+  --topbar-text: var(--text);
+  --topbar-muted: var(--text-muted);
+
+  --ok: oklch(76% 0.14 155);
+  --warn: oklch(80% 0.12 80);
+  --warn-weak: oklch(30% 0.05 80);
+  --bad: oklch(73% 0.15 25);
+  --bad-weak: oklch(30% 0.07 25);
+}
+
+:root[data-theme="light"] {
+  color-scheme: only light;
+  --bg: oklch(98.5% 0.003 255);
+  --surface: oklch(100% 0 0);
+  --surface-2: oklch(96.8% 0.004 255);
+  --text: oklch(24% 0.012 260);
+  --text-muted: oklch(50% 0.012 260);
+  --text-faint: oklch(62% 0.010 260);
+  --border: oklch(90% 0.006 260);
+  --border-strong: oklch(80% 0.008 260);
+
+  --accent: oklch(50% 0.15 252);
+  --accent-weak: oklch(94.5% 0.038 248);
+
+  --topbar-bg: oklch(32% 0.10 258);
+  --topbar-border: oklch(28% 0.09 258);
+  --topbar-text: oklch(97% 0.01 250);
+  --topbar-muted: oklch(78% 0.05 248);
+
+  --ok: oklch(47% 0.12 152);
+  --warn: oklch(54% 0.12 72);
+  --warn-weak: oklch(95.5% 0.045 82);
+  --bad: oklch(51% 0.18 27);
+  --bad-weak: oklch(95.5% 0.03 27);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -763,8 +833,9 @@ button.danger:hover, input[type="submit"].danger:hover { background: var(--bad-w
 
 header.topbar {
   align-items: center;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--topbar-border);
+  color: var(--topbar-text);
   display: flex;
   flex-wrap: nowrap;
   gap: var(--space-5);
@@ -778,9 +849,41 @@ header.topbar {
   z-index: 20;
 }
 
+header.topbar .brand { align-items: center; display: inline-flex; flex: 0 0 auto; gap: var(--space-2); }
+header.topbar h1 .console { color: var(--logo-blue); }
 header.topbar h1 { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.02em; margin: 0; }
 header.topbar dl.target { flex: 1 1 auto; min-width: 0; overflow: hidden; }
-header.topbar .refresh { flex: 0 0 auto; margin-left: auto; }
+header.topbar .refresh { color: var(--topbar-muted); flex: 0 0 auto; margin-left: auto; }
+header.topbar dl.target dt { color: var(--topbar-muted); }
+header.topbar dl.target dd { color: var(--topbar-text); }
+
+/* Theme switch. Both glyphs ship; the inactive one is hidden per theme so
+   the button always shows the theme it would move to. */
+.theme-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--topbar-text) 32%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--topbar-text);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  height: 1.75rem;
+  justify-content: center;
+  margin-left: var(--space-3);
+  padding: 0;
+  width: 1.75rem;
+}
+.theme-toggle:hover { background: color-mix(in oklab, var(--topbar-text) 12%, transparent); }
+.theme-toggle svg { height: 1rem; width: 1rem; }
+.theme-toggle .i-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .i-moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .i-sun { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-toggle .i-moon { display: none; }
+  :root:not([data-theme="light"]) .theme-toggle .i-sun { display: block; }
+}
+@media print { .theme-toggle { display: none !important; } }
 
 .shell { padding-top: var(--header-h); }
 .sidebar { max-height: calc(100vh - var(--header-h)); top: var(--header-h); }
