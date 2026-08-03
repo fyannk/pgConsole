@@ -101,11 +101,23 @@ func run() error {
 			deps.HistorySource = store
 		}
 	}
+	// The metrics window follows the same shape: in-memory by default,
+	// and with a snapshot path configured it is primed from the file and
+	// rewritten periodically. An unusable snapshot path fails before
+	// listen; an unreadable snapshot merely starts the window empty.
 	if cfg.MetricsEnabled {
-		deps.Metrics = metrics.NewStore(metrics.Limits{
+		store := metrics.NewStore(metrics.Limits{
 			Interval:  cfg.MetricsInterval,
 			Retention: cfg.MetricsRetention,
 		})
+		deps.Metrics = store
+		if cfg.MetricsPath != "" {
+			persister, err := metrics.OpenPersister(cfg.MetricsPath, store, observe.RealClock{}, logger)
+			if err != nil {
+				return err
+			}
+			deps.MetricsRunner = persister.Run
+		}
 	}
 	client, err := kube.InClusterClient(opts, logger)
 	if err != nil {

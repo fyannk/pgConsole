@@ -240,11 +240,19 @@ spec:
 # most the last couple of seconds of history, never the file's
 # integrity.
 #
+# The metrics window can share the same volume: METRICS_PATH points a
+# periodic snapshot (one atomic rewrite per minute, one at shutdown) at
+# a file beside the journal, so the charts survive restarts too. A hard
+# kill loses at most the last minute of samples, which then reads as a
+# gap like any other unswept span.
+#
 # To enable, create the claim and add to the Deployment above:
 #
 #   env:
 #     - name: HISTORY_PATH
 #       value: /var/lib/pgconsole/history.db
+#     - name: METRICS_PATH
+#       value: /var/lib/pgconsole/metrics.snapshot
 #   volumeMounts:
 #     - name: history
 #       mountPath: /var/lib/pgconsole

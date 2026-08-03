@@ -299,6 +299,25 @@ func TestLoadMatrix(t *testing.T) {
 			wantErr: EnvMetricsRetention + ": must be a duration between 1h0m0s and 720h0m0s",
 		},
 		{
+			name:   "metrics snapshot path configured",
+			mutate: map[string]string{EnvMetricsPath: "/var/lib/pgconsole/metrics.snapshot"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MetricsPath != "/var/lib/pgconsole/metrics.snapshot" {
+					t.Errorf("MetricsPath = %q", cfg.MetricsPath)
+				}
+			},
+		},
+		{
+			name:    "metrics path must be absolute",
+			mutate:  map[string]string{EnvMetricsPath: "metrics.snapshot"},
+			wantErr: EnvMetricsPath + ": must be an absolute file path",
+		},
+		{
+			name:    "metrics path conflicts with disabled metrics",
+			mutate:  map[string]string{EnvMetricsEnabled: "false", EnvMetricsPath: "/var/lib/pgconsole/metrics.snapshot"},
+			wantErr: EnvMetricsPath + ": requires " + EnvMetricsEnabled + "=true",
+		},
+		{
 			name:    "history revisions below bound",
 			mutate:  map[string]string{EnvHistoryMaxRevisions: "99"},
 			wantErr: EnvHistoryMaxRevisions + ": must be an integer between 100 and 20000",

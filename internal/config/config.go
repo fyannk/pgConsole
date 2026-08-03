@@ -94,6 +94,13 @@ const (
 	EnvMetricsInterval = "METRICS_INTERVAL"
 	// EnvMetricsRetention is how long the rollup tier is kept.
 	EnvMetricsRetention = "METRICS_RETENTION"
+	// EnvMetricsPath is the snapshot file the metrics window is
+	// periodically written to so it survives restarts. Empty keeps the
+	// window in memory only — the default, which preserves the
+	// stateless deployment. Setting it implies a writable volume
+	// (typically the history journal's) and requires metrics to be
+	// enabled.
+	EnvMetricsPath = "METRICS_PATH"
 	// EnvObjectStoreViewerURL is the link-out base URL to the cluster's
 	// ObjectStoreViewer.
 	EnvObjectStoreViewerURL = "OBJECTSTOREVIEWER_URL"
@@ -266,6 +273,9 @@ type Config struct {
 	MetricsInterval time.Duration
 	// MetricsRetention is how long the rollup tier is kept.
 	MetricsRetention time.Duration
+	// MetricsPath is the snapshot file; empty keeps the window in
+	// memory only.
+	MetricsPath string
 	// ObjectStoreViewerURL is the ObjectStoreViewer link-out base URL;
 	// empty hides the link.
 	ObjectStoreViewerURL string
@@ -415,6 +425,18 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.MetricsEnabled = boolVar(lookup, EnvMetricsEnabled, true, fail)
 	cfg.MetricsInterval = durationVar(lookup, EnvMetricsInterval, DefaultMetricsInterval, MinMetricsInterval, MaxMetricsInterval, fail)
 	cfg.MetricsRetention = durationVar(lookup, EnvMetricsRetention, DefaultMetricsRetention, MinMetricsRetention, MaxMetricsRetention, fail)
+	if raw, ok := lookup(EnvMetricsPath); ok && raw != "" {
+		switch {
+		case !strings.HasPrefix(raw, "/") || len(raw) < 2 || strings.ContainsAny(raw, "\x00\r\n"):
+			fail(EnvMetricsPath, "must be an absolute file path")
+		case !cfg.MetricsEnabled:
+			// A mounted snapshot with metrics switched off is conflicting
+			// intent, not a silent no-op.
+			fail(EnvMetricsPath, "requires "+EnvMetricsEnabled+"=true")
+		default:
+			cfg.MetricsPath = raw
+		}
+	}
 
 	cfg.ObjectStoreViewerURL = linkVar(lookup, EnvObjectStoreViewerURL, cfg.AllowInsecureLinks, fail)
 	cfg.PgAdminURL = linkVar(lookup, EnvPgAdminURL, cfg.AllowInsecureLinks, fail)

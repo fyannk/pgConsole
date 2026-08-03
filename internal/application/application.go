@@ -107,6 +107,10 @@ type Deps struct {
 	// route exists. The scraper needs the pod roster, so it only runs
 	// when PodSource is also wired.
 	Metrics *metrics.Store
+	// MetricsRunner is the metrics snapshot loop, owning the snapshot
+	// file's cadence and final flush. Nil means the window is in-memory
+	// or disabled and no loop runs.
+	MetricsRunner func(ctx context.Context) error
 	// Prober answers the readiness endpoint.
 	Prober web.ReadinessProber
 	// Clock supplies time to the collectors and the page ages.
@@ -203,6 +207,9 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 	}
 	if deps.HistoryRunner != nil {
 		runners = append(runners, deps.HistoryRunner)
+	}
+	if deps.MetricsRunner != nil {
+		runners = append(runners, deps.MetricsRunner)
 	}
 	// The access-review collector runs only in review mode with a wired
 	// source: disabled mode observes nothing and renders no panel.
