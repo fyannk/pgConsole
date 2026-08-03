@@ -40,6 +40,7 @@
 <symbol id="i-metrics" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13.5h12"></path><path d="M3.5 10.5 6.5 7l2.5 2 3.5-4.5"></path></symbol>
 <symbol id="i-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"></circle><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"></path></symbol>
 <symbol id="i-moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"></path></symbol>
+<symbol id="i-close" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"></path></symbol>
 </defs></svg>
 {{- end -}}
 
@@ -72,7 +73,7 @@
 {{- end -}}
 
 {{- /* sidebar renders a ShellView. Current keys: overview,
-       cluster-overview, cluster-status, cluster-pods, cluster-events, cluster-logs,
+       cluster-overview, cluster-status, cluster-pods, cluster-events, cluster-metrics,
        backups-overview, backups-objects, backups-evidence,
        databases-overview, databases-roles, databases-publications,
        databases-subscriptions,
@@ -87,7 +88,7 @@
     <a class="sidebar-link" href="/"{{if eq .Current "overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
 
     <div class="sidebar-group">
-      <a class="sidebar-link sidebar-group-label" href="/cluster/status" title="Cluster"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></a>
+      <a class="sidebar-link sidebar-group-label" href="/cluster/overview" title="Cluster"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></a>
       <div class="sidebar-sub">
         <a class="sidebar-link" href="/cluster/overview"{{if eq .Current "cluster-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
         <a class="sidebar-link" href="/cluster/status"{{if eq .Current "cluster-status"}} aria-current="page"{{end}} title="Status"><svg><use href="#i-status"></use></svg><span class="sidebar-label">Status</span></a>
@@ -103,7 +104,6 @@
 		{{- else}}
 		<span class="sidebar-link" aria-disabled="true" title="Object history — disabled in this deployment"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></span>
 		{{- end}}
-        <a class="sidebar-link" href="/cluster/logs"{{if eq .Current "cluster-logs"}} aria-current="page"{{end}} title="Logs"><svg><use href="#i-logs"></use></svg><span class="sidebar-label">Logs</span></a>
       </div>
     </div>
 

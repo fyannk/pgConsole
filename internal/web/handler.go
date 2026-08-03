@@ -273,8 +273,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /cluster/overview", h.handleClusterOverview)
 	mux.HandleFunc("GET /cluster/status", h.handleClusterStatus)
 	mux.HandleFunc("GET /cluster/pods", h.handleClusterPods)
+	mux.HandleFunc("GET /cluster/pods/{pod}", h.handlePodDetail)
 	mux.HandleFunc("GET /cluster/events", h.handleClusterEvents)
-	mux.HandleFunc("GET /cluster/logs", h.handleClusterLogs)
 	mux.HandleFunc("GET /backups", h.handleBackupsOverview)
 	mux.HandleFunc("GET /backups/objects", h.handleBackupsObjects)
 	mux.HandleFunc("GET /backups/evidence", h.handleBackupsEvidence)
@@ -422,20 +422,21 @@ func (h *Handler) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "cluster-status", "cluster-status.html.tmpl", h.assemble(r, "cluster-status"))
 }
 
-// handleClusterPods renders the Kubernetes-observed instance pods.
+// handleClusterPods renders the Kubernetes-observed instance pods and
+// the merged recent per-pod timeline.
 func (h *Handler) handleClusterPods(w http.ResponseWriter, r *http.Request) {
-	h.renderPage(w, "cluster-pods", "cluster-pods.html.tmpl", h.assemble(r, "cluster-pods"))
+	page := h.assemble(r, "cluster-pods")
+	page.PodHistory, _ = h.buildPodTimeline("", recentPodHistoryBound, h.now())
+	h.renderPage(w, "cluster-pods", "cluster-pods.html.tmpl", page)
 }
+
+// recentPodHistoryBound caps the roster screen's timeline; the per-pod
+// detail carries the rest.
+const recentPodHistoryBound = 8
 
 // handleClusterEvents renders the age-windowed cluster events.
 func (h *Handler) handleClusterEvents(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "cluster-events", "cluster-events.html.tmpl", h.assemble(r, "cluster-events"))
-}
-
-// handleClusterLogs renders the per-pod log-tail launch points; the tail
-// itself is the poweruser-gated /logs route.
-func (h *Handler) handleClusterLogs(w http.ResponseWriter, r *http.Request) {
-	h.renderPage(w, "cluster-logs", "cluster-logs.html.tmpl", h.assemble(r, "cluster-logs"))
 }
 
 // handleBackupsOverview renders the backup catalog verdict and the
@@ -598,15 +599,41 @@ func (h *Handler) buildIdentityView(r *http.Request) *IdentityView {
 // shape before anything touches the API.
 var podNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
 
+// serveRawTail writes the bounded tail as plain text. It sits behind
+// the same requireLevel gate as the page form of the route.
+func (h *Handler) serveRawTail(w http.ResponseWriter, r *http.Request, pod string) {
+	if h.tailer == nil {
+		http.Error(w, "no Kubernetes access", http.StatusServiceUnavailable)
+		return
+	}
+	tail, err := h.tailer.TailLogs(r.Context(), pod)
+	if err != nil {
+		if redact.Categorize(err) == redact.CategoryNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, redact.Safe(err), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(tail.Content))
+}
+
 // handleLogs serves one bounded, on-demand log tail for a verified
 // member pod. This is a closed request-time API exception: the fetch
 // runs on the request's context, so a client disconnect cancels it;
 // nothing is cached or persisted. A non-member pod is indistinguishable
-// from a nonexistent one.
+// from a nonexistent one. With ?raw=1 the same gated tail is served as
+// plain text, which is what the pod detail's follow enhancement polls.
 func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	pod := r.PathValue("pod")
 	if !podNamePattern.MatchString(pod) {
 		http.NotFound(w, r)
+		return
+	}
+	if r.URL.Query().Get("raw") == "1" {
+		h.serveRawTail(w, r, pod)
 		return
 	}
 	view := LogsView{

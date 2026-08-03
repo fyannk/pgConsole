@@ -903,8 +903,12 @@ func TestHandlerLogsLinkRenderedForMembers(t *testing.T) {
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
 	body := getWithHeaders(t, h, "/cluster/pods", powerUser).Body.String()
-	if !strings.Contains(body, `<a href="/logs/orders-1">tail</a>`) {
-		t.Fatal("member pod misses its log link")
+	if !strings.Contains(body, `<a href="/cluster/pods/orders-1">orders-1</a>`) {
+		t.Fatal("member pod misses its detail link")
+	}
+	detail := getWithHeaders(t, h, "/cluster/pods/orders-1", powerUser).Body.String()
+	if !strings.Contains(detail, `data-tab="pod-logs"`) {
+		t.Fatal("poweruser pod detail misses the logs tab")
 	}
 }
 

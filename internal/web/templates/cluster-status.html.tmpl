@@ -55,10 +55,9 @@
     {{- end}}
     <h2 class="section-title">Details</h2>
     {{- with .Cluster}}
-    <section class="panel sectioned" x-data="panel" data-panel="cluster">
+    <section class="panel sectioned">
       <div class="panel-head">
         <h2>Cluster status</h2>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       {{- if .Absent}}

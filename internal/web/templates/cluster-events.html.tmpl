@@ -7,11 +7,10 @@
 {{template "page-head" "events"}}
 {{template "shell-open" .Shell}}
     {{- with .Events}}
-    <section class="panel sectioned" x-data="panel" data-panel="events">
+    <section class="panel sectioned" data-panel="events">
       <div class="panel-head">
         <h2>Events</h2>
         <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}) — window {{.Window}}</p>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       {{- if .Rows}}

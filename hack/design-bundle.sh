@@ -196,9 +196,9 @@ rewrite() {
     -e 's|"/cluster/overview"|"cluster-overview.html"|g' \
     -e 's|"/cluster/metrics"|"cluster-metrics.html"|g' \
     -e 's|"/cluster/status"|"cluster-status.html"|g' \
+    -e 's|"/cluster/pods/[^"]*"|"pod-details.html"|g' \
     -e 's|"/cluster/pods"|"cluster-pods.html"|g' \
     -e 's|"/cluster/events"|"cluster-events.html"|g' \
-    -e 's|"/cluster/logs"|"cluster-logs.html"|g' \
     -e 's|"/backups/objects"|"backups-objects.html"|g' \
     -e 's|"/backups/evidence"|"backups-evidence.html"|g' \
     -e 's|"/backups"|"backups-overview.html"|g' \
@@ -216,7 +216,6 @@ rewrite() {
     -e 's|"/operations/[^"]*"|"operations-confirm.html"|g' \
     -e 's|"/operations"|"operations-index.html"|g' \
     -e 's|"/access-requests"|"access-requests.html"|g' \
-    -e 's|"/logs/[^"]*"|"logs-tail.html"|g' \
     -e 's|href="/"|href="index-healthy.html"|g'
 }
 
@@ -277,8 +276,6 @@ page $HEALTHY /cluster/events   "" "" cluster-events.html Pages \
   "Cluster — events" "Recent Kubernetes events"
 page $HEALTHY /cluster/metrics  "" "" cluster-metrics.html Pages \
   "Cluster — metrics" "Instance metrics: text summaries with chart enhancement"
-page $HEALTHY /cluster/logs     "" "" cluster-logs.html Pages \
-  "Cluster — logs" "Choosing an instance container log to tail"
 page $HEALTHY /backups          "" "" backups-overview.html Pages \
   "Backups — overview" "Recency, schedule and retention"
 page $HEALTHY /backups/objects  "" "" backups-objects.html Pages \
@@ -302,8 +299,8 @@ page $HEALTHY /poolers/logs poweruser operator poolers-logs.html Pages \
 
 # The level-gated screens. The tail needs poweruser; the review panel
 # needs dba; the refusal is the same route asked for below its level.
-page $HEALTHY /logs/orders-1 poweruser operator logs-tail.html Pages \
-  "Log tail" "On-demand bounded fetch, never stored"
+page $HEALTHY /cluster/pods/orders-1 poweruser operator pod-details.html Pages \
+  "Pod detail" "Status, history and logs for one instance pod, with the raw definition in a modal"
 page $HEALTHY /operations poweruser operator operations-index.html Pages \
   "Operations — catalog" "Available operations for the authorized level"
 # Promote is the operation that targets a named instance, so its

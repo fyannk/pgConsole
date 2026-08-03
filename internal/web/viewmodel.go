@@ -737,6 +737,9 @@ type Page struct {
 	// ClusterOverview is the power-user wiring screen, derived from
 	// this page; nil without a snapshot.
 	ClusterOverview *ClusterOverviewView
+	// PodHistory is the roster screen's merged recent timeline, set by
+	// its handler only.
+	PodHistory []PodTimelineEntry
 	// ImageCatalog is the resolved catalog panel, nil when never
 	// observed.
 	ImageCatalog *ImageCatalogView

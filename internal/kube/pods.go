@@ -158,6 +158,10 @@ func (c *Client) convertPod(content map[string]any) (observe.PodFacts, bool, err
 		Deleting: pod.DeletionTimestamp != nil,
 	}
 
+	if pod.Status.StartTime != nil {
+		started := pod.Status.StartTime.Time
+		facts.Started = &started
+	}
 	for _, cond := range pod.Status.Conditions {
 		if cond.Type == corev1.PodReady {
 			ready := cond.Status == corev1.ConditionTrue

@@ -90,6 +90,14 @@ func uiHistorySource() *history.Store {
 	base.SpecHash = "instances-3"
 	base.Actor = history.Actor{Manager: "gitops", Operation: "Apply"}
 	store.Observe(base)
+	clock.now = testNow.Add(-30 * time.Second)
+	store.Observe(history.Observation{
+		Scope: "pods", Group: "", Version: "v1", Kind: "Pod",
+		Namespace: "payments", Name: "orders-1", UID: "pod-uid-1",
+		Manifest: []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"orders-1","namespace":"payments","labels":{"cnpg.io/cluster":"orders"}},"spec":{"nodeName":"node-a","containers":[{"name":"postgres","image":"ghcr.io/cloudnative-pg/postgresql:16.4"}]},"status":{"phase":"Running"}}`),
+		SpecHash: "pod-spec-1", StatusHash: "running",
+		Actor: history.Actor{Manager: "kubelet", Operation: "Update"},
+	})
 	return store
 }
 

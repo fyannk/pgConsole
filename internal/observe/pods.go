@@ -44,9 +44,11 @@ type PodFacts struct {
 	Restarts *int
 	// Node is the assigned node name.
 	Node string
-	// IP is the pod IP, empty until assigned. It is what the metrics
-	// scraper dials; nothing else in the console uses it.
+	// IP is the pod IP, empty until assigned. The metrics scraper dials
+	// it and the pod detail states it.
 	IP string
+	// Started is the reported start time; nil when unreported.
+	Started *time.Time
 	// Image is the PostgreSQL container image.
 	Image string
 	// Deleting reports a set deletion timestamp.

@@ -124,7 +124,6 @@ func TestEnhancementIsAdditive(t *testing.T) {
 	for _, cloaked := range []string{
 		`<div class="refresh" x-data="autoRefresh" x-cloak>`,
 		`<div class="table-tools" x-cloak>`,
-		`class="panel-toggle" x-cloak`,
 	} {
 		if !strings.Contains(body, cloaked) {
 			t.Errorf("enhancement control is not cloaked: %q", cloaked)

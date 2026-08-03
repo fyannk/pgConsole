@@ -162,15 +162,18 @@ async function checkEnhancement(browser) {
   check('sorted header marked for the stylesheet',
     (await nameHeader.getAttribute('data-sort')) === 'desc');
 
-  // Collapse, on the events screen.
-  await page.goto(new URL('/cluster/events', STATES.healthy).toString(), { waitUntil: 'networkidle' });
-  const toggle = page.locator('section[data-panel="events"] .panel-toggle');
-  const body = page.locator('section[data-panel="events"] .panel-body');
-  const before = await body.isVisible();
-  await toggle.click();
+  // Tabs, on the pod detail: with no script every panel is served
+  // visible; the enhancement shows one at a time and the click moves it.
+  await page.goto(new URL('/cluster/pods/orders-1', STATES.healthy).toString(), { waitUntil: 'networkidle' });
+  const statusPanel = page.locator('#pod-status');
+  const historyPanel = page.locator('#pod-history');
+  const statusFirst = await statusPanel.isVisible() && !(await historyPanel.isVisible());
+  await page.locator('.tabs button[data-tab="pod-history"]').click();
   await page.waitForTimeout(150);
-  const after = await body.isVisible();
-  check('panel collapses', before === true && after === false, `${before} -> ${after}`);
+  const historyAfter = (await historyPanel.isVisible()) && !(await statusPanel.isVisible());
+  check('pod detail tabs switch panels', statusFirst && historyAfter,
+    `status-first=${statusFirst}, history-after=${historyAfter}`);
+  await page.goto(new URL('/cluster/events', STATES.healthy).toString(), { waitUntil: 'networkidle' });
 
   // Auto-refresh must never be on unless asked for.
   check('auto-refresh defaults to off',
@@ -207,7 +210,7 @@ async function checkEnhancement(browser) {
     enhanced.marker === 'survives-root-swaps' && enhanced.navigations === navigationCount && enhanced.roots === 1,
     `${enhanced.navigations} navigation entries, ${enhanced.roots} app roots`);
   check('history timeline enhancement draws from the served rows',
-    await page.locator('[data-history-visual] svg .history-point').count() === 2);
+    await page.locator('[data-history-visual] svg .history-point').count() === 3);
 
   const refreshed = page.evaluate(() => new Promise((resolve) => {
     document.addEventListener('htmx:afterSwap', () => resolve(true), { once: true });

@@ -7,11 +7,10 @@
 {{template "page-head" "backup objects"}}
 {{template "shell-open" .Shell}}
     {{- with .Backups}}
-    <section class="panel sectioned" x-data="panel" data-panel="backups">
+    <section class="panel sectioned">
       <div class="panel-head">
         <h2>Backup catalog</h2>
         <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       <p>Last completed backup age: {{.LastCompletedAge}}</p>
@@ -68,10 +67,9 @@
     </section>
     {{- end}}
     {{- with .ObjectStore}}
-    <section class="panel sectioned" x-data="panel" data-panel="objectstore">
+    <section class="panel sectioned">
       <div class="panel-head">
         <h2>ObjectStore reference</h2>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       <dl class="facts">

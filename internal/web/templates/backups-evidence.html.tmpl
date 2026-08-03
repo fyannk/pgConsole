@@ -8,11 +8,10 @@
 {{template "page-head" "repository evidence"}}
 {{template "shell-open" .Shell}}
     {{- with .Repository}}
-    <section class="panel sectioned" x-data="panel" data-panel="repository">
+    <section class="panel sectioned">
       <div class="panel-head">
         <h2>Repository evidence</h2>
         <p class="meta" data-state="{{stateToken .Meta.State}}">sidecar contact: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}){{if .ContactFailure}} — {{.ContactFailure}}{{end}}</p>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       <p class="state">This section is <strong>ObjectStoreViewer&#39;s</strong> report, read over the sidecar API — not the operator&#39;s account of the same backups. pgConsole never reads object storage itself, so everything below is the independent observer&#39;s word about what the repository actually holds.{{if $.Links}} To browse the objects themselves, open ObjectStoreViewer from the sidebar.{{end}}</p>
@@ -79,10 +78,9 @@
     </section>
     {{- end}}
     {{- with .CrossCheck}}
-    <section class="panel sectioned" x-data="panel" data-panel="crosscheck">
+    <section class="panel sectioned">
       <div class="panel-head">
         <h2>Backup cross-check</h2>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       {{- if .Degraded}}

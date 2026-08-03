@@ -18,7 +18,7 @@
 {{template "shell-open" .Shell}}
     {{- $current := .Shell.Current}}
     {{- with .Databases}}
-    <section class="panel sectioned" id="databases" x-data="panel" data-panel="databases">
+    <section class="panel sectioned" id="databases">
       <div class="panel-head">
         <h2>
           {{- if eq $current "databases-roles"}}Declared roles
@@ -27,7 +27,6 @@
           {{- else}}Declared databases{{end -}}
         </h2>
         <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
 

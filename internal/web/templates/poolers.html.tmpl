@@ -12,11 +12,10 @@
 {{template "shell-open" .Shell}}
     {{- if eq .Shell.Current "poolers-pods"}}
     {{- with .PoolerPods}}
-    <section class="panel sectioned" id="pooler-pods" x-data="panel" data-panel="pooler-pods">
+    <section class="panel sectioned" id="pooler-pods">
       <div class="panel-head">
         <h2>Pooler pods</h2>
         <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       {{- if .Rows}}
@@ -78,11 +77,10 @@
 
     {{- else}}
     {{- with .Poolers}}
-    <section class="panel sectioned" id="poolers" x-data="panel" data-panel="poolers">
+    <section class="panel sectioned" id="poolers">
       <div class="panel-head">
         <h2>Poolers</h2>
         <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
-        <button type="button" class="panel-toggle" x-cloak>Hide</button>
       </div>
       <div class="panel-body">
       {{- if .Poolers}}

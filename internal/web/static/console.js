@@ -13,7 +13,6 @@
    expression is attached here with addEventListener instead. */
 
 document.addEventListener('alpine:init', () => {
-  Alpine.data('panel', panel);
   Alpine.data('dataTable', dataTable);
   Alpine.data('autoRefresh', autoRefresh);
   Alpine.data('sidebar', sidebar);
@@ -90,66 +89,156 @@ document.addEventListener('click', (event) => {
   writePref('pgconsole.theme', next);
 });
 
-/**
- * Collapsible panel. The body is visible by default and stays visible
- * when this never runs, so collapsing is additive. The open/closed
- * choice persists per panel name taken from data-panel.
- * @returns {object} Alpine component.
- */
-function panel() {
-  return {
-    open: true,
-    root: null,
-    storageKey: '',
+/* ------------------------------------------------------------- Tabs, rows
 
-    /**
-     * Restores the persisted state for this panel.
-     * @returns {void}
-     */
-    init() {
-      this.root = this.$el;
-      const button = this.root.querySelector('.panel-toggle');
-      if (button) button.addEventListener('click', () => this.toggle());
-      const name = this.root.dataset.panel || '';
-      if (name) {
-        this.storageKey = 'pgconsole.panel.' + name;
-        this.open = readPref(this.storageKey, 'open') !== 'closed';
-      }
-      this.apply();
-    },
+   Delegated so an htmx swap keeps them working, and additive: without
+   this every tab panel stays visible and the pod name link still works. */
 
-    /**
-     * Reflects the open state onto the DOM. Written imperatively for the
-     * same reason the click is: the markup then carries no attribute
-     * name a strict XML serialiser would reject.
-     * @returns {void}
-     */
-    apply() {
-      if (!this.root) return;
-      const body = this.root.querySelector('.panel-body');
-      if (body) body.hidden = !this.open;
-      const button = this.root.querySelector('.panel-toggle');
-      if (button) button.textContent = this.label;
-    },
-
-    /**
-     * Toggles the body and persists the new state.
-     * @returns {void}
-     */
-    toggle() {
-      this.open = !this.open;
-      if (this.storageKey) {
-        writePref(this.storageKey, this.open ? 'open' : 'closed');
-      }
-      this.apply();
-    },
-
-    /** @returns {string} Button label for the current state. */
-    get label() {
-      return this.open ? 'Hide' : 'Show';
-    },
-  };
+function selectTab(button) {
+  const list = button.closest('.tabs');
+  if (!list) return;
+  const buttons = Array.prototype.slice.call(list.querySelectorAll('button[data-tab]'));
+  buttons.forEach((b) => {
+    const on = b === button;
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+    const panel = document.getElementById(b.dataset.tab);
+    if (panel) panel.hidden = !on;
+  });
 }
+
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!target.closest) return;
+
+  const tab = target.closest('.tabs button[data-tab]');
+  if (tab) { selectTab(tab); return; }
+
+  const open = target.closest('[data-dialog]');
+  if (open) {
+    const dialog = document.getElementById(open.dataset.dialog);
+    if (dialog && dialog.showModal) dialog.showModal();
+    return;
+  }
+
+  const close = target.closest('[data-dialog-close]');
+  if (close) {
+    const dialog = close.closest('dialog');
+    if (dialog) dialog.close();
+    return;
+  }
+
+  /* A click on the backdrop lands on the dialog element itself, never on
+     its content, so it closes. */
+  if (target.tagName === 'DIALOG' && target.open) { target.close(); return; }
+
+  /* A click anywhere on the row follows the row's own link, unless the
+     click already landed on one. */
+  const row = target.closest('tr[data-href]');
+  if (row && !target.closest('a')) window.location.href = row.dataset.href;
+});
+
+/* ------------------------------------------------------------ Log follow
+
+   The served tail is complete on its own. Following re-fetches the same
+   bounded tail from the pod's raw route and keeps the pane pinned to its
+   last line; a scroll away from the bottom stops it, as tail -f does not
+   fight the reader. The route is the same one the page rendered from, so
+   following can never show a line the reader's level would not get. */
+
+function initLogTails(scope) {
+  const root = scope && scope.querySelectorAll ? scope : document;
+  Array.prototype.forEach.call(root.querySelectorAll('pre[data-log-tail]'), (pre) => {
+    if (pre.dataset.logReady === 'true') return;
+    pre.dataset.logReady = 'true';
+    const body = pre.closest('.panel-body') || document;
+    const box = body.querySelector('[data-log-follow]');
+    const state = body.querySelector('[data-log-state]');
+    const src = pre.dataset.logSrc;
+
+    const reflect = () => {
+      const on = !box || box.checked;
+      if (state) {
+        state.textContent = on ? 'following' : 'paused';
+        if (on) state.removeAttribute('data-paused');
+        else state.setAttribute('data-paused', '');
+      }
+      if (on) pre.scrollTop = pre.scrollHeight;
+    };
+
+    /* Fit the pane to the space left below it so only the pane scrolls. */
+    const fit = () => {
+      /* A hidden panel has no geometry to measure. */
+      if (!pre.offsetParent) return;
+      const gap = 16;
+      const footer = pre.parentElement
+        ? pre.parentElement.getBoundingClientRect().bottom - pre.getBoundingClientRect().bottom
+        : 0;
+      const height = window.innerHeight - pre.getBoundingClientRect().top - footer - gap;
+      pre.style.height = Math.max(96, Math.floor(height)) + 'px';
+      /* Whatever sits below the pane (caption, source line, padding) is
+         measured as page overflow and taken back out of the pane, so the
+         document itself never scrolls. */
+      const spill = document.documentElement.scrollHeight - window.innerHeight;
+      if (spill > 0) pre.style.height = Math.max(96, pre.clientHeight - spill) + 'px';
+      if (!box || box.checked) pre.scrollTop = pre.scrollHeight;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    document.addEventListener('click', (event) => {
+      if (event.target.closest && event.target.closest('.tabs button[data-tab]')) window.setTimeout(fit, 0);
+    });
+
+    if (box) box.addEventListener('change', reflect);
+
+    /* Scrolling away pauses; scrolling back to the bottom resumes. */
+    pre.addEventListener('scroll', () => {
+      if (!box) return;
+      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+      if (box.checked !== atBottom) { box.checked = atBottom; reflect(); }
+    });
+
+    if (src) {
+      window.setInterval(() => {
+        if ((box && !box.checked) || document.hidden || !document.body.contains(pre)) return;
+        fetch(src, { credentials: 'same-origin' }).then((resp) => {
+          if (!resp.ok) throw new Error('status');
+          return resp.text();
+        }).then((text) => {
+          if (box && !box.checked) return;
+          pre.textContent = text;
+          pre.scrollTop = pre.scrollHeight;
+        }).catch(() => {
+          /* The last fetched tail stays; the page's own refresh cycle
+             reports transport failures. */
+        });
+      }, 5000);
+    }
+
+    reflect();
+  });
+}
+
+function initTabs(scope) {
+  const root = scope && scope.querySelectorAll ? scope : document;
+  Array.prototype.forEach.call(root.querySelectorAll('.tabs'), (list) => {
+    const first = list.querySelector('button[data-tab][aria-selected="true"]') ||
+      list.querySelector('button[data-tab]');
+    if (first) selectTab(first);
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { initTabs(document); initLogTails(document); });
+} else {
+  initTabs(document);
+  initLogTails(document);
+}
+document.addEventListener('htmx:afterSwap', (event) => {
+  const scope = event.detail && event.detail.elt;
+  initTabs(scope);
+  initLogTails(scope);
+});
+
 
 /**
  * Collapsible left navigation. The served markup is the expanded state,
