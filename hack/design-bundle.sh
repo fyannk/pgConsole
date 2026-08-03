@@ -186,11 +186,15 @@ rewrite() {
     -e 's|/static/htmx-2\.0\.10\.min\.js|htmx-2.0.10.min.js|g' \
     -e 's|/static/history-timeline\.js|history-timeline.js|g' \
     -e 's|/static/logo\.png|logo.png|g' \
+    -e 's|/static/uplot-1\.6\.32\.min\.js|uplot-1.6.32.min.js|g' \
+    -e 's|/static/uplot-1\.6\.32\.min\.css|uplot-1.6.32.min.css|g' \
+    -e 's|/static/metrics-charts\.js|metrics-charts.js|g' \
     -e 's|/static/favicon\.svg|favicon.svg|g' \
     -e 's|action="/operations/[^"]*"|action="operations-result.html"|g' \
     -e 's|action="/access-requests/[^"]*/approve"|action="access-result.html"|g' \
     -e 's|action="/access-requests/[^"]*/deny"|action="access-result.html"|g' \
     -e 's|"/cluster/overview"|"cluster-overview.html"|g' \
+    -e 's|"/cluster/metrics"|"cluster-metrics.html"|g' \
     -e 's|"/cluster/status"|"cluster-status.html"|g' \
     -e 's|"/cluster/pods"|"cluster-pods.html"|g' \
     -e 's|"/cluster/events"|"cluster-events.html"|g' \
@@ -241,6 +245,9 @@ cp internal/web/static/htmx-2.0.10.min.js "$OUT/pages/htmx-2.0.10.min.js"
 cp internal/web/static/history-timeline.js "$OUT/pages/history-timeline.js"
 cp internal/web/static/favicon.svg "$OUT/pages/favicon.svg"
 cp internal/web/static/logo.png "$OUT/pages/logo.png"
+cp internal/web/static/uplot-1.6.32.min.js "$OUT/pages/uplot-1.6.32.min.js"
+cp internal/web/static/uplot-1.6.32.min.css "$OUT/pages/uplot-1.6.32.min.css"
+cp internal/web/static/metrics-charts.js "$OUT/pages/metrics-charts.js"
 
 log "capturing the pages"
 
@@ -268,6 +275,8 @@ page $HEALTHY /cluster/pods     "" "" cluster-pods.html Pages \
   "Cluster — pods" "Instance pods as observed"
 page $HEALTHY /cluster/events   "" "" cluster-events.html Pages \
   "Cluster — events" "Recent Kubernetes events"
+page $HEALTHY /cluster/metrics  "" "" cluster-metrics.html Pages \
+  "Cluster — metrics" "Instance metrics: text summaries with chart enhancement"
 page $HEALTHY /cluster/logs     "" "" cluster-logs.html Pages \
   "Cluster — logs" "Choosing an instance container log to tail"
 page $HEALTHY /backups          "" "" backups-overview.html Pages \

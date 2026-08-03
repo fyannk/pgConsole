@@ -31,10 +31,12 @@ import (
 	"github.com/fyannk/pgConsole/internal/config"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/ops"
 	"github.com/fyannk/pgConsole/internal/redact"
 	"github.com/fyannk/pgConsole/internal/review"
+	"github.com/fyannk/pgConsole/internal/scrape"
 	"github.com/fyannk/pgConsole/internal/web"
 )
 
@@ -100,6 +102,11 @@ type Deps struct {
 	// HistorySource reads the same bounded store that the Kubernetes watch
 	// recorder writes. Nil means history is disabled and no UI route exists.
 	HistorySource web.HistorySource
+	// Metrics is the bounded metrics window the scraper fills and the
+	// UI reads. Nil means metrics are disabled: no scraper runs and no
+	// route exists. The scraper needs the pod roster, so it only runs
+	// when PodSource is also wired.
+	Metrics *metrics.Store
 	// Prober answers the readiness endpoint.
 	Prober web.ReadinessProber
 	// Clock supplies time to the collectors and the page ages.
@@ -148,6 +155,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		podStore := observe.NewPodStore()
 		sources.Pods = podStore
 		runners = append(runners, observe.NewPodCollector(deps.PodSource, podStore, deps.Clock, logger).Run)
+		if deps.Metrics != nil {
+			sources.Metrics = deps.Metrics
+			runners = append(runners, scrape.New(podStore, deps.Metrics,
+				deps.Metrics.Interval(), deps.Clock, logger).Run)
+		}
 	}
 	if deps.EventSource != nil {
 		eventStore := observe.NewEventStore()

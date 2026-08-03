@@ -34,6 +34,7 @@ package web
 import (
 	"bytes"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -47,6 +48,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
 	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/ops"
 	"github.com/fyannk/pgConsole/internal/review"
@@ -88,6 +90,35 @@ func uiHistorySource() *history.Store {
 	base.SpecHash = "instances-3"
 	base.Actor = history.Actor{Manager: "gitops", Operation: "Apply"}
 	store.Observe(base)
+	return store
+}
+
+// uiMetricsSource is a deterministic metrics window: an hour of sweeps
+// for three instances, with a visible outage gap and a replica whose
+// lag moves, so the charts and summaries have a real shape.
+func uiMetricsSource() *metrics.Store {
+	store := metrics.NewStore(metrics.Limits{Interval: 10 * time.Second})
+	base := testNow.Add(-time.Hour)
+	for i := 0; i < 360; i++ {
+		if i >= 200 && i < 230 {
+			continue // a console outage: the lines must break here
+		}
+		at := base.Add(time.Duration(i) * 10 * time.Second)
+		phase := float64(i) / 30
+		store.Observe("orders-1", at, map[string]float64{
+			"connections":   12 + 4*math.Sin(phase),
+			"xact-commit":   float64(100000 + i*220),
+			"database-size": 2<<30 + float64(i)*4096,
+		})
+		store.Observe("orders-2", at, map[string]float64{
+			"connections":     5 + 2*math.Sin(phase/2),
+			"replication-lag": 0.2 + 0.15*math.Sin(phase/3),
+		})
+		store.Observe("orders-3", at, map[string]float64{
+			"connections":     4,
+			"replication-lag": 0.4 + 0.3*math.Sin(phase/4),
+		})
+	}
 	return store
 }
 
@@ -296,7 +327,7 @@ func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, autho
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
 	}
 	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots,
-		Evidence: fakeEvidence{status: status}, History: uiHistorySource()}
+		Evidence: fakeEvidence{status: status}, History: uiHistorySource(), Metrics: uiMetricsSource()}
 	var executor OpsExecutor
 	var reviewer ReviewExecutor
 	if authorized {

@@ -1,0 +1,46 @@
+{{- /*
+  Instance metrics. Every panel's facts are the text summary — latest,
+  min, max, average per instance over the retained window — and the
+  chart is an enhancement drawn from the same served data plus a
+  same-origin poll. Every value is a claim the instance's exporter made;
+  the console only recorded it, and a sweep that failed is a hole in
+  the line, never an interpolation.
+*/ -}}
+{{template "page-head" "cluster metrics"}}
+{{template "shell-open" .Shell}}
+  <header>
+    <div class="header-bar">
+      <h1>Instance metrics</h1>
+      <dl class="target"><dt>Scraped every</dt><dd>{{.Interval}}</dd><dt>Raw window</dt><dd>{{.RawWindow}}</dd><dt>Rollups kept</dt><dd>{{.Retention}}</dd></dl>
+    </div>
+  </header>
+  {{- if not .HasSamples}}
+  <section class="panel">
+    <h2>Instance metrics</h2>
+    <div class="empty"><strong>No samples yet</strong>No instance metrics endpoint has answered a sweep so far. The first samples appear within one scrape interval of an instance becoming reachable; if none ever do, check that the network policy allows this console to reach the pods&#39; metrics port.</div>
+    <p class="origin">source: instance-reported metrics</p>
+  </section>
+  {{- end}}
+  {{- range .Series}}
+  <section class="panel">
+    <h2>{{.Title}}{{if .Unit}} <span class="origin">({{.Unit}})</span>{{end}}</h2>
+    {{- if .Rows}}
+    <div class="metric-chart" data-metric-chart data-metric-key="{{.Key}}" data-metric-series="{{.Data}}" hidden aria-hidden="true"></div>
+    <div class="table-scroll">
+    <table>
+      <caption>Window summary per instance</caption>
+      <thead><tr><th>Instance</th><th>Latest</th><th>Min</th><th>Max</th><th>Avg</th></tr></thead>
+      <tbody>
+      {{- range .Rows}}
+      <tr><td>{{.Instance}}</td><td>{{.Latest}}</td><td>{{.Min}}</td><td>{{.Max}}</td><td>{{.Avg}}</td></tr>
+      {{- end}}
+      </tbody>
+    </table>
+    </div>
+    {{- else}}
+    <p class="state">no samples for this series in the retained window</p>
+    {{- end}}
+    <p class="origin">source: instance-reported metrics; times are when this pgConsole process scraped them</p>
+  </section>
+  {{- end}}
+{{template "shell-close"}}

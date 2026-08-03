@@ -195,6 +195,9 @@ body {
 .history-visual-label { fill: var(--text-muted); font-size: 11px; }
 .manifest { max-height: 34rem; overflow: auto; }
 
+.metric-chart { margin: var(--space-3) 0 var(--space-2); overflow-x: auto; }
+.metric-chart .u-legend { color: var(--text-muted); font-size: var(--text-xs); }
+
 /* The inline icon sprite defines <symbol>s for <use>; it must render
    nothing and take no flow space, or its line box pushes the shell down
    below the fixed top bar. Kept referenceable (not display:none) so the

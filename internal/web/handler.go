@@ -34,6 +34,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
 	reviewpkg "github.com/fyannk/pgConsole/internal/review"
@@ -153,6 +154,24 @@ type Sources struct {
 	// History supplies the object-definition timeline. Nil means history is
 	// disabled and no history route is registered.
 	History HistorySource
+	// Metrics supplies the bounded instance-metrics window. Nil means
+	// metrics are disabled and no metrics route is registered.
+	Metrics MetricsSource
+}
+
+// MetricsSource supplies the bounded instance-metrics window the
+// scraper fills. Implemented by *metrics.Store.
+type MetricsSource interface {
+	// Instances lists the tracked instance names, sorted.
+	Instances() []string
+	// Range reads one series at one tier as aligned columns.
+	Range(key string, tier metrics.Tier) (times []int64, byInstance map[string][]*float64)
+	// SeriesStats summarises one series per instance.
+	SeriesStats(key string) map[string]metrics.Stats
+	// Interval is the scrape cadence, for the pages to state.
+	Interval() time.Duration
+	// Retention is the rollup window, for the pages to state.
+	Retention() time.Duration
 }
 
 // LogTailer performs one bounded, on-demand log fetch for a verified
@@ -271,6 +290,10 @@ func (h *Handler) Routes() http.Handler {
 	// scrub — more revealing than any other screen — so it sits behind
 	// the same gate as the log tail, and the timeline hides the links
 	// below that level.
+	if h.sources.Metrics != nil {
+		mux.HandleFunc("GET /cluster/metrics", h.handleClusterMetrics)
+		mux.HandleFunc("GET /cluster/metrics/series", h.handleMetricsSeries)
+	}
 	if h.sources.History != nil {
 		mux.HandleFunc("GET /history", h.handleHistory)
 		mux.HandleFunc("GET /history/revisions/{seq}", h.requireLevel(authz.TierPowerUser,
@@ -472,6 +495,7 @@ func (h *Handler) shell(r *http.Request, current string) ShellView {
 		AccessReviewAvailable: h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil,
 		CanReviewAccess:       access.canReviewAccess(h),
 		HistoryAvailable:      h.sources.History != nil,
+		MetricsAvailable:      h.sources.Metrics != nil,
 		Current:               current,
 	}
 }

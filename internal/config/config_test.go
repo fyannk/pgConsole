@@ -271,6 +271,34 @@ func TestLoadMatrix(t *testing.T) {
 			wantErr: EnvHistoryEnabled + `: must be "true" or "false"`,
 		},
 		{
+			name:   "metrics disabled explicitly",
+			mutate: map[string]string{EnvMetricsEnabled: "false"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MetricsEnabled {
+					t.Error("MetricsEnabled = true, want false")
+				}
+			},
+		},
+		{
+			name:   "metrics cadence and retention configured",
+			mutate: map[string]string{EnvMetricsInterval: "30s", EnvMetricsRetention: "48h"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MetricsInterval != 30*time.Second || cfg.MetricsRetention != 48*time.Hour {
+					t.Errorf("metrics bounds = %v/%v", cfg.MetricsInterval, cfg.MetricsRetention)
+				}
+			},
+		},
+		{
+			name:    "metrics interval below bound",
+			mutate:  map[string]string{EnvMetricsInterval: "1s"},
+			wantErr: EnvMetricsInterval + ": must be a duration between 5s and 5m0s",
+		},
+		{
+			name:    "metrics retention above bound",
+			mutate:  map[string]string{EnvMetricsRetention: "1000h"},
+			wantErr: EnvMetricsRetention + ": must be a duration between 1h0m0s and 720h0m0s",
+		},
+		{
 			name:    "history revisions below bound",
 			mutate:  map[string]string{EnvHistoryMaxRevisions: "99"},
 			wantErr: EnvHistoryMaxRevisions + ": must be an integer between 100 and 20000",

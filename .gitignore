@@ -4,3 +4,4 @@
 *.out
 coverage.txt
 .gstack/
+.playwright-mcp/

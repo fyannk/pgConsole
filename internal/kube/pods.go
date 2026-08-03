@@ -154,6 +154,7 @@ func (c *Client) convertPod(content map[string]any) (observe.PodFacts, bool, err
 		Role:     pod.Labels[roleLabel],
 		Phase:    string(pod.Status.Phase),
 		Node:     pod.Spec.NodeName,
+		IP:       pod.Status.PodIP,
 		Deleting: pod.DeletionTimestamp != nil,
 	}
 

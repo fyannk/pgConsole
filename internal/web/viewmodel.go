@@ -686,6 +686,9 @@ type ShellView struct {
 	// HistoryAvailable reports that the in-memory history read side is
 	// constructed and its route is registered.
 	HistoryAvailable bool
+	// MetricsAvailable reports that the metrics window is constructed
+	// and its routes are registered.
+	MetricsAvailable bool
 	// Current is the key of the page being rendered, used for
 	// aria-current. Empty on pages outside the map.
 	Current string

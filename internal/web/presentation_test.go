@@ -339,6 +339,23 @@ func TestVendoredHTMXIsPinned(t *testing.T) {
 	}
 }
 
+// TestVendoredUPlotIsPinned does the same for the chart library.
+func TestVendoredUPlotIsPinned(t *testing.T) {
+	t.Parallel()
+	for path, want := range map[string]string{
+		"static/uplot-1.6.32.min.js":  "19c8d4c6ad88929a79f4ae49d6f7161566dfd0ba3d15cc495e974f787eb78f1f",
+		"static/uplot-1.6.32.min.css": "df630c6a8d6f8eeaff264b50f73ce5b114f646ffd9a0bb74f049b0a00135fa04",
+	} {
+		raw, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read vendored uPlot: %v", err)
+		}
+		if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != want {
+			t.Fatalf("vendored %s digest = %s, want %s", path, got, want)
+		}
+	}
+}
+
 // fullPage is a source set that populates every enhanced section, so
 // the additive-enhancement assertions see each control.
 func fullPage() staticSnapshots {

@@ -87,6 +87,13 @@ const (
 	// implies a writable volume and a single replica, and requires
 	// history to be enabled.
 	EnvHistoryPath = "HISTORY_PATH"
+	// EnvMetricsEnabled enables the bounded in-memory metrics window
+	// scraped from the instance pods' metrics endpoints.
+	EnvMetricsEnabled = "METRICS_ENABLED"
+	// EnvMetricsInterval is the scrape cadence.
+	EnvMetricsInterval = "METRICS_INTERVAL"
+	// EnvMetricsRetention is how long the rollup tier is kept.
+	EnvMetricsRetention = "METRICS_RETENTION"
 	// EnvObjectStoreViewerURL is the link-out base URL to the cluster's
 	// ObjectStoreViewer.
 	EnvObjectStoreViewerURL = "OBJECTSTOREVIEWER_URL"
@@ -152,6 +159,17 @@ const (
 	// MaxHistoryCoalesceWindow is the longest accepted
 	// HISTORY_COALESCE_WINDOW.
 	MaxHistoryCoalesceWindow = time.Hour
+	// MinMetricsInterval is the shortest accepted METRICS_INTERVAL: the
+	// exporters refresh their own caches on the order of seconds, so a
+	// faster sweep only rereads the same claims.
+	MinMetricsInterval = 5 * time.Second
+	// MaxMetricsInterval is the longest accepted METRICS_INTERVAL.
+	MaxMetricsInterval = 5 * time.Minute
+	// MinMetricsRetention is the shortest accepted METRICS_RETENTION.
+	MinMetricsRetention = time.Hour
+	// MaxMetricsRetention is the longest accepted METRICS_RETENTION; it
+	// bounds the rollup ring the window is stored in.
+	MaxMetricsRetention = 30 * 24 * time.Hour
 )
 
 // Defaults of the optional variables.
@@ -188,6 +206,10 @@ const (
 	// DefaultHistoryCoalesceWindow is applied when
 	// HISTORY_COALESCE_WINDOW is unset.
 	DefaultHistoryCoalesceWindow = time.Minute
+	// DefaultMetricsInterval is applied when METRICS_INTERVAL is unset.
+	DefaultMetricsInterval = 10 * time.Second
+	// DefaultMetricsRetention is applied when METRICS_RETENTION is unset.
+	DefaultMetricsRetention = 7 * 24 * time.Hour
 )
 
 // Config is the validated runtime configuration. A Config only exists in
@@ -238,6 +260,12 @@ type Config struct {
 	// HistoryPath is the durable journal file; empty keeps history in
 	// memory only.
 	HistoryPath string
+	// MetricsEnabled enables the bounded in-memory metrics window.
+	MetricsEnabled bool
+	// MetricsInterval is the scrape cadence.
+	MetricsInterval time.Duration
+	// MetricsRetention is how long the rollup tier is kept.
+	MetricsRetention time.Duration
 	// ObjectStoreViewerURL is the ObjectStoreViewer link-out base URL;
 	// empty hides the link.
 	ObjectStoreViewerURL string
@@ -318,6 +346,9 @@ func Load(lookup Lookup) (Config, error) {
 		HistoryMaxBytes:           DefaultHistoryMaxBytes,
 		HistoryPerObjectRevisions: DefaultHistoryPerObjectRevisions,
 		HistoryCoalesceWindow:     DefaultHistoryCoalesceWindow,
+		MetricsEnabled:            true,
+		MetricsInterval:           DefaultMetricsInterval,
+		MetricsRetention:          DefaultMetricsRetention,
 	}
 
 	cfg.ClusterName = requiredLabel(lookup, EnvClusterName, fail)
@@ -380,6 +411,10 @@ func Load(lookup Lookup) (Config, error) {
 			cfg.HistoryPath = raw
 		}
 	}
+
+	cfg.MetricsEnabled = boolVar(lookup, EnvMetricsEnabled, true, fail)
+	cfg.MetricsInterval = durationVar(lookup, EnvMetricsInterval, DefaultMetricsInterval, MinMetricsInterval, MaxMetricsInterval, fail)
+	cfg.MetricsRetention = durationVar(lookup, EnvMetricsRetention, DefaultMetricsRetention, MinMetricsRetention, MaxMetricsRetention, fail)
 
 	cfg.ObjectStoreViewerURL = linkVar(lookup, EnvObjectStoreViewerURL, cfg.AllowInsecureLinks, fail)
 	cfg.PgAdminURL = linkVar(lookup, EnvPgAdminURL, cfg.AllowInsecureLinks, fail)

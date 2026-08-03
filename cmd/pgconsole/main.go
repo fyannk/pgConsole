@@ -31,6 +31,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/history/bolt"
 	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
 )
@@ -99,6 +100,12 @@ func run() error {
 			opts.Recorder = store
 			deps.HistorySource = store
 		}
+	}
+	if cfg.MetricsEnabled {
+		deps.Metrics = metrics.NewStore(metrics.Limits{
+			Interval:  cfg.MetricsInterval,
+			Retention: cfg.MetricsRetention,
+		})
 	}
 	client, err := kube.InClusterClient(opts, logger)
 	if err != nil {
