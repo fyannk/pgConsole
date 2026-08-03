@@ -256,13 +256,19 @@ scans, and the tests. In short:
 - Makefile targets `build`, `test`, `test-race`, `test-integration`,
   `test-scale`, `test-container`, `test-multiarch`, `test-ui`, `test-e2e`,
   `lint`, `check`, `docker-build`, `supply-chain`, and `release-check`.
+- The wiring diagrams are laid out by Graphviz, which runs in-process as
+  WebAssembly (no cgo, no subprocess, no network). It answers only where
+  the boxes and wires go: the tiers and their order are the console's,
+  and the drawing is the console's own SVG with the design system's
+  classes. Layout is serialised — Graphviz keeps process-wide state — and
+  a layout that fails omits the diagram rather than drawing a wrong one.
 - The console UI is server-rendered `html/template` plus one embedded
   stylesheet and three narrowly separated, vendored enhancement layers:
   htmx 2.x owns same-origin HTML navigation and atomic screen refresh;
   the Alpine CSP build owns local component state (never the standard
   Alpine build, which would require `script-src 'unsafe-eval'`); uPlot
   draws the metrics charts from series the document already carries and
-  a same-origin JSON poll. All are served from the binary, htmx
+  a same-origin JSON poll. No layer draws a diagram: those ship finished. All are served from the binary, htmx
   evaluation and browser history caching are disabled, and no layer
   decides authorization or interprets cluster state. Content is never
   gated behind scripting: the document is complete before any script

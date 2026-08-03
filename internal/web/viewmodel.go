@@ -15,6 +15,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"net/url"
@@ -806,7 +807,7 @@ type snapshots struct {
 
 // buildPage assembles the page from the current snapshots. Handlers
 // call this and the template; nothing here touches any API.
-func buildPage(clusterName, namespace string, s snapshots, now time.Time, links Links) Page {
+func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, now time.Time, links Links) Page {
 	page := Page{
 		ClusterName:   clusterName,
 		Namespace:     namespace,
@@ -906,8 +907,8 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 	// Derived last, so they read the finished page and can restate only
 	// what the attributed sections above already carry.
 	page.Summary = buildSummary(&page)
-	page.Topology = buildTopology(&page)
-	page.ClusterOverview = buildClusterOverview(&page)
+	page.Topology = buildTopology(ctx, &page)
+	page.ClusterOverview = buildClusterOverview(ctx, &page)
 	return page
 }
 
@@ -936,8 +937,8 @@ type PlacementRowView struct {
 // buildClusterOverview derives the power-user screen from the assembled
 // page. Nil when nothing relevant has been observed, so the route
 // renders its empty state instead of an empty diagram.
-func buildClusterOverview(p *Page) *ClusterOverviewView {
-	view := &ClusterOverviewView{Wiring: buildClusterWiring(p)}
+func buildClusterOverview(ctx context.Context, p *Page) *ClusterOverviewView {
+	view := &ClusterOverviewView{Wiring: buildClusterWiring(ctx, p)}
 	if p.Pods != nil {
 		for _, row := range p.Pods.Rows {
 			view.Placement = append(view.Placement, PlacementRowView{

@@ -15,6 +15,7 @@
 package web
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
@@ -236,7 +237,7 @@ func TestSummaryRestatesOnlyWhatThePageCarries(t *testing.T) {
 	h := newEvidenceHandler(t, observedCluster(false), status)
 	body := get(t, h, http.MethodGet, "/").Body.String()
 
-	page := buildPage("orders", "payments", snapshots{
+	page := buildPage(context.Background(), "orders", "payments", snapshots{
 		window: time.Hour,
 		cluster: observe.Snapshot{
 			Generation: 7, ObservedAt: testNow.Add(-3 * time.Second), Cluster: healthyFacts(),
@@ -279,13 +280,13 @@ func TestSummaryNeverPresentsAnUnobservedClusterAsHealthy(t *testing.T) {
 		page      Page
 		wantState string
 	}{
-		{"no snapshot", buildPage("orders", "payments", snapshots{window: time.Hour}, testNow, Links{}), unknown},
-		{"absent cluster", buildPage("orders", "payments", snapshots{
+		{"no snapshot", buildPage(context.Background(), "orders", "payments", snapshots{window: time.Hour}, testNow, Links{}), unknown},
+		{"absent cluster", buildPage(context.Background(), "orders", "payments", snapshots{
 			window:  time.Hour,
 			cluster: observe.Snapshot{Generation: 2, ObservedAt: testNow, Cluster: observe.ClusterFacts{Present: false}},
 			ok:      true,
 		}, testNow, Links{}), "degraded"},
-		{"stale", buildPage("orders", "payments", snapshots{
+		{"stale", buildPage(context.Background(), "orders", "payments", snapshots{
 			window: time.Hour,
 			cluster: observe.Snapshot{
 				Generation: 9, ObservedAt: testNow.Add(-150 * time.Second), Stale: true, Cluster: healthyFacts(),

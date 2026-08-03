@@ -380,7 +380,7 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 		s.evidence = h.sources.Evidence.CurrentEvidence()
 		s.evidenceEnabled = true
 	}
-	page := buildPage(h.cfg.ClusterName, h.cfg.Namespace, s, h.now(), h.cfg.Links)
+	page := buildPage(r.Context(), h.cfg.ClusterName, h.cfg.Namespace, s, h.now(), h.cfg.Links)
 	page.Identity = h.buildIdentityView(r)
 	page.Shell = h.shell(r, current)
 	page.Shell.SnapshotState = page.SnapshotState

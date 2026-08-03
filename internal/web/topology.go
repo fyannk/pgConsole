@@ -15,6 +15,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -175,26 +176,20 @@ type TopoEdge struct {
 	LabelX, LabelY int
 }
 
-// topology geometry, in viewBox units. The SVG scales to its container.
+// Box extents, in viewBox units. Placement is the layout engine's.
 const (
-	topoWidth    = 920
-	topoColApps  = 24
-	topoColSvc   = 210
-	topoColSrv   = 448
-	topoColStore = 712
-	topoWApps    = 150
-	topoWSvc     = 158
-	topoWSrv     = 176
-	topoWStore   = 184
-	topoSrvH     = 60
-	topoSrvGap   = 22
-	topoMaxSrv   = 6
+	topoWApps  = 150
+	topoWSvc   = 158
+	topoWSrv   = 176
+	topoWStore = 184
+	topoSrvH   = 60
+	topoMaxSrv = 6
 )
 
 // buildTopology derives the wiring diagram from the assembled page. It
 // reads only p, so it can invent nothing: with no observed servers it
 // returns nil and the Overview simply omits the diagram.
-func buildTopology(p *Page) *TopologyView {
+func buildTopology(ctx context.Context, p *Page) *TopologyView {
 	if p.Cluster == nil || p.Cluster.Absent {
 		return nil
 	}
@@ -206,24 +201,13 @@ func buildTopology(p *Page) *TopologyView {
 	view := &TopologyView{
 		Title: "How your database is wired",
 		Aria:  "How applications reach the database and where the data is stored",
-		Width: topoWidth,
 	}
 
-	// Servers column, stacked and vertically centred; the primary leads.
-	stackH := len(servers)*topoSrvH + (len(servers)-1)*topoSrvGap
-	height := stackH + 76
-	if height < 236 {
-		height = 236
-	}
-	view.Height = height
-	mid := height / 2
-	srvTop := mid - stackH/2
-
-	// Position the server nodes, primary first.
+	// Nodes carry only their extent and tier; the layout engine places
+	// them. Order within a tier is ours — the primary leads.
 	serverNodes := make([]TopoNode, 0, len(servers))
 	for i, s := range servers {
-		s.X, s.W, s.H = topoColSrv, topoWSrv, topoSrvH
-		s.Y = srvTop + i*(topoSrvH+topoSrvGap)
+		s.W, s.H = topoWSrv, topoSrvH
 		s.ID, s.Layer = fmt.Sprintf("srv-%d", i), 2
 		serverNodes = append(serverNodes, s)
 	}
@@ -232,13 +216,13 @@ func buildTopology(p *Page) *TopologyView {
 	// is actually configured.
 	head := []TopoNode{
 		{ID: "apps", Layer: 0, Kind: "apps", Label: "Your applications", Sub: "clients that connect",
-			X: topoColApps, Y: mid - 30, W: topoWApps, H: 60},
+			W: topoWApps, H: 60},
 		{ID: "rw", Layer: 1, Kind: "endpoint", Label: "Write endpoint", Sub: p.ClusterName + "-rw",
-			X: topoColSvc, Y: mid - 58, W: topoWSvc, H: 48},
+			W: topoWSvc, H: 48},
 		{ID: "ro", Layer: 1, Kind: "endpoint", Label: "Read endpoint", Sub: p.ClusterName + "-ro",
-			X: topoColSvc, Y: mid + 10, W: topoWSvc, H: 48},
+			W: topoWSvc, H: 48},
 	}
-	store, snapshot := topoStorage(p, mid)
+	store, snapshot := topoStorage(p)
 	if store != nil {
 		store.ID, store.Layer = "store", 3
 		head = append(head, *store)
@@ -268,10 +252,7 @@ func buildTopology(p *Page) *TopologyView {
 	apps, rw, ro := view.Nodes[0], view.Nodes[1], view.Nodes[2]
 
 	// Flows. Apps reach the two doors; the doors reach the servers; the
-	// primary copies to the replicas and streams backups to storage. The
-	// graph records the flows and the router draws every one of them, so
-	// the served drawing and the graph the enhancement re-lays out can
-	// never describe different diagrams.
+	// primary copies to the replicas and streams backups to storage.
 	link := func(kind string, from, to TopoNode) {
 		view.Graph.Links = append(view.Graph.Links,
 			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind})
@@ -294,14 +275,23 @@ func buildTopology(p *Page) *TopologyView {
 	if snapshotN != nil && primary != nil {
 		link("archive", *primary, *snapshotN)
 	}
-	view.Edges = routeEdges(view.Nodes, view.Graph.Links)
-	view.Legend = topoLegend(view.Graph.Links)
 
-	for _, n := range view.Nodes {
-		view.Graph.Nodes = append(view.Graph.Nodes, TopoGraphNode{
-			ID: n.ID, Layer: n.Layer, Cls: n.Kind, Label: n.Label,
-			Sub: n.Sub, Disk: n.Disk, State: n.State, W: n.W, H: n.H,
-		})
+	// A layout that cannot be trusted is no diagram at all: the page
+	// omits it rather than drawing boxes in the wrong places.
+	geo, err := layoutDiagram(ctx, view.Nodes, view.Graph.Links)
+	if err != nil {
+		return nil
+	}
+	view.Width, view.Height = geo.Width, geo.Height
+	view.Edges = geo.Edges
+	view.Legend = topoLegend(view.Graph.Links)
+	for i := range view.Nodes {
+		centre, ok := geo.Centres[view.Nodes[i].ID]
+		if !ok {
+			return nil
+		}
+		view.Nodes[i].X = int(centre.x) - view.Nodes[i].W/2
+		view.Nodes[i].Y = int(centre.y) - view.Nodes[i].H/2
 	}
 
 	// The caption states what is observed versus fixed wiring, and only
@@ -377,20 +367,20 @@ func podState(row PodRowView) string {
 // a cloud-backup node when a repository or backup catalog exists, and a
 // volume-snapshot node when a Backup used that method. Returns nils when
 // nothing is configured, so the lane is simply absent.
-func topoStorage(p *Page, mid int) (store, snapshot *TopoNode) {
+func topoStorage(p *Page) (store, snapshot *TopoNode) {
 	cloud, snap := topoStorageConfigured(p)
 	switch {
 	case cloud && snap:
 		store = &TopoNode{Kind: "storage", Label: "Cloud backup", Sub: "object storage (WAL + backups)",
-			X: topoColStore, Y: mid - 58, W: topoWStore, H: 48}
+			W: topoWStore, H: 48}
 		snapshot = &TopoNode{Kind: "snapshot", Label: "Volume snapshots", Sub: "disk-level copies",
-			X: topoColStore, Y: mid + 10, W: topoWStore, H: 48}
+			W: topoWStore, H: 48}
 	case cloud:
 		store = &TopoNode{Kind: "storage", Label: "Cloud backup", Sub: "object storage (WAL + backups)",
-			X: topoColStore, Y: mid - 26, W: topoWStore, H: 52}
+			W: topoWStore, H: 52}
 	case snap:
 		snapshot = &TopoNode{Kind: "snapshot", Label: "Volume snapshots", Sub: "disk-level copies",
-			X: topoColStore, Y: mid - 26, W: topoWStore, H: 52}
+			W: topoWStore, H: 52}
 	}
 	return store, snapshot
 }

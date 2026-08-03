@@ -14,7 +14,10 @@
 
 package web
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // The cluster-overview wiring is the power-user counterpart of the
 // Overview diagram: the same observed shape, drawn with the facts a DBA
@@ -24,17 +27,12 @@ import "fmt"
 // reads), so a box holds as many facts as are actually observed and no
 // row is ever invented to fill a slot.
 //
-// Geometry, in viewBox units; there is no applications tier, so the
+// Box extents, in viewBox units; there is no applications tier, so the
 // endpoints take the left column.
 const (
-	wireWidth    = 1080
-	wireColSvc   = 24
-	wireColSrv   = 460
-	wireColStore = 790
-	wireWSvc     = 190
-	wireWSrv     = 230
-	wireWStore   = 265
-	wireSrvGap   = 22
+	wireWSvc   = 190
+	wireWSrv   = 230
+	wireWStore = 265
 )
 
 // wireLineStep mirrors the enhancement layer's row spacing: the label
@@ -92,7 +90,7 @@ func wirePlace(n *TopoNode, rows []TopoGraphText) {
 // buildClusterWiring derives the power-user wiring diagram from the
 // assembled page. Like buildTopology it reads only p and invents
 // nothing: absent facts drop their row rather than rendering a guess.
-func buildClusterWiring(p *Page) *TopologyView {
+func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 	if p.Cluster == nil || p.Cluster.Absent {
 		return nil
 	}
@@ -104,27 +102,15 @@ func buildClusterWiring(p *Page) *TopologyView {
 	view := &TopologyView{
 		Title: "Physical wiring",
 		Aria:  "Services, instances with node placement, replication and backup targets",
-		Width: wireWidth,
 	}
-	view.Graph.TierX = []int{wireColSvc, wireColSvc, wireColSrv, wireColStore}
 
-	// Servers column, stacked and vertically centred; the primary leads.
-	stackH := 0
-	for _, s := range serverRows {
-		stackH += wireNodeHeight(len(s.rows))
-	}
-	stackH += (len(serverRows) - 1) * wireSrvGap
-	height := stackH + 76
-	if height < 236 {
-		height = 236
-	}
-	view.Height = height
-	mid := height / 2
-
+	// Nodes carry their rows and extent; the layout engine places them,
+	// and the rows are positioned inside each box once it has a home.
 	nodes := make([]TopoNode, 0, len(serverRows)+4)
+	rowsByID := map[string][]TopoGraphText{}
 	addNode := func(id string, layer int, n TopoNode, rows []TopoGraphText) *TopoNode {
 		n.ID, n.Layer = id, layer
-		wirePlace(&n, rows)
+		rowsByID[id] = rows
 		nodes = append(nodes, n)
 		return &nodes[len(nodes)-1]
 	}
@@ -140,22 +126,14 @@ func buildClusterWiring(p *Page) *TopologyView {
 		{C: "label", T: p.ClusterName + "-ro"},
 		{C: "sub", T: "routes to the read-only copies"},
 	}
-	rwNode := wireNode("endpoint", "", wireWSvc, rwRows)
-	rwNode.X, rwNode.Y = wireColSvc, mid-8-wireNodeHeight(len(rwRows))
-	roNode := wireNode("endpoint", "", wireWSvc, roRows)
-	roNode.X, roNode.Y = wireColSvc, mid+8
-	rw := addNode("rw", 1, rwNode, rwRows)
-	ro := addNode("ro", 1, roNode, roRows)
+	rw := addNode("rw", 1, wireNode("endpoint", "", wireWSvc, rwRows), rwRows)
+	ro := addNode("ro", 1, wireNode("endpoint", "", wireWSvc, roRows), roRows)
 
 	// Servers, primary first, each carrying its observed facts.
-	srvTop := mid - stackH/2
 	var primary *TopoNode
 	var replicas []*TopoNode
 	for i, s := range serverRows {
-		n := wireNode(s.kind, s.state, wireWSrv, s.rows)
-		n.X, n.Y = wireColSrv, srvTop
-		srvTop += n.H + wireSrvGap
-		ptr := addNode(fmt.Sprintf("srv-%d", i), 2, n, s.rows)
+		ptr := addNode(fmt.Sprintf("srv-%d", i), 2, wireNode(s.kind, s.state, wireWSrv, s.rows), s.rows)
 		if s.kind == "primary" {
 			primary = ptr
 		} else {
@@ -174,29 +152,16 @@ func buildClusterWiring(p *Page) *TopologyView {
 		{C: "label", T: "Volume snapshots"},
 		{C: "sub", T: "disk-level copies"},
 	}
-	switch {
-	case cloud && snap:
-		n := wireNode("storage", "", wireWStore, storeRows)
-		n.X, n.Y = wireColStore, mid-8-n.H
-		storeN = addNode("store", 3, n, storeRows)
-		m := wireNode("snapshot", "", wireWStore, snapRows)
-		m.X, m.Y = wireColStore, mid+8
-		snapshotN = addNode("snapshot", 3, m, snapRows)
-	case cloud:
-		n := wireNode("storage", "", wireWStore, storeRows)
-		n.X, n.Y = wireColStore, mid-n.H/2
-		storeN = addNode("store", 3, n, storeRows)
-	case snap:
-		n := wireNode("snapshot", "", wireWStore, snapRows)
-		n.X, n.Y = wireColStore, mid-n.H/2
-		snapshotN = addNode("snapshot", 3, n, snapRows)
+	if cloud {
+		storeN = addNode("store", 3, wireNode("storage", "", wireWStore, storeRows), storeRows)
+	}
+	if snap {
+		snapshotN = addNode("snapshot", 3, wireNode("snapshot", "", wireWStore, snapRows), snapRows)
 	}
 
 	view.Nodes = nodes
 
-	// Flows: the graph records them and the router draws every one, so
-	// the served drawing and the enhanced re-layout can never describe
-	// different diagrams.
+	// Flows, recorded once and routed by the layout engine.
 	link := func(kind string, from, to *TopoNode) {
 		view.Graph.Links = append(view.Graph.Links,
 			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind})
@@ -216,18 +181,23 @@ func buildClusterWiring(p *Page) *TopologyView {
 	if primary != nil && snapshotN != nil {
 		link("archive", primary, snapshotN)
 	}
-	view.Edges = routeEdges(view.Nodes, view.Graph.Links)
-	view.Legend = topoLegend(view.Graph.Links)
 
-	for _, n := range view.Nodes {
-		rows := make([]TopoGraphText, 0, len(n.Lines))
-		for _, l := range n.Lines {
-			rows = append(rows, TopoGraphText{C: l.Class, T: l.Text})
+	// A layout that cannot be trusted is no diagram at all.
+	geo, err := layoutDiagram(ctx, view.Nodes, view.Graph.Links)
+	if err != nil {
+		return nil
+	}
+	view.Width, view.Height = geo.Width, geo.Height
+	view.Edges = geo.Edges
+	view.Legend = topoLegend(view.Graph.Links)
+	for i := range view.Nodes {
+		centre, ok := geo.Centres[view.Nodes[i].ID]
+		if !ok {
+			return nil
 		}
-		view.Graph.Nodes = append(view.Graph.Nodes, TopoGraphNode{
-			ID: n.ID, Layer: n.Layer, Cls: n.Kind, State: n.State,
-			W: n.W, H: n.H, Lines: rows,
-		})
+		view.Nodes[i].X = int(centre.x) - view.Nodes[i].W/2
+		view.Nodes[i].Y = int(centre.y) - view.Nodes[i].H/2
+		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 
 	view.Caption = "Instances, roles and placement are observed; the timeline and quorum membership are operator-reported; the endpoints and backup path follow the standard CloudNativePG wiring."

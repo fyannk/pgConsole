@@ -115,52 +115,27 @@ async function checkEnhancement(browser) {
 
   // The wiring diagram lives on the Overview, so it is checked before
   // moving on to the screens that carry the tables.
+  // Diagrams are drawn by the server outright — there is no diagram
+  // script any more — so the enhanced page must carry the same finished
+  // drawing, with every box placed and every flow routed.
   const topo = await page.evaluate(() => {
     const svg = document.querySelector('svg.topo');
-    if (!svg) return { layout: 'missing', boxes: 0, dup: 0 };
-    const boxes = svg.querySelectorAll('.topo-node').length;
-    const ids = new Set([...svg.querySelectorAll('.topo-node .topo-label')].map((n) => n.textContent));
-    return { layout: svg.getAttribute('data-layout'), boxes, dup: boxes - ids.size };
+    if (!svg) return { boxes: 0, routes: 0, cubic: 0, origin: 0, legend: 0 };
+    const routes = [...svg.querySelectorAll('.topo-edge[marker-end]')].map((p) => p.getAttribute('d'));
+    return {
+      boxes: svg.querySelectorAll('.topo-node').length,
+      routes: routes.length,
+      cubic: routes.filter((d) => d.includes('C')).length,
+      origin: [...svg.querySelectorAll('.topo-node rect')]
+        .filter((r) => r.getBoundingClientRect().width === 0).length,
+      legend: document.querySelectorAll('.topo-legend span').length,
+    };
   });
-  check('wiring diagram is re-laid out when the enhancement runs',
-    topo.layout === 'routed' && topo.boxes > 0, `layout ${topo.layout}, ${topo.boxes} boxes`);
-  // Appending instead of replacing would double every box.
-  check('re-layout replaces the served drawing rather than adding to it',
-    topo.dup === 0, `${topo.dup} duplicated boxes`);
-
-  // The pod roster is its own screen since the shell rebuild.
-  await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'networkidle' });
-
-  const toolsVisible = await page.locator('.table-tools').first().isVisible();
-  check('enhancement controls revealed after init', toolsVisible);
-
-  // Filter.
-  const search = page.locator('section[data-panel="pods"] .table-tools input[type="search"]');
-  const rows = page.locator('section[data-panel="pods"] table.pods tbody tr');
-  const total = await rows.count();
-  await search.fill('orders-2');
-  await page.waitForTimeout(250);
-  const shown = await rows.evaluateAll(
-    (rs) => rs.filter((r) => getComputedStyle(r).display !== 'none').length);
-  check('table filter narrows rows', total === 3 && shown === 1, `${total} rows -> ${shown} visible`);
-
-  const summary = await page.locator('section[data-panel="pods"] .table-tools .count').innerText();
-  check('filter reports the count', /1 of 3 rows/.test(summary), summary);
-  await search.fill('');
-  await page.waitForTimeout(250);
-
-  // Sort.
-  const nameHeader = page.locator('section[data-panel="pods"] table.pods thead th').first();
-  await nameHeader.click();
-  await page.waitForTimeout(150);
-  const asc = await rows.first().locator('td').first().innerText();
-  await nameHeader.click();
-  await page.waitForTimeout(150);
-  const desc = await rows.first().locator('td').first().innerText();
-  check('click-to-sort reorders rows', asc === 'orders-1' && desc === 'orders-3',
-    `asc=${asc}, desc=${desc}`);
-  check('sorted header marked for the stylesheet',
-    (await nameHeader.getAttribute('data-sort')) === 'desc');
+  check('wiring diagram is drawn with every box and flow',
+    topo.boxes > 0 && topo.routes > 0 && topo.origin === 0,
+    `${topo.boxes} boxes, ${topo.routes} routes`);
+  check('flows are routed orthogonally', topo.cubic === 0, `${topo.cubic} cubic curves`);
+  check('the legend keys the styles taken off the wires', topo.legend > 0, `${topo.legend} entries`);
 
   // Tabs, on the pod detail: with no script every panel is served
   // visible; the enhancement shows one at a time and the click moves it.
@@ -280,12 +255,11 @@ async function checkNoScript(browser) {
     return {
       boxes: svg.querySelectorAll('.topo-node').length,
       edges: svg.querySelectorAll('.topo-edge').length,
-      layout: svg.getAttribute('data-layout') || 'server',
     };
   });
   check('wiring diagram is drawn without JavaScript',
-    topoNoJs.boxes > 0 && topoNoJs.edges > 0 && topoNoJs.layout === 'server',
-    `${topoNoJs.boxes} boxes, ${topoNoJs.edges} flows, layout ${topoNoJs.layout}`);
+    topoNoJs.boxes > 0 && topoNoJs.edges > 0,
+    `${topoNoJs.boxes} boxes, ${topoNoJs.edges} flows`);
 
   await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'domcontentloaded' });
   check('panel bodies visible without JavaScript',

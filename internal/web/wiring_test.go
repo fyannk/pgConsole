@@ -15,8 +15,6 @@
 package web
 
 import (
-	"encoding/json"
-	"html"
 	"net/http"
 	"strings"
 	"testing"
@@ -77,31 +75,19 @@ func TestClusterOverviewRendersWiringPlacementAndQuorum(t *testing.T) {
 		}
 	}
 
-	// The graph the enhancement re-lays out carries the pinned tiers and
-	// the lines[] rows, and names only boxes it defines.
-	raw := body[strings.Index(body, `data-topo="`)+len(`data-topo="`):]
-	raw = html.UnescapeString(raw[:strings.Index(raw, `"`)])
-	var graph TopoGraph
-	if err := json.Unmarshal([]byte(raw), &graph); err != nil {
-		t.Fatalf("graph is not valid JSON: %v", err)
+	// The drawing is finished server-side: every box placed, every flow
+	// routed as an orthogonal run, no script involved.
+	if strings.Contains(body, `<rect x="0" y="0"`) {
+		t.Error("a box was drawn at the origin, so the layout did not place it")
 	}
-	if len(graph.TierX) != 4 {
-		t.Errorf("graph tierX = %v, want 4 pinned columns", graph.TierX)
+	routes := topoPaths(body)
+	if len(routes) == 0 {
+		t.Error("no flow was routed")
 	}
-	ids := map[string]bool{}
-	for _, n := range graph.Nodes {
-		if len(n.Lines) == 0 {
-			t.Errorf("graph node %s has no lines", n.ID)
+	for _, path := range routes {
+		if strings.Contains(path, "C") {
+			t.Errorf("route is a cubic curve rather than an orthogonal run: %q", path)
 		}
-		ids[n.ID] = true
-	}
-	for _, l := range graph.Links {
-		if !ids[l.Source] || !ids[l.Target] {
-			t.Errorf("link %s -> %s names a box the graph does not carry", l.Source, l.Target)
-		}
-	}
-	if got, want := strings.Count(body, `class="topo-node`), len(graph.Nodes); got != want {
-		t.Errorf("the drawing has %d boxes, the graph has %d", got, want)
 	}
 
 	// Placement, replication and the backup path are attributed panels.

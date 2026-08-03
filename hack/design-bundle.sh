@@ -181,7 +181,6 @@ rewrite() {
   sed \
     -e 's|/static/app\.css|console.css|g' \
     -e 's|/static/console\.js|console.js|g' \
-    -e 's|/static/topology-force\.js|topology-force.js|g' \
     -e 's|/static/alpine\.csp\.js|alpine.csp.js|g' \
     -e 's|/static/htmx-2\.0\.10\.min\.js|htmx-2.0.10.min.js|g' \
     -e 's|/static/history-timeline\.js|history-timeline.js|g' \
@@ -238,7 +237,6 @@ page() {
 log "capturing the shared assets"
 cp internal/web/static/app.css "$OUT/pages/console.css"
 cp internal/web/static/console.js "$OUT/pages/console.js"
-cp internal/web/static/topology-force.js "$OUT/pages/topology-force.js"
 cp internal/web/static/alpine.csp.js "$OUT/pages/alpine.csp.js"
 cp internal/web/static/htmx-2.0.10.min.js "$OUT/pages/htmx-2.0.10.min.js"
 cp internal/web/static/history-timeline.js "$OUT/pages/history-timeline.js"

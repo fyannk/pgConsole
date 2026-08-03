@@ -1,21 +1,17 @@
 {{- /*
-  The wiring diagram that opens the Overview: one inline SVG (no script,
-  no external asset) drawn from a TopologyView. It reads left to right —
-  apps, the write and read endpoints, the servers, and the backup
-  storage — so a non-technical reader can see how their apps reach the
-  database and where the data is kept. Every box carries a text label;
-  colour and the primary's emphasis are reinforcement, never the only
-  signal. Positions are computed server-side; the template only draws.
+  One wiring diagram: an inline SVG drawn from a TopologyView, with no
+  script and no external asset. It reads left to right — the clients,
+  the endpoints, the servers, and the storage — so a reader can see how
+  applications reach the database and where the data is kept. Every box
+  carries a text label; colour and the primary's emphasis are
+  reinforcement, never the only signal. The geometry is settled
+  server-side by the layout engine; the template only draws it.
 */ -}}
 {{- define "topology" -}}
 <section class="panel topo-panel">
   <h2 class="topo-title">{{.Title}}</h2>
   <div class="topo-scroll">
-  {{- /* data-topo carries the layout-free graph the enhancement layer
-         re-lays this diagram out from. An attribute, not a script block:
-         html/template escapes attribute values contextually, so a value
-         drawn from cluster state cannot break out of it. */}}
-  <svg class="topo" data-topo="{{.GraphJSON}}" viewBox="0 0 {{.Width}} {{.Height}}" role="img"
+  <svg class="topo" viewBox="0 0 {{.Width}} {{.Height}}" role="img"
        aria-label="{{.Aria}}"
        preserveAspectRatio="xMidYMid meet">
     <defs>
