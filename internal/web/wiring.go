@@ -34,6 +34,7 @@ const (
 	wireWSvc   = 210
 	wireWSrv   = 230
 	wireWStore = 265
+	wireWPool  = 210
 )
 
 // wireLineStep mirrors the enhancement layer's row spacing: the label
@@ -124,6 +125,27 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 	rw := addNode("rw", 1, wireNode("endpoint", "", wireWSvc, rwRows), rwRows)
 	ro := addNode("ro", 1, wireNode("endpoint", "", wireWSvc, roRows), roRows)
 
+	// Connection poolers sit in front of the services: a client that
+	// uses one never dials the cluster directly, so a wiring diagram
+	// without them describes a path nobody takes.
+	type pooled struct {
+		node *TopoNode
+		to   *TopoNode
+	}
+	var poolers []pooled
+	if p.Poolers != nil {
+		for i, pooler := range p.Poolers.Poolers {
+			rows := poolerRows(pooler)
+			node := addNode(fmt.Sprintf("pool-%d", i), 0,
+				wireNode("pooler", poolerState(pooler), wireWPool, rows), rows)
+			target := rw
+			if pooler.Type == "ro" {
+				target = ro
+			}
+			poolers = append(poolers, pooled{node: node, to: target})
+		}
+	}
+
 	// Servers, primary first, each carrying its observed facts.
 	var primary *TopoNode
 	var replicas []*TopoNode
@@ -154,6 +176,13 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 	link := func(kind string, from, to *TopoNode) {
 		view.Graph.Links = append(view.Graph.Links,
 			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind})
+	}
+	for _, pooler := range poolers {
+		kind := "write"
+		if pooler.to == ro {
+			kind = "read"
+		}
+		link(kind, pooler.node, pooler.to)
 	}
 	if primary != nil {
 		link("write", rw, primary)
@@ -240,9 +269,13 @@ func wireServers(p *Page) []wireServer {
 				}
 			}
 		}
+		s.rows = append(s.rows, TopoGraphText{C: "sub", T: instanceCondition(row)})
 		s.rows = append(s.rows, TopoGraphText{C: "disk", T: "node " + row.Node})
 		if disk := volumeLine(p, row.Name); disk != "" {
 			s.rows = append(s.rows, TopoGraphText{C: "disk", T: disk})
+		}
+		if image := shortImage(row.Image); image != "" {
+			s.rows = append(s.rows, TopoGraphText{C: "disk", T: image})
 		}
 		if s.kind == "primary" {
 			v := s
@@ -401,4 +434,62 @@ func snapshotRows(p *Page) []TopoGraphText {
 		}
 	}
 	return rows
+}
+
+// instanceCondition states the pod's phase and readiness in one line,
+// with the restart count only when there is one to report — a zero
+// restart count is noise, a non-zero one is the first thing a DBA
+// looks for.
+func instanceCondition(row PodRowView) string {
+	line := row.Phase
+	switch row.Ready {
+	case "true":
+		line += " · ready"
+	case "false":
+		line += " · not ready"
+	default:
+		line += " · readiness " + row.Ready
+	}
+	if row.Restarts != "" && row.Restarts != "0" && row.Restarts != unknown {
+		line += " · " + row.Restarts + " restarts"
+	}
+	return line
+}
+
+// shortImage keeps the image's final element, which is the repository
+// and tag a reader recognises without the registry path pushing every
+// other fact out of the box.
+func shortImage(image string) string {
+	if image == "" || image == unknown {
+		return ""
+	}
+	if cut := strings.LastIndex(image, "/"); cut >= 0 {
+		return image[cut+1:]
+	}
+	return image
+}
+
+// poolerRows describes one connection pooler.
+func poolerRows(pooler PoolerRowView) []TopoGraphText {
+	rows := []TopoGraphText{{C: "label", T: pooler.Name}}
+	routing := "pgbouncer"
+	if pooler.Type != "" && pooler.Type != unknown {
+		routing += " — " + pooler.Type
+	}
+	if pooler.PoolMode != "" && pooler.PoolMode != unknown {
+		routing += " · " + pooler.PoolMode
+	}
+	rows = append(rows, TopoGraphText{C: "sub", T: routing})
+	if pooler.Instances != "" && pooler.Instances != unknown {
+		rows = append(rows, TopoGraphText{C: "disk", T: pooler.Instances + " instances"})
+	}
+	return rows
+}
+
+// poolerState reads the pooler's phase through the same conservative
+// classifier every other screen uses: a phase the console does not
+// recognise is unknown, never promoted to healthy and never demoted to
+// a fault the operator did not report.
+func poolerState(pooler PoolerRowView) string {
+	return stateToken(pooler.Phase)
 }

@@ -1306,6 +1306,9 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-apps rect, .topo-endpoint rect { fill: var(--surface-2); stroke: var(--border); }
 .topo-storage rect { fill: var(--accent-weak); stroke: var(--accent); }
 .topo-snapshot rect { fill: var(--surface-2); stroke: var(--border-strong); }
+/* A pooler is infrastructure the cluster does not own, so it reads as a
+   neighbour of the endpoints rather than one of the servers. */
+.topo-pooler rect { fill: var(--surface-2); stroke: var(--border-strong); }
 /* Health by border colour; the state word rides in the diagram's labels
    and on the Cluster status screen, so colour is reinforcement. */
 .topo-node[data-state="current"] rect { stroke: var(--ok); }
