@@ -741,6 +741,12 @@ type Page struct {
 	// PodHistory is the roster screen's merged recent timeline, set by
 	// its handler only.
 	PodHistory []PodTimelineEntry
+	// Infrastructure is the observed service, claim and snapshot set;
+	// nil when it was never observed.
+	Infrastructure *InfrastructureView
+	// ObjectStoreDetail is what the referenced ObjectStore reports about
+	// where backups go; nil when none is referenced or observable.
+	ObjectStoreDetail *ObjectStoreDetailView
 	// ImageCatalog is the resolved catalog panel, nil when never
 	// observed.
 	ImageCatalog *ImageCatalogView
@@ -799,6 +805,8 @@ type snapshots struct {
 	catalogsOK      bool
 	declared        observe.DatabaseObjectsSnapshot
 	declaredOK      bool
+	infra           observe.InfrastructureSnapshot
+	infraOK         bool
 	evidence        evidence.Status
 	evidenceEnabled bool
 	window          time.Duration
@@ -904,12 +912,169 @@ func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, 
 	if page.Pods != nil && snap.Cluster.Present {
 		page.Pods.Disagreement = buildDisagreement(snap.Cluster, s.pods)
 	}
+	page.Infrastructure = buildInfrastructureView(s.infra, s.infraOK, now)
+	if s.backupsOK {
+		page.ObjectStoreDetail = buildObjectStoreDetail(s.backups.ObjectStore)
+	}
 	// Derived last, so they read the finished page and can restate only
 	// what the attributed sections above already carry.
 	page.Summary = buildSummary(&page)
 	page.Topology = buildTopology(ctx, &page)
 	page.ClusterOverview = buildClusterOverview(ctx, &page)
 	return page
+}
+
+// InfrastructureView is the cluster's observed physical resources: the
+// services clients dial, the claims the instances keep their data on,
+// and the volume snapshots taken of them.
+type InfrastructureView struct {
+	// Origin attributes every claim in the section.
+	Origin Origin
+	// Meta is the set's own freshness.
+	Meta SectionMeta
+	// Services, Volumes and Snapshots are the observed sets.
+	Services  []ServiceRowView
+	Volumes   []VolumeRowView
+	Snapshots []SnapshotRowView
+	// SnapshotsObservable reports that the VolumeSnapshot API answered.
+	// False states that the console did not read snapshots, which is not
+	// a claim that none exist.
+	SnapshotsObservable bool
+	// Truncated reports a display ceiling on any list.
+	Truncated bool
+}
+
+// ServiceRowView is one observed service.
+type ServiceRowView struct {
+	Name string
+	// Role is the plain-language job: read-write, read-only, any
+	// instance, or empty for a service whose name says nothing.
+	Role string
+	Type string
+	// Address is the ClusterIP, "headless", or unknown.
+	Address string
+	// Port is the first reported port, empty when none is reported.
+	Port string
+	// Headless reports the explicit None address.
+	Headless bool
+	// ClusterIP is the raw address, empty when headless or unreported.
+	ClusterIP string
+	// Selector is the reported label selector.
+	Selector []string
+}
+
+// VolumeRowView is one observed claim.
+type VolumeRowView struct {
+	Name     string
+	Instance string
+	// Purpose is the claim's job as the operator labels it, such as
+	// PG_DATA; empty when unlabelled.
+	Purpose      string
+	Phase        string
+	PhaseState   string
+	Capacity     string
+	StorageClass string
+	VolumeName   string
+}
+
+// SnapshotRowView is one observed volume snapshot.
+type SnapshotRowView struct {
+	Name        string
+	SourceClaim string
+	// Ready is "true", "false" or unknown — unreported readiness is not
+	// the same as not ready.
+	Ready       string
+	RestoreSize string
+	Age         string
+}
+
+// ObjectStoreDetailView is where the backups actually go, read from the
+// referenced ObjectStore rather than inferred from the Cluster.
+type ObjectStoreDetailView struct {
+	Origin      Origin
+	Name        string
+	Destination string
+	Endpoint    string
+	Retention   string
+	// Observed reports that the store itself was read, not merely
+	// referenced.
+	Observed bool
+}
+
+// buildInfrastructureView converts the observed set into rows.
+func buildInfrastructureView(snap observe.InfrastructureSnapshot, ok bool, now time.Time) *InfrastructureView {
+	if !ok {
+		return nil
+	}
+	view := &InfrastructureView{
+		Origin:              OriginKubernetes,
+		Meta:                buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
+		SnapshotsObservable: snap.SnapshotsObservable,
+		Truncated:           snap.Truncated,
+	}
+	for _, s := range snap.Services {
+		row := ServiceRowView{
+			Name: s.Name, Role: s.Role, Type: orUnknown(s.Type),
+			Headless: s.Headless, ClusterIP: s.ClusterIP,
+			Selector: append([]string(nil), s.TargetSelector...),
+		}
+		switch {
+		case s.Headless:
+			row.Address = "headless"
+		case s.ClusterIP != "":
+			row.Address = s.ClusterIP
+		default:
+			row.Address = unknown
+		}
+		if s.Port != nil {
+			row.Port = strconv.FormatInt(int64(*s.Port), 10)
+		}
+		view.Services = append(view.Services, row)
+	}
+	for _, v := range snap.Volumes {
+		row := VolumeRowView{
+			Name: v.Name, Instance: orUnknown(v.Instance), Purpose: v.Role,
+			Phase: orUnknown(v.Phase), Capacity: orUnknown(v.Capacity),
+			StorageClass: orUnknown(v.StorageClass), VolumeName: orUnknown(v.VolumeName),
+		}
+		row.PhaseState = unknown
+		if v.Phase == "Bound" {
+			row.PhaseState = "current"
+		} else if v.Phase != "" {
+			row.PhaseState = "degraded"
+		}
+		view.Volumes = append(view.Volumes, row)
+	}
+	for _, s := range snap.Snapshots {
+		row := SnapshotRowView{
+			Name: s.Name, SourceClaim: orUnknown(s.SourceClaim),
+			RestoreSize: orUnknown(s.RestoreSize), Ready: unknown, Age: unknown,
+		}
+		if s.Ready != nil {
+			row.Ready = strconv.FormatBool(*s.Ready)
+		}
+		if s.CreatedAt != nil {
+			row.Age = formatAge(now.Sub(*s.CreatedAt))
+		}
+		view.Snapshots = append(view.Snapshots, row)
+	}
+	return view
+}
+
+// buildObjectStoreDetail states where backups go, when a store is
+// referenced and was read.
+func buildObjectStoreDetail(ref observe.ObjectStoreReference) *ObjectStoreDetailView {
+	if ref.Name == "" {
+		return nil
+	}
+	return &ObjectStoreDetailView{
+		Origin:      OriginKubernetes,
+		Name:        ref.Name,
+		Destination: ref.Destination,
+		Endpoint:    ref.Endpoint,
+		Retention:   ref.RetentionPolicy,
+		Observed:    ref.State == observe.ObjectStorePresent,
+	}
 }
 
 // ClusterOverviewView is the power-user wiring screen: the observed

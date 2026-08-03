@@ -91,6 +91,9 @@ type Deps struct {
 	// DatabaseObjectsSource observes the cluster's declared databases,
 	// roles, publications and subscriptions.
 	DatabaseObjectsSource observe.DatabaseObjectsSource
+	// InfrastructureSource observes the cluster's services, volume
+	// claims and volume snapshots.
+	InfrastructureSource observe.InfrastructureSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
@@ -199,6 +202,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		declaredStore := observe.NewDatabaseObjectsStore()
 		sources.DatabaseObjects = declaredStore
 		runners = append(runners, observe.NewDatabaseObjectsCollector(deps.DatabaseObjectsSource, declaredStore, deps.Clock, logger).Run)
+	}
+	if deps.InfrastructureSource != nil {
+		infraStore := observe.NewInfrastructureStore()
+		sources.Infrastructure = infraStore
+		runners = append(runners, observe.NewInfrastructureCollector(deps.InfrastructureSource, infraStore, deps.Clock, logger).Run)
 	}
 	if deps.EvidenceFetcher != nil {
 		evidenceStore := evidence.NewStore()

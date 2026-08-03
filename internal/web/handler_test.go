@@ -1367,10 +1367,15 @@ func TestTopologyIsServedDrawn(t *testing.T) {
 		strings.Contains(body, `src="/static/topology`) {
 		t.Error("a diagram script is still referenced")
 	}
-	// Every drawn box carries a placement and every flow a routed path:
-	// an unplaced box would collapse onto the origin.
-	if strings.Contains(body, `<rect x="0" y="0"`) {
-		t.Error("a box was drawn at the origin, so the layout did not place it")
+	// Every drawn box carries its own placement: a layout that failed
+	// would stack them all on one spot.
+	positions := topoRectPositions(body)
+	seen := map[string]bool{}
+	for _, p := range positions {
+		seen[p] = true
+	}
+	if len(positions) < 2 || len(seen) != len(positions) {
+		t.Errorf("%d boxes share %d positions", len(positions), len(seen))
 	}
 	if got := strings.Count(body, `marker-end="url(#topo-arrow)"`); got == 0 {
 		t.Error("no flow was routed")
@@ -1385,6 +1390,25 @@ func TestTopologyIsServedDrawn(t *testing.T) {
 			t.Errorf("route carries no straight run: %q", path)
 		}
 	}
+}
+
+// topoRectPositions lists each diagram box's placement.
+func topoRectPositions(body string) []string {
+	start := strings.Index(body, `<svg class="topo"`)
+	if start < 0 {
+		return nil
+	}
+	svg := body[start:]
+	if end := strings.Index(svg, "</svg>"); end >= 0 {
+		svg = svg[:end]
+	}
+	var out []string
+	for _, tag := range strings.Split(svg, "<rect ")[1:] {
+		if cut := strings.Index(tag, " width="); cut >= 0 {
+			out = append(out, tag[:cut])
+		}
+	}
+	return out
 }
 
 // topoPaths extracts the routed flows from a rendered page. Only the

@@ -77,8 +77,19 @@ func TestClusterOverviewRendersWiringPlacementAndQuorum(t *testing.T) {
 
 	// The drawing is finished server-side: every box placed, every flow
 	// routed as an orthogonal run, no script involved.
-	if strings.Contains(body, `<rect x="0" y="0"`) {
-		t.Error("a box was drawn at the origin, so the layout did not place it")
+	// A layout that failed to place anything would stack every box on
+	// one spot; distinct positions prove it ran.
+	if positions := topoRectPositions(body); len(positions) < 2 {
+		t.Errorf("diagram has %d boxes", len(positions))
+	} else {
+		seen := map[string]bool{}
+		for _, p := range positions {
+			seen[p] = true
+		}
+		if len(seen) != len(positions) {
+			t.Errorf("%d boxes share %d positions, so the layout did not place them",
+				len(positions), len(seen))
+		}
 	}
 	routes := topoPaths(body)
 	if len(routes) == 0 {

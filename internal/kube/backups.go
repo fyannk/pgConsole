@@ -21,6 +21,7 @@ import (
 
 	apiv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -167,6 +168,15 @@ func (c *Client) fetchObjectStoreReference(ctx context.Context) observe.ObjectSt
 	// implies nothing about any other, so it never claims seed semantics.
 	c.recordObject(scopeObjectStore, store.Object)
 	ref.State = observe.ObjectStorePresent
+	// The destination, endpoint and retention are what a DBA needs to
+	// know where the backups actually go. Each is reported or absent;
+	// nothing is inferred from another.
+	ref.Destination, _, _ = unstructured.NestedString(store.Object,
+		"spec", "configuration", "destinationPath")
+	ref.Endpoint, _, _ = unstructured.NestedString(store.Object,
+		"spec", "configuration", "endpointURL")
+	ref.RetentionPolicy, _, _ = unstructured.NestedString(store.Object,
+		"spec", "retentionPolicy")
 	return ref
 }
 

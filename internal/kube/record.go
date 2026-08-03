@@ -56,6 +56,9 @@ const (
 	scopeSubscriptions    = "subscriptions"
 	scopeAccessRequests   = "access requests"
 	scopeAccessRoles      = "access roles"
+	scopeServices         = "services"
+	scopeVolumes          = "volumes"
+	scopeSnapshots        = "snapshots"
 )
 
 // lastAppliedAnnotation embeds a full second copy of the object as

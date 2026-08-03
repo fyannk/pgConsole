@@ -107,6 +107,13 @@ type DatabaseObjectsSource interface {
 	CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool)
 }
 
+// InfrastructureSource supplies the cluster's observed services,
+// volume claims and volume snapshots.
+type InfrastructureSource interface {
+	// CurrentInfrastructure returns the snapshot and whether one exists.
+	CurrentInfrastructure() (observe.InfrastructureSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -145,6 +152,9 @@ type Sources struct {
 	ImageCatalogs ImageCatalogsSource
 	// DatabaseObjects supplies the declarative-object snapshot.
 	DatabaseObjects DatabaseObjectsSource
+	// Infrastructure supplies the services, volume claims and volume
+	// snapshots. Nil means they were never observed.
+	Infrastructure InfrastructureSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -376,6 +386,9 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 	s.quorum, s.quorumOK = h.sources.FailoverQuorum.CurrentFailoverQuorum()
 	s.catalogs, s.catalogsOK = h.sources.ImageCatalogs.CurrentImageCatalogs()
 	s.declared, s.declaredOK = h.sources.DatabaseObjects.CurrentDatabaseObjects()
+	if h.sources.Infrastructure != nil {
+		s.infra, s.infraOK = h.sources.Infrastructure.CurrentInfrastructure()
+	}
 	if h.sources.Evidence != nil {
 		s.evidence = h.sources.Evidence.CurrentEvidence()
 		s.evidenceEnabled = true

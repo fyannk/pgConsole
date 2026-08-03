@@ -103,6 +103,14 @@ type ObjectStoreReference struct {
 	Name string
 	// State is the metadata-only lookup outcome.
 	State ObjectStoreState
+	// Destination is the reported destination path, such as an s3:// or
+	// azure:// URL. Empty when the store reports none.
+	Destination string
+	// Endpoint is the reported endpoint URL, empty when the store uses
+	// the provider default.
+	Endpoint string
+	// RetentionPolicy is the reported retention, empty when none is set.
+	RetentionPolicy string
 }
 
 // BackupCatalogState is one complete seed and the resource versions from

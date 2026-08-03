@@ -17,6 +17,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // The cluster-overview wiring is the power-user counterpart of the
@@ -30,7 +31,7 @@ import (
 // Box extents, in viewBox units; there is no applications tier, so the
 // endpoints take the left column.
 const (
-	wireWSvc   = 190
+	wireWSvc   = 210
 	wireWSrv   = 230
 	wireWStore = 265
 )
@@ -115,17 +116,11 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 		return &nodes[len(nodes)-1]
 	}
 
-	// Endpoints, the left column: the two doors every client uses. The
-	// routing statements are the standard CloudNativePG wiring, and the
-	// caption says so.
-	rwRows := []TopoGraphText{
-		{C: "label", T: p.ClusterName + "-rw"},
-		{C: "sub", T: "routes to the current primary"},
-	}
-	roRows := []TopoGraphText{
-		{C: "label", T: p.ClusterName + "-ro"},
-		{C: "sub", T: "routes to the read-only copies"},
-	}
+	// Endpoints, the left column: the services clients actually dial,
+	// as observed. Their addresses and selectors are read from the
+	// Service objects, not built from the cluster's name.
+	rwRows := endpointRows(p, "read-write", p.ClusterName+"-rw", "routes to the current primary")
+	roRows := endpointRows(p, "read-only", p.ClusterName+"-ro", "routes to the read-only copies")
 	rw := addNode("rw", 1, wireNode("endpoint", "", wireWSvc, rwRows), rwRows)
 	ro := addNode("ro", 1, wireNode("endpoint", "", wireWSvc, roRows), roRows)
 
@@ -144,14 +139,8 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 	// Storage, evidence-based exactly like the Overview.
 	cloud, snap := topoStorageConfigured(p)
 	var storeN, snapshotN *TopoNode
-	storeRows := []TopoGraphText{
-		{C: "label", T: "Cloud backup"},
-		{C: "sub", T: "object storage (WAL + backups)"},
-	}
-	snapRows := []TopoGraphText{
-		{C: "label", T: "Volume snapshots"},
-		{C: "sub", T: "disk-level copies"},
-	}
+	storeRows := objectStoreRows(p)
+	snapRows := snapshotRows(p)
 	if cloud {
 		storeN = addNode("store", 3, wireNode("storage", "", wireWStore, storeRows), storeRows)
 	}
@@ -200,7 +189,7 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 
-	view.Caption = "Instances, roles and placement are observed; the timeline and quorum membership are operator-reported; the endpoints and backup path follow the standard CloudNativePG wiring."
+	view.Caption = "Instances, roles, placement, claims, services and snapshots are observed; the timeline and quorum membership are operator-reported; the object store is read from its own resource."
 	return view
 }
 
@@ -252,6 +241,9 @@ func wireServers(p *Page) []wireServer {
 			}
 		}
 		s.rows = append(s.rows, TopoGraphText{C: "disk", T: "node " + row.Node})
+		if disk := volumeLine(p, row.Name); disk != "" {
+			s.rows = append(s.rows, TopoGraphText{C: "disk", T: disk})
+		}
 		if s.kind == "primary" {
 			v := s
 			primary = &v
@@ -274,4 +266,139 @@ func wireServers(p *Page) []wireServer {
 		}})
 	}
 	return out
+}
+
+// endpointRows describes one service box. The observed Service supplies
+// the address, port and selector; when none was observed the box keeps
+// the standard CloudNativePG name and says the routing is the standard
+// wiring rather than an observation.
+func endpointRows(p *Page, role, fallbackName, standardRouting string) []TopoGraphText {
+	svc := findService(p, role)
+	if svc == nil {
+		return []TopoGraphText{
+			{C: "label", T: fallbackName},
+			{C: "sub", T: standardRouting},
+			{C: "disk", T: "service not observed"},
+		}
+	}
+	rows := []TopoGraphText{{C: "label", T: svc.Name}}
+	switch {
+	case svc.Headless:
+		rows = append(rows, TopoGraphText{C: "sub", T: "headless" + portSuffix(svc)})
+	case svc.ClusterIP != "":
+		rows = append(rows, TopoGraphText{C: "sub", T: svc.Type + " " + svc.ClusterIP + portSuffix(svc)})
+	default:
+		rows = append(rows, TopoGraphText{C: "sub", T: svc.Type})
+	}
+	// The diagram shows the term that distinguishes this service; the
+	// cluster term is the same for every box on the drawing, and the
+	// services table below carries the selector in full.
+	if distinguishing := distinguishingSelector(svc.Selector); distinguishing != "" {
+		rows = append(rows, TopoGraphText{C: "disk", T: "selector: " + distinguishing})
+	}
+	return rows
+}
+
+// distinguishingSelector drops the cluster term every service shares
+// and joins what is left, so the box says what makes this service
+// different rather than repeating the diagram's subject.
+func distinguishingSelector(selector []string) string {
+	var kept []string
+	for _, term := range selector {
+		if strings.HasPrefix(term, "cnpg.io/cluster=") {
+			continue
+		}
+		kept = append(kept, strings.TrimPrefix(term, "cnpg.io/"))
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, ", ")
+}
+
+// portSuffix renders ":port" when a port was reported.
+func portSuffix(svc *ServiceRowView) string {
+	if svc.Port == "" {
+		return ""
+	}
+	return ":" + svc.Port
+}
+
+// findService locates one observed service by its role.
+func findService(p *Page, role string) *ServiceRowView {
+	if p.Infrastructure == nil {
+		return nil
+	}
+	for i := range p.Infrastructure.Services {
+		if p.Infrastructure.Services[i].Role == role {
+			return &p.Infrastructure.Services[i]
+		}
+	}
+	return nil
+}
+
+// volumeLine describes an instance's claims in one line, so a box says
+// what disk the instance actually holds.
+func volumeLine(p *Page, instance string) string {
+	if p.Infrastructure == nil {
+		return ""
+	}
+	var parts []string
+	for _, v := range p.Infrastructure.Volumes {
+		if v.Instance != instance {
+			continue
+		}
+		part := v.Capacity
+		if part == "" {
+			part = unknown
+		}
+		if v.Purpose != "" {
+			part = v.Purpose + " " + part
+		}
+		if v.StorageClass != "" {
+			part += " · " + v.StorageClass
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " | ")
+}
+
+// objectStoreRows describes the cloud backup box from the ObjectStore
+// the console actually read.
+func objectStoreRows(p *Page) []TopoGraphText {
+	rows := []TopoGraphText{{C: "label", T: "Cloud backup"}}
+	store := p.ObjectStoreDetail
+	if store == nil || store.Destination == "" {
+		rows = append(rows, TopoGraphText{C: "sub", T: "object storage (WAL + backups)"})
+		if store != nil && store.Name != "" {
+			rows = append(rows, TopoGraphText{C: "disk", T: "ObjectStore/" + store.Name})
+		}
+		return rows
+	}
+	rows = append(rows, TopoGraphText{C: "disk", T: store.Destination})
+	if store.Endpoint != "" {
+		rows = append(rows, TopoGraphText{C: "sub", T: "endpoint " + store.Endpoint})
+	}
+	if store.Retention != "" {
+		rows = append(rows, TopoGraphText{C: "sub", T: "retention " + store.Retention})
+	}
+	return rows
+}
+
+// snapshotRows describes the volume-snapshot box from what was observed.
+func snapshotRows(p *Page) []TopoGraphText {
+	rows := []TopoGraphText{{C: "label", T: "Volume snapshots"}}
+	if p.Infrastructure == nil || !p.Infrastructure.SnapshotsObservable {
+		rows = append(rows, TopoGraphText{C: "sub", T: "disk-level copies"})
+		return rows
+	}
+	count := len(p.Infrastructure.Snapshots)
+	rows = append(rows, TopoGraphText{C: "sub", T: fmt.Sprintf("%d observed", count)})
+	if count > 0 {
+		newest := p.Infrastructure.Snapshots[0]
+		if newest.RestoreSize != "" {
+			rows = append(rows, TopoGraphText{C: "disk", T: "newest " + newest.RestoreSize})
+		}
+	}
+	return rows
 }

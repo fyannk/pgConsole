@@ -77,6 +77,16 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  # The cluster's own services, so the console states the addresses
+  # clients actually dial instead of assuming the standard names.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  # The claims each instance keeps its data on: capacity, class and
+  # binding, none of which is inferable from the Cluster alone.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
   # Bounded log tail: only pods proven to belong to the cluster. Omit
   # this rule when deploying with ALLOW_LOGS=false.
   - apiGroups: [""]
