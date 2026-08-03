@@ -731,6 +731,9 @@ type Page struct {
 	PoolerPods *PodsView
 	// Quorum is the failover-quorum panel, nil when never observed.
 	Quorum *FailoverQuorumView
+	// ClusterOverview is the power-user wiring screen, derived from
+	// this page; nil without a snapshot.
+	ClusterOverview *ClusterOverviewView
 	// ImageCatalog is the resolved catalog panel, nil when never
 	// observed.
 	ImageCatalog *ImageCatalogView
@@ -898,7 +901,78 @@ func buildPage(clusterName, namespace string, s snapshots, now time.Time, links 
 	// what the attributed sections above already carry.
 	page.Summary = buildSummary(&page)
 	page.Topology = buildTopology(&page)
+	page.ClusterOverview = buildClusterOverview(&page)
 	return page
+}
+
+// ClusterOverviewView is the power-user wiring screen: the observed
+// shape drawn with the facts a DBA reaches for, and the placement
+// spread derived from the same pod snapshot.
+type ClusterOverviewView struct {
+	// Wiring is the lines[]-style diagram; nil without observed servers.
+	Wiring *TopologyView
+	// Placement is one row per observed instance pod.
+	Placement []PlacementRowView
+	// PlacementNote is the derived spread statement, empty when there
+	// is nothing to say.
+	PlacementNote string
+	// PlacementWarn marks the note as a finding: instances share a node.
+	PlacementWarn bool
+}
+
+// PlacementRowView is one instance's observed scheduling facts.
+type PlacementRowView struct {
+	Name string
+	Role string
+	Node string
+}
+
+// buildClusterOverview derives the power-user screen from the assembled
+// page. Nil when nothing relevant has been observed, so the route
+// renders its empty state instead of an empty diagram.
+func buildClusterOverview(p *Page) *ClusterOverviewView {
+	view := &ClusterOverviewView{Wiring: buildClusterWiring(p)}
+	if p.Pods != nil {
+		for _, row := range p.Pods.Rows {
+			view.Placement = append(view.Placement, PlacementRowView{
+				Name: row.Name, Role: row.Role, Node: row.Node,
+			})
+		}
+	}
+	view.PlacementNote, view.PlacementWarn = placementNote(view.Placement)
+	if view.Wiring == nil && len(view.Placement) == 0 {
+		return nil
+	}
+	return view
+}
+
+// placementNote states what the observed placement actually shows: a
+// shared node is a finding, a clean spread is said in one line, and
+// unreported placement is counted rather than glossed over.
+func placementNote(rows []PlacementRowView) (string, bool) {
+	if len(rows) < 2 {
+		return "", false
+	}
+	byNode := map[string][]string{}
+	unreported := 0
+	for _, r := range rows {
+		if r.Node == "" || r.Node == unknown {
+			unreported++
+			continue
+		}
+		byNode[r.Node] = append(byNode[r.Node], r.Name)
+	}
+	for node, names := range byNode {
+		if len(names) > 1 {
+			return strings.Join(names, " and ") + " share node " + node +
+				" — a single node failure takes more than one instance.", true
+		}
+	}
+	if unreported > 0 {
+		return fmt.Sprintf("Placement is unreported for %d of %d instances, so the spread cannot be confirmed.",
+			unreported, len(rows)), false
+	}
+	return "No two instances share a node.", false
 }
 
 // DeclaredView is the reconciliation spine shared by every declarative

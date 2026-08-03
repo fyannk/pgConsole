@@ -33,6 +33,9 @@ import (
 // viewBox and it scales to its container. Every node carries a text
 // label, never colour alone.
 type TopologyView struct {
+	// Title heads the panel and Aria labels the drawing for a reader
+	// who never sees it.
+	Title, Aria string
 	// Width and Height are the SVG viewBox extent.
 	Width, Height int
 	// Nodes are the boxes, in render order.
@@ -54,10 +57,21 @@ type TopologyView struct {
 
 // TopoGraph is the wiring diagram as a graph rather than a drawing.
 type TopoGraph struct {
+	// TierX overrides the enhancement layer's default tier columns;
+	// empty keeps the Overview's four-tier default.
+	TierX []int `json:"tierX,omitempty"`
 	// Nodes are the boxes, each pinned to a tier on the horizontal axis.
 	Nodes []TopoGraphNode `json:"nodes"`
 	// Links are the flows between them.
 	Links []TopoGraphLink `json:"links"`
+}
+
+// TopoGraphText is one row of a lines[]-style node in the graph: the
+// class shorthand the enhancement layer maps back to the drawing's text
+// treatments, and the text itself.
+type TopoGraphText struct {
+	C string `json:"c"`
+	T string `json:"t"`
 }
 
 // TopoGraphNode is one box, without a position.
@@ -69,9 +83,12 @@ type TopoGraphNode struct {
 	// Cls is the CSS treatment, matching TopoNode.Kind.
 	Cls string `json:"cls"`
 	// Label, Sub and Disk are the box's lines of text.
-	Label string `json:"label"`
+	Label string `json:"label,omitempty"`
 	Sub   string `json:"sub,omitempty"`
 	Disk  string `json:"disk,omitempty"`
+	// Lines replaces the fixed label/sub/disk triple for a node that
+	// carries as many rows as its facts need.
+	Lines []TopoGraphText `json:"lines,omitempty"`
 	// State is the health token, empty for infrastructure nodes.
 	State string `json:"state,omitempty"`
 	// W and H are the box extent; the layout decides only x and y.
@@ -120,8 +137,21 @@ type TopoNode struct {
 	// State is the presentation token for a server's health, empty for
 	// infrastructure nodes.
 	State string
+	// Lines replaces the fixed label/sub/disk triple in the served
+	// drawing, already placed inside the box; empty keeps the triple.
+	Lines []TopoText
 	// X, Y, W, H place the box in the viewBox.
 	X, Y, W, H int
+}
+
+// TopoText is one placed row of a lines[]-style node.
+type TopoText struct {
+	// Class selects the text treatment: label, sub, or disk.
+	Class string
+	// Text is the row itself.
+	Text string
+	// X and Y place the row in the viewBox.
+	X, Y int
 }
 
 // CenterY is the vertical middle of the node, for edge anchoring.
@@ -170,7 +200,11 @@ func buildTopology(p *Page) *TopologyView {
 		return nil
 	}
 
-	view := &TopologyView{Width: topoWidth}
+	view := &TopologyView{
+		Title: "How your database is wired",
+		Aria:  "How applications reach the database and where the data is stored",
+		Width: topoWidth,
+	}
 
 	// Servers column, stacked and vertically centred; the primary leads.
 	stackH := len(servers)*topoSrvH + (len(servers)-1)*topoSrvGap
@@ -340,17 +374,7 @@ func podState(row PodRowView) string {
 // volume-snapshot node when a Backup used that method. Returns nils when
 // nothing is configured, so the lane is simply absent.
 func topoStorage(p *Page, mid int) (store, snapshot *TopoNode) {
-	cloud := p.Repository != nil || (p.Backups != nil && len(p.Backups.Rows) > 0) ||
-		(p.Backups != nil && p.Backups.EvidenceLink != nil)
-	snap := false
-	if p.Backups != nil {
-		for _, b := range p.Backups.Rows {
-			if strings.Contains(b.Method, "volumeSnapshot") || strings.Contains(b.SnapshotState, "not collected") {
-				snap = true
-				break
-			}
-		}
-	}
+	cloud, snap := topoStorageConfigured(p)
 	switch {
 	case cloud && snap:
 		store = &TopoNode{Kind: "storage", Label: "Cloud backup", Sub: "object storage (WAL + backups)",
@@ -365,6 +389,23 @@ func topoStorage(p *Page, mid int) (store, snapshot *TopoNode) {
 			X: topoColStore, Y: mid - 26, W: topoWStore, H: 52}
 	}
 	return store, snapshot
+}
+
+// topoStorageConfigured reports which storage lanes the page's evidence
+// actually supports: a cloud lane when a repository or backup catalog
+// exists, a snapshot lane when a Backup used that method.
+func topoStorageConfigured(p *Page) (cloud, snap bool) {
+	cloud = p.Repository != nil || (p.Backups != nil && len(p.Backups.Rows) > 0) ||
+		(p.Backups != nil && p.Backups.EvidenceLink != nil)
+	if p.Backups != nil {
+		for _, b := range p.Backups.Rows {
+			if strings.Contains(b.Method, "volumeSnapshot") || strings.Contains(b.SnapshotState, "not collected") {
+				snap = true
+				break
+			}
+		}
+	}
+	return cloud, snap
 }
 
 // edge resolves a flow between two nodes into a smooth horizontal bezier

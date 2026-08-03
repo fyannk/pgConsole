@@ -185,10 +185,12 @@ rewrite() {
     -e 's|/static/alpine\.csp\.js|alpine.csp.js|g' \
     -e 's|/static/htmx-2\.0\.10\.min\.js|htmx-2.0.10.min.js|g' \
     -e 's|/static/history-timeline\.js|history-timeline.js|g' \
+    -e 's|/static/logo\.png|logo.png|g' \
     -e 's|/static/favicon\.svg|favicon.svg|g' \
     -e 's|action="/operations/[^"]*"|action="operations-result.html"|g' \
     -e 's|action="/access-requests/[^"]*/approve"|action="access-result.html"|g' \
     -e 's|action="/access-requests/[^"]*/deny"|action="access-result.html"|g' \
+    -e 's|"/cluster/overview"|"cluster-overview.html"|g' \
     -e 's|"/cluster/status"|"cluster-status.html"|g' \
     -e 's|"/cluster/pods"|"cluster-pods.html"|g' \
     -e 's|"/cluster/events"|"cluster-events.html"|g' \
@@ -238,6 +240,7 @@ cp internal/web/static/alpine.csp.js "$OUT/pages/alpine.csp.js"
 cp internal/web/static/htmx-2.0.10.min.js "$OUT/pages/htmx-2.0.10.min.js"
 cp internal/web/static/history-timeline.js "$OUT/pages/history-timeline.js"
 cp internal/web/static/favicon.svg "$OUT/pages/favicon.svg"
+cp internal/web/static/logo.png "$OUT/pages/logo.png"
 
 log "capturing the pages"
 
@@ -257,6 +260,8 @@ page $HEALTHY  / dba fanch index-identity.html Pages \
   "Overview — with identity" "Proxy-asserted user and authorization level in the target list"
 
 # The section screens, all from the healthy state.
+page $HEALTHY /cluster/overview "" "" cluster-overview.html Pages \
+  "Cluster — overview" "Power-user wiring: placement, replication and the backup path"
 page $HEALTHY /cluster/status   "" "" cluster-status.html Pages \
   "Cluster — status" "Verdict, topology and conditions"
 page $HEALTHY /cluster/pods     "" "" cluster-pods.html Pages \

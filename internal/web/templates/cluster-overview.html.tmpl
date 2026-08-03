@@ -1,0 +1,99 @@
+{{- /*
+  Cluster overview: the power-user wiring. The diagram restates the
+  Overview's observed shape with the facts a DBA reaches for — placement,
+  the operator's timeline, quorum membership — and the panels beneath it
+  carry the derived placement spread, the reported replication quorum,
+  and the configured backup path. Every claim keeps its origin; a fact
+  the snapshot does not carry has no row.
+*/ -}}
+{{template "page-head" "cluster overview"}}
+{{template "shell-open" .Shell}}
+    {{- if .ClusterOverview}}
+    {{- with .ClusterOverview.Wiring}}
+    {{template "topology" .}}
+    {{- end}}
+    {{- with .ClusterOverview}}
+    {{- if .Placement}}
+    <h2 class="section-title">Scheduling</h2>
+    <section class="panel">
+      <h2>Observed placement</h2>
+      <div class="table-scroll">
+      <table>
+        <caption>Instance placement</caption>
+        <thead><tr><th>Instance</th><th>Role</th><th>Node</th></tr></thead>
+        <tbody>
+        {{- range .Placement}}
+        <tr><td>{{.Name}}</td><td>{{.Role}}</td><td>{{.Node}}</td></tr>
+        {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- if .PlacementNote}}
+      {{- if .PlacementWarn}}
+      <div class="finding"><p class="state">{{.PlacementNote}}</p></div>
+      {{- else}}
+      <p class="state">{{.PlacementNote}}</p>
+      {{- end}}
+      {{- end}}
+      <p class="origin">source: Kubernetes-reported pod placement</p>
+    </section>
+    {{- end}}
+    {{- end}}
+    {{- else}}
+    <section class="panel">
+      <h2>Cluster overview</h2>
+      <div class="empty"><strong>No cluster snapshot yet</strong>Nothing has been observed for this cluster, so the console cannot draw its wiring.</div>
+      <p class="origin">source: Kubernetes-observed pods, operator-reported status</p>
+    </section>
+    {{- end}}
+    {{- with .Quorum}}
+    <h2 class="section-title">Replication</h2>
+    <section class="panel">
+      <h2>Failover quorum</h2>
+      <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+      {{- if .Configured}}
+      <dl class="facts">
+        <dt>Method</dt><dd>{{.Method}}</dd>
+        <dt>Reported by</dt><dd>{{.Primary}}</dd>
+        <dt>Standbys awaited</dt><dd>{{.StandbyNumber}}</dd>
+        <dt>Potentially synchronous</dt><dd>{{if .Standbys}}{{range $i, $s := .Standbys}}{{if $i}}, {{end}}{{$s}}{{end}}{{else}}none reported{{end}}</dd>
+      </dl>
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">More standbys were reported than the display bound; the list above is cut.</p>
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>Not configured</strong>The operator reports no failover quorum for this cluster, so a transaction does not wait on a synchronous standby before it is acknowledged.</div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+    </section>
+    {{- end}}
+    {{- with .Backups}}
+    <h2 class="section-title">Backup path</h2>
+    <section class="panel">
+      <h2>Configured backups</h2>
+      <p class="meta" data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+      <dl class="facts">
+        <dt>Most recent completed</dt><dd>{{.LastCompletedAge}}</dd>
+      </dl>
+      {{- if .ScheduledRows}}
+      <div class="table-scroll">
+      <table>
+        <caption>ScheduledBackup resources</caption>
+        <thead><tr><th>Name</th><th>Method</th><th>Schedule</th><th>Suspended</th></tr></thead>
+        <tbody>
+        {{- range .ScheduledRows}}
+        <tr><td>{{.Name}}</td><td>{{.Method}}</td><td>{{.Schedule}}</td><td>{{.Suspended}}</td></tr>
+        {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <div class="empty"><strong>No schedule</strong>No <code>ScheduledBackup</code> targets this cluster, so backups only happen when someone asks for one.</div>
+      {{- end}}
+      {{- with .EvidenceLink}}
+      <p><a href="{{.URL}}">{{.Label}}</a></p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+    </section>
+    {{- end}}
+{{template "shell-close"}}
