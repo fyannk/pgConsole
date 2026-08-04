@@ -30,6 +30,11 @@ import (
 // secMaxBoxes bounds each drawn list; more become one "+N more" box.
 const secMaxBoxes = 6
 
+// secWPod is the pooler-pod boxes' width: a deployment pod name
+// carries two hash suffixes, so these boxes run wider than their
+// pooler's.
+const secWPod = 265
+
 // clusterRootRows states the Cluster box shared by the inventory-style
 // drawings: identity and operator-reported standing.
 func clusterRootRows(p *Page) []TopoGraphText {
@@ -155,10 +160,18 @@ func buildBackupsDrawing(p *Page) *TopologyView {
 	x = rootX + chWBox + grpAlley
 	destX := x
 
-	// Destination boxes, stacked as two frames on the right.
+	// Destination boxes, stacked as two frames on the right. The
+	// endpoint rides the object frame's label, so a long one widens
+	// that frame — the same deterministic estimate the overview uses.
 	endpoint := ""
 	if p.ObjectStoreDetail != nil {
 		endpoint = p.ObjectStoreDetail.Endpoint
+	}
+	storeFrameW := frameW
+	if endpoint != "" {
+		if need := 110 + 8 + 7*len(endpoint); need > storeFrameW {
+			storeFrameW = need
+		}
 	}
 	var frames []TopoFrame
 	destY := top
@@ -168,7 +181,7 @@ func buildBackupsDrawing(p *Page) *TopologyView {
 		bottom := stack([]*TopoNode{store}, destX+grpPad, destY+grpLabelBand+grpPad)
 		frames = append(frames, TopoFrame{
 			Label: "Object storage", Note: endpoint, Kind: "store",
-			X: int(destX), Y: int(destY), W: frameW, H: int(bottom + grpPad - destY),
+			X: int(destX), Y: int(destY), W: storeFrameW, H: int(bottom + grpPad - destY),
 		})
 		destY = bottom + grpPad + grpRowGap
 	}
@@ -469,12 +482,12 @@ func buildPoolersWiring(p *Page) *TopologyView {
 				boxRows = append(boxRows, TopoGraphText{C: "disk", T: "node " + pod.Node})
 			}
 			pods = append(pods, secPod{
-				node: add(fmt.Sprintf("ppod-%d", i), "pooler", podState(pod), wireWPool, boxRows),
+				node: add(fmt.Sprintf("ppod-%d", i), "pooler", podState(pod), secWPod, boxRows),
 				of:   pod.Role,
 			})
 		}
 		if extra > 0 {
-			pods = append(pods, secPod{node: add("ppod-more", "pooler", "", wireWPool, []TopoGraphText{
+			pods = append(pods, secPod{node: add("ppod-more", "pooler", "", secWPod, []TopoGraphText{
 				{C: "label", T: fmt.Sprintf("+%d more", extra)},
 				{C: "sub", T: "pooler pods"},
 			})})
@@ -541,7 +554,7 @@ func buildPoolersWiring(p *Page) *TopologyView {
 		frames = append(frames, TopoFrame{
 			Label: "Pooler pods", Kind: "pool",
 			X: int(poolX) - grpPad, Y: int(podTop),
-			W: wireWPool + 2*grpPad, H: int(y - chBoxGap + grpPad - podTop),
+			W: secWPod + 2*grpPad, H: int(y - chBoxGap + grpPad - podTop),
 		})
 	}
 
