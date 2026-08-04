@@ -451,7 +451,10 @@ func instanceCondition(row PodRowView) string {
 		line += " · readiness " + row.Ready
 	}
 	if row.Restarts != "" && row.Restarts != "0" && row.Restarts != unknown {
-		line += " · " + row.Restarts + " restarts"
+		line += " · " + row.Restarts + " restart"
+		if row.Restarts != "1" {
+			line += "s"
+		}
 	}
 	return line
 }

@@ -1,0 +1,70 @@
+# A throwaway S3 endpoint for the dev cluster, so the console's backup
+# panels and the wiring diagram's storage tier show a real object store
+# instead of an honest "not referenced".
+#
+# Nothing here is production shaped: one replica, an emptyDir, credentials
+# in plain text. It exists only so barman-cloud has somewhere to write.
+# pgConsole never reads any of it — it reads the ObjectStore resource that
+# names it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-creds
+  namespace: minio
+stringData:
+  MINIO_ROOT_USER: pgconsoledev
+  MINIO_ROOT_PASSWORD: pgconsoledev123
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef:
+                name: minio-creds
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000

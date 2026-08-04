@@ -114,6 +114,22 @@ func TestClusterOverviewRendersWiringPlacementAndQuorum(t *testing.T) {
 	}
 }
 
+func TestInstanceConditionReportsRestartsOnlyWhenThereAreSome(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ restarts, want string }{
+		{"0", "Running · ready"},
+		{"", "Running · ready"},
+		{unknown, "Running · ready"},
+		{"1", "Running · ready · 1 restart"},
+		{"4", "Running · ready · 4 restarts"},
+	} {
+		got := instanceCondition(PodRowView{Phase: "Running", Ready: "true", Restarts: tc.restarts})
+		if got != tc.want {
+			t.Errorf("restarts %q = %q, want %q", tc.restarts, got, tc.want)
+		}
+	}
+}
+
 func TestClusterOverviewDerivesSharedNodeFinding(t *testing.T) {
 	t.Parallel()
 	src := wiringSources()

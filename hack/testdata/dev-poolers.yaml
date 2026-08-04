@@ -1,0 +1,29 @@
+# Two connection poolers, so the dev console shows the tier a DBA reads
+# first: the addresses applications actually dial. Two of them, with
+# different types and pool modes, because one pooler cannot show that the
+# read and write paths are distinct.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: orders-pool-rw
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: orders-pool-ro
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  instances: 1
+  type: ro
+  pgbouncer:
+    poolMode: session

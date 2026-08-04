@@ -23,8 +23,15 @@
 # up, re-running relaunches the four ports fast. RECREATE=true forces a
 # clean rebuild.
 #
-# Environment overrides: CLUSTER, KIND_NODE_IMAGE, CNPG_MANIFEST, IMAGE,
-# SKIP_BUILD=true, RECREATE=true, NO_FORWARD=true.
+# The dev cluster is deliberately not the minimum one: it runs two
+# connection poolers and archives to a throwaway MinIO through the
+# barman-cloud plugin, because the console's endpoint, storage and backup
+# panels have nothing to say against a bare three-instance cluster.
+# SKIP_BACKUP=true drops the object store half of that.
+#
+# Environment overrides: CLUSTER, KIND_NODE_IMAGE, CNPG_MANIFEST,
+# CERT_MANAGER_MANIFEST, BARMAN_MANIFEST, IMAGE, SKIP_BUILD=true,
+# SKIP_BACKUP=true, RECREATE=true, NO_FORWARD=true.
 #
 # Ctrl-C stops the forward and proxies; the cluster stays up.
 # Tear down with:  kind delete cluster --name "$CLUSTER"
@@ -37,6 +44,12 @@ CLUSTER="${CLUSTER:-pgc-dev}"
 CONTEXT="kind-$CLUSTER"
 KIND_NODE_IMAGE="${KIND_NODE_IMAGE:-kindest/node:v1.34.0}"
 CNPG_MANIFEST="${CNPG_MANIFEST:-https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.30/releases/cnpg-1.30.0.yaml}"
+# The barman-cloud plugin is what gives the dev cluster a real object
+# store, and it needs cert-manager for the mTLS between operator and
+# plugin. Set SKIP_BACKUP=true to stand up the cluster without either;
+# the console then honestly reports no object store referenced.
+CERT_MANAGER_MANIFEST="${CERT_MANAGER_MANIFEST:-https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml}"
+BARMAN_MANIFEST="${BARMAN_MANIFEST:-https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.14.0/manifest.yaml}"
 IMAGE="${IMAGE:-pgconsole:dev}"
 
 log() { echo "[dev-up] $*"; }
@@ -56,6 +69,76 @@ already_up() {
   ready=$(kubectl --context "$CONTEXT" -n payments get deploy/pgconsole-orders \
     -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
   [ "${ready:-0}" -ge 1 ] 2>/dev/null
+}
+
+# setup_backup gives the dev cluster a real object store: cert-manager,
+# the barman-cloud plugin, a throwaway MinIO, and the ObjectStore the
+# Cluster then names. The order matters and the waits are not padding —
+# the plugin's CRD must exist before the ObjectStore applies, and the
+# Cluster only gains its plugin sidecar on the rolling restart that
+# adding spec.plugins triggers. A Backup taken before that sidecar exists
+# fails with "requested plugin is not available", so this waits for the
+# sidecar rather than assuming the patch was enough.
+setup_backup() {
+  log "installing cert-manager (the barman-cloud plugin needs it for mTLS)"
+  kubectl apply -f "$CERT_MANAGER_MANIFEST" > /dev/null
+  kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=300s > /dev/null
+
+  log "installing the barman-cloud plugin"
+  kubectl apply -f "$BARMAN_MANIFEST" > /dev/null
+  kubectl wait --for=condition=established --timeout=120s \
+    crd/objectstores.barmancloud.cnpg.io > /dev/null
+  kubectl -n cnpg-system rollout status deployment/barman-cloud --timeout=300s > /dev/null
+
+  log "deploying MinIO and creating the backup bucket"
+  kubectl apply -f hack/testdata/dev-minio.yaml > /dev/null
+  kubectl -n minio rollout status deployment/minio --timeout=180s > /dev/null
+  kubectl -n minio delete job mc-mkbucket --ignore-not-found > /dev/null 2>&1 || true
+  cat <<'YAML' | kubectl apply -f - > /dev/null
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mc-mkbucket
+  namespace: minio
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command: ["sh", "-c"]
+          args:
+            - mc alias set m http://minio.minio.svc:9000 pgconsoledev pgconsoledev123 &&
+              mc mb --ignore-existing m/pgbackups
+YAML
+  kubectl -n minio wait --for=condition=complete --timeout=180s job/mc-mkbucket > /dev/null
+
+  log "declaring the object store and the nightly schedule"
+  kubectl apply -f hack/testdata/dev-backup.yaml > /dev/null
+
+  log "pointing the cluster at the object store (this rolls the instances)"
+  kubectl -n payments patch cluster orders --type merge -p '{"spec":{"plugins":[{"name":"barman-cloud.cloudnative-pg.io","enabled":true,"isWALArchiver":true,"parameters":{"barmanObjectName":"orders-store"}}]}}' > /dev/null
+
+  # The sidecar is a native (restartable init) container, so it shows up
+  # in .spec.initContainers, not .spec.containers.
+  log "waiting for every instance to gain the plugin sidecar"
+  i=0
+  while :; do
+    missing=0
+    for pod in $(kubectl -n payments get pods -l cnpg.io/cluster=orders \
+      -o jsonpath='{range .items[*]}{.metadata.name} {end}' 2>/dev/null); do
+      kubectl -n payments get pod "$pod" \
+        -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null |
+        grep -q plugin-barman-cloud || missing=1
+    done
+    [ "$missing" -eq 0 ] && break
+    i=$((i + 1))
+    [ "$i" -le 120 ] || { log "the plugin sidecar never appeared on the instances"; exit 1; }
+    sleep 5
+  done
+  log "backup wiring ready — WAL archives to s3://pgbackups/orders"
 }
 
 if [ "${RECREATE:-false}" != "true" ] && already_up; then
@@ -100,6 +183,15 @@ YAML
     phase=$(kubectl -n payments get cluster orders -o jsonpath='{.status.phase}' 2>/dev/null || true)
   done
   log "cluster healthy"
+
+  log "adding the connection poolers"
+  kubectl apply -f hack/testdata/dev-poolers.yaml > /dev/null
+
+  if [ "${SKIP_BACKUP:-false}" != "true" ]; then
+    setup_backup
+  else
+    log "SKIP_BACKUP set — no object store; the backup panels stay empty"
+  fi
 
   log "loading the image and deploying the console"
   kind load docker-image "$IMAGE" --name "$CLUSTER"
