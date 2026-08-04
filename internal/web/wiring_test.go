@@ -15,6 +15,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -110,6 +111,85 @@ func TestClusterOverviewRendersWiringPlacementAndQuorum(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page misses %q", want)
+		}
+	}
+}
+
+// A read-only pooler fronts the read service, and its box says "ro"
+// rather than explaining what "ro" means. Both facts once ran through
+// the prose spelling of the type, which made every pooler — the
+// read-only one included — draw against the write service.
+func TestWiringDrawsPoolersAgainstTheServiceTheyFront(t *testing.T) {
+	t.Parallel()
+	src := wiringSources()
+	page := buildPage(context.Background(), "orders", "payments", snapshots{
+		window: time.Hour, cluster: src.snap, ok: src.ok,
+		pods: src.pods, podsOK: src.podsOK,
+		poolers: observe.PoolersSnapshot{
+			Generation: 4, ObservedAt: testNow.Add(-time.Second),
+			Poolers: []observe.PoolerFacts{
+				{Name: "orders-pool-rw", UID: "p1", Type: "rw", PoolMode: "transaction", Phase: "active"},
+				{Name: "orders-pool-ro", UID: "p2", Type: "ro", PoolMode: "session", Phase: "active"},
+			},
+		},
+		poolersOK: true,
+	}, testNow, Links{})
+
+	view := buildClusterWiring(context.Background(), &page)
+	if view == nil {
+		t.Fatal("no wiring diagram was built")
+	}
+	// A wiring box carries as many rows as its facts need, so its name is
+	// the first "label" row and its detail lines are the rest.
+	rows := func(n TopoNode, class string) []string {
+		var out []string
+		for _, l := range n.Lines {
+			if l.Class == class {
+				out = append(out, l.Text)
+			}
+		}
+		return out
+	}
+	name := func(n TopoNode) string {
+		if got := rows(n, "label"); len(got) > 0 {
+			return got[0]
+		}
+		return n.Label
+	}
+	named := map[string]TopoNode{}
+	byID := map[string]TopoNode{}
+	for _, n := range view.Nodes {
+		named[name(n)] = n
+		byID[n.ID] = n
+	}
+
+	// The type reads as the operator's token, with no definition of it.
+	for pooler, want := range map[string]string{
+		"orders-pool-ro": "pgbouncer — ro · session",
+		"orders-pool-rw": "pgbouncer — rw · transaction",
+	} {
+		n, ok := named[pooler]
+		if !ok {
+			t.Fatalf("%s is not in the diagram", pooler)
+		}
+		if got := rows(n, "sub"); len(got) == 0 || got[0] != want {
+			t.Errorf("%s reads %q, want %q", pooler, got, want)
+		}
+	}
+
+	// Each pooler reaches the service it actually fronts.
+	fronts := map[string]string{}
+	for _, l := range view.Graph.Links {
+		if strings.HasPrefix(l.Source, "pool-") {
+			fronts[name(byID[l.Source])] = name(byID[l.Target])
+		}
+	}
+	for pooler, want := range map[string]string{
+		"orders-pool-ro": "orders-ro",
+		"orders-pool-rw": "orders-rw",
+	} {
+		if got := fronts[pooler]; got != want {
+			t.Errorf("%s is drawn against %q, want %q", pooler, got, want)
 		}
 	}
 }

@@ -1492,6 +1492,11 @@ type PoolerRowView struct {
 	Name string
 	// Type is the endpoint the pooler fronts, in words.
 	Type string
+	// TypeToken is the same value as the operator reports it — "rw",
+	// "ro", "r". The wiring diagram reads this one: it decides which
+	// service a pooler is drawn against, and its readers already know
+	// the vocabulary the prose above exists to explain.
+	TypeToken string
 	// PoolMode is the configured PgBouncer pooling mode.
 	PoolMode string
 	// Instances is the ready-of-desired pod count.
@@ -1549,6 +1554,7 @@ func buildPoolersView(snap observe.PoolersSnapshot, now time.Time) *PoolersView 
 		view.Poolers = append(view.Poolers, PoolerRowView{
 			Name:        p.Name,
 			Type:        poolerEndpoint(p.Type),
+			TypeToken:   p.Type,
 			PoolMode:    orUnknown(p.PoolMode),
 			Instances:   formatPoolerInstances(p.ReadyInstances, p.DesiredInstances),
 			Phase:       orUnknown(p.Phase),

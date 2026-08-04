@@ -138,8 +138,11 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 			rows := poolerRows(pooler)
 			node := addNode(fmt.Sprintf("pool-%d", i), 0,
 				wireNode("pooler", poolerState(pooler), wireWPool, rows), rows)
+			// A read-only pooler fronts the read service; every other
+			// type fronts the write one. Matched against the operator's
+			// token, never against the prose spelling of it.
 			target := rw
-			if pooler.Type == "ro" {
+			if pooler.TypeToken == "ro" {
 				target = ro
 			}
 			poolers = append(poolers, pooled{node: node, to: target})
@@ -472,12 +475,14 @@ func shortImage(image string) string {
 	return image
 }
 
-// poolerRows describes one connection pooler.
+// poolerRows describes one connection pooler. The type is the operator's
+// own token, unglossed: this drawing is read by people who know what "rw"
+// fronts, and the box has room for facts, not for a definition.
 func poolerRows(pooler PoolerRowView) []TopoGraphText {
 	rows := []TopoGraphText{{C: "label", T: pooler.Name}}
 	routing := "pgbouncer"
-	if pooler.Type != "" && pooler.Type != unknown {
-		routing += " — " + pooler.Type
+	if pooler.TypeToken != "" {
+		routing += " — " + pooler.TypeToken
 	}
 	if pooler.PoolMode != "" && pooler.PoolMode != unknown {
 		routing += " · " + pooler.PoolMode
