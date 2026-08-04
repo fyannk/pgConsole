@@ -132,8 +132,15 @@ func (v TopologyView) GraphJSON() (string, error) {
 // TopoFrame is one dotted category box: a labelled region the reader
 // can take in at a glance before reading the boxes inside it.
 type TopoFrame struct {
-	// Label names the category: Poolers, Cluster, Storage.
+	// Label names the category: Poolers, Cluster, Backups, storage.
 	Label string
+	// Note is an optional plain detail after the label — the object
+	// store frame carries its endpoint here, where it describes the
+	// whole region rather than one box.
+	Note string
+	// Kind selects the frame's domain colour: pool, cluster, backup,
+	// store. Empty keeps the neutral frame style.
+	Kind string
 	// X, Y, W, H place the frame in the viewBox.
 	X, Y, W, H int
 }

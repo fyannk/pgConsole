@@ -25,7 +25,7 @@ import (
 
 // groupedPage builds a page with everything the grouped drawing can
 // show: two poolers, two services, a primary with two replicas, one
-// claim per instance, a backup path.
+// claim per instance, a backup schedule and a backup path.
 func groupedPage(t *testing.T) Page {
 	t.Helper()
 	src := wiringSources()
@@ -37,6 +37,9 @@ func groupedPage(t *testing.T) Page {
 		backups: observe.BackupsSnapshot{
 			Generation: 6, ObservedAt: testNow.Add(-2 * time.Second),
 			Backups: []observe.BackupFacts{{Name: "orders-first", UID: "b1", Phase: "completed", Method: "plugin"}},
+			ScheduledBackups: []observe.ScheduledBackupFacts{
+				{Name: "daily", UID: "sb1", Method: "plugin", Schedule: "0 0 2 * * *", Suspended: boolp(false)},
+			},
 		},
 		backupsOK: true,
 		poolers: observe.PoolersSnapshot{
@@ -118,8 +121,15 @@ func TestGroupedWiringPinsEveryStatedPlacement(t *testing.T) {
 	// The primary left of its replicas, replicas left of their claims.
 	leftOf("orders-1 — primary", "orders-2 — replica")
 	leftOf("orders-2 — replica", "Cloud backup")
-	// The object store on top of the storage column, above every claim.
+	// The top band: the schedule above the primary and centred on it,
+	// the object store above every claim.
+	above("daily", "orders-1 — primary")
 	above("Cloud backup", "orders-1")
+	if sched, prim := byName["daily"], byName["orders-1 — primary"]; sched == nil || prim == nil {
+		t.Fatal("the schedule or the primary is not drawn")
+	} else if sc, pc := sched.X+sched.W/2, prim.X+prim.W/2; sc != pc {
+		t.Errorf("the schedule (centre %d) is not centred on the primary (centre %d)", sc, pc)
+	}
 	// Each claim is level with its instance, so the volume wire is
 	// straight: same centre, and the edge path carries no corner.
 	for _, pair := range [][2]string{
@@ -135,14 +145,37 @@ func TestGroupedWiringPinsEveryStatedPlacement(t *testing.T) {
 			t.Errorf("%s (centre %d) is not level with its claim (centre %d)", pair[0], instC, claimC)
 		}
 	}
+	// Consecutive instances stagger their claims over two columns, and
+	// the columns alternate: first and third left, second right.
+	if c1, c2, c3 := byName["orders-1"], byName["orders-2"], byName["orders-3"]; c1.X >= c2.X {
+		t.Errorf("the second claim column (x=%d) does not stand right of the first (x=%d)", c2.X, c1.X)
+	} else if c1.X != c3.X {
+		t.Errorf("the third claim (x=%d) does not return to the first column (x=%d)", c3.X, c1.X)
+	}
 
-	// Three dotted frames, in reading order.
+	// Five dotted frames, each carrying its domain kind.
 	var labels []string
+	kinds := map[string]string{}
+	notes := map[string]string{}
 	for _, f := range view.Frames {
 		labels = append(labels, f.Label)
+		kinds[f.Label] = f.Kind
+		notes[f.Label] = f.Note
 	}
-	if got, want := strings.Join(labels, ","), "Poolers,Cluster,Storage"; got != want {
+	if got, want := strings.Join(labels, ","), "Poolers,Cluster,Backups,Kubernetes storage,Object storage"; got != want {
 		t.Errorf("frames = %s, want %s", got, want)
+	}
+	for label, kind := range map[string]string{
+		"Poolers": "pool", "Cluster": "cluster", "Backups": "backup",
+		"Kubernetes storage": "store", "Object storage": "store",
+	} {
+		if kinds[label] != kind {
+			t.Errorf("frame %s carries kind %q, want %q", label, kinds[label], kind)
+		}
+	}
+	// No endpoint was observed, so the object frame carries no note.
+	if notes["Object storage"] != "" {
+		t.Errorf("object frame note = %q with no endpoint observed", notes["Object storage"])
 	}
 	// Frames do not overlap each other.
 	for i := 0; i < len(view.Frames); i++ {
@@ -213,6 +246,23 @@ func TestGroupedWiringTrunksItsFans(t *testing.T) {
 		if strings.Contains(d.Path, "Q") {
 			t.Errorf("a volume wire turns a corner: %q", d.Path)
 		}
+	}
+
+	// The backup path is two archive wires — the schedule into the
+	// primary, the primary into the object store — and the lone
+	// schedule's drop collapses to one straight vertical line.
+	archives := kinds["archive"]
+	if len(archives) != 2 {
+		t.Fatalf("%d archive wires, want 2", len(archives))
+	}
+	straight := 0
+	for _, a := range archives {
+		if !strings.Contains(a.Path, "Q") {
+			straight++
+		}
+	}
+	if straight != 1 {
+		t.Errorf("%d straight archive wires, want exactly the schedule drop", straight)
 	}
 
 	// Tees carry dots in the styles of the flows that split.

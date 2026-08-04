@@ -336,7 +336,8 @@ async function checkNoScript(browser) {
     };
   });
   check('the grouped drawing is complete without JavaScript',
-    groupedNoJs.present && groupedNoJs.frames === 3 && groupedNoJs.boxes > 0 && groupedNoJs.dots > 0,
+    groupedNoJs.present && groupedNoJs.frames === 5 && groupedNoJs.boxes > 0 && groupedNoJs.dots > 0
+      && groupedNoJs.labels.includes('Backups') && groupedNoJs.labels.includes('Object storage'),
     `frames [${groupedNoJs.labels}], ${groupedNoJs.boxes} boxes, ${groupedNoJs.dots} tees`);
 
   const elkNoJs = await page.evaluate(() => {

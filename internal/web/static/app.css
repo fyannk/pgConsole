@@ -54,6 +54,9 @@
   --accent: oklch(50% 0.15 252);
   --accent-weak: oklch(94.5% 0.038 248);
   --logo-blue: oklch(76% 0.11 232);
+  /* Storage identity: the wiring drawing's storage frames and boxes.
+     A domain colour, not a status — nothing purple is ever a verdict. */
+  --storage: oklch(45% 0.11 305);
 
   /* Navy Chrome: the topbar takes the mark's outline navy, so the logo sits
      on its own colour while the content area stays light. */
@@ -91,6 +94,7 @@
 
     --accent: oklch(74% 0.115 240);
     --accent-weak: oklch(31% 0.06 250);
+    --storage: oklch(74% 0.10 305);
 
     --topbar-bg: var(--surface);
     --topbar-border: var(--border);
@@ -118,6 +122,7 @@
 
   --accent: oklch(74% 0.115 240);
   --accent-weak: oklch(31% 0.06 250);
+  --storage: oklch(74% 0.10 305);
 
   --topbar-bg: var(--surface);
   --topbar-border: var(--border);
@@ -144,6 +149,7 @@
 
   --accent: oklch(50% 0.15 252);
   --accent-weak: oklch(94.5% 0.038 248);
+  --storage: oklch(45% 0.11 305);
 
   --topbar-bg: oklch(32% 0.10 258);
   --topbar-border: oklch(28% 0.09 258);
@@ -1311,6 +1317,19 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
    else, and the tee dots marking where a trunk splits. */
 .topo-frame rect { fill: none; stroke: var(--border-strong); stroke-dasharray: 2 5; stroke-width: 1.2; }
 .topo-frame-label { fill: var(--text-muted); font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+/* Each category frame takes its domain's colour — client blue for the
+   poolers and the backup path, green for the cluster, storage purple
+   for both storage frames — so a reader can follow one domain from its
+   frame to its boxes to its wires. */
+.topo-frame-pool rect, .topo-frame-backup rect { stroke: var(--accent); }
+.topo-frame-pool .topo-frame-label, .topo-frame-backup .topo-frame-label { fill: var(--accent); }
+.topo-frame-cluster rect { stroke: var(--ok); }
+.topo-frame-cluster .topo-frame-label { fill: var(--ok); }
+.topo-frame-store rect { stroke: var(--storage); }
+.topo-frame-store .topo-frame-label { fill: var(--storage); }
+/* The object storage frame's endpoint: a fact about the region, so it
+   rides the frame label — in mono, and never shouted into uppercase. */
+.topo-frame-note { fill: var(--text-muted); font-family: var(--font-mono); font-weight: 450; letter-spacing: 0; text-transform: none; }
 .topo-dot { stroke: var(--surface); stroke-width: 1; }
 .topo-dot-write, .topo-dot-archive { fill: var(--accent); }
 .topo-dot-read { fill: var(--text-muted); }
@@ -1327,6 +1346,17 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 /* A pooler is infrastructure the cluster does not own, so it reads as a
    neighbour of the endpoints rather than one of the servers. */
 .topo-pooler rect { fill: var(--surface-2); stroke: var(--border-strong); }
+/* A ScheduledBackup box: the head of the backup path, in its blue. */
+.topo-backup rect { fill: var(--accent-weak); stroke: var(--accent); }
+
+/* Domain tints, grouped drawing only: the boxes inside a coloured frame
+   answer it. Declared before the data-state rules so an actual health
+   verdict always outranks a domain colour. */
+.topo-panel-grouped .topo-pooler rect { stroke: var(--accent); }
+.topo-panel-grouped .topo-endpoint rect { stroke: var(--ok); }
+.topo-panel-grouped .topo-pvc rect,
+.topo-panel-grouped .topo-snapshot rect { stroke: var(--storage); }
+.topo-panel-grouped .topo-storage rect { fill: var(--surface-2); stroke: var(--storage); }
 /* Health by border colour; the state word rides in the diagram's labels
    and on the Cluster status screen, so colour is reinforcement. */
 .topo-node[data-state="current"] rect { stroke: var(--ok); }

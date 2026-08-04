@@ -14,25 +14,38 @@
 
 package web
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-// The grouped wiring drawing. A derivation of the design proposal's
-// diagram, and laid out the same way that proposal was: no layout
-// engine, every placement a stated rule.
+// The grouped wiring drawing. A derivation of the operator's own
+// draw.io sketch of the cluster, laid out the same way that sketch
+// was: no layout engine, every placement a stated rule.
 //
 //   - Columns, left to right: poolers, services, the primary, the
 //     replicas, storage. The primary stands left of its replicas; the
-//     claims stand right of the instance that holds them.
+//     claims stand right of the instances, staggered over two columns
+//     so consecutive instances never fight for the same corridor.
+//   - A top band holds what feeds and receives the backup path: the
+//     ScheduledBackup boxes over the primary, the object store over the
+//     Kubernetes storage. Both drop out of the band into the drawing.
 //   - Rows: rw above ro, for the poolers and the services alike. In the
-//     storage column the object store and the snapshots sit on top; each
-//     claim is centred on its own instance, so the volume wire between
-//     them is a straight line.
-//   - Three dotted frames name the categories: Poolers, Cluster,
-//     Storage. The trunk buses run in the alleys between frames.
+//     Kubernetes storage frame the snapshots sit on top; each claim
+//     group is centred on its own instance, so a lone claim's volume
+//     wire is a straight line.
+//   - Five dotted frames name the categories, each in its domain's
+//     colour: Poolers, Cluster, Backups, Kubernetes storage, Object
+//     storage. The object store's endpoint rides its frame label — it
+//     describes the region, not one bucket. The trunk buses run in the
+//     alleys between frames.
 //   - A flow that fans out leaves its box once: one trunk to a bus, one
 //     branch per destination, a dot on each tee. Replication leaves the
 //     primary at one port and splits; the read service reaches its
-//     replicas the same way.
+//     replicas the same way; an instance reaches its claims the same
+//     way. The whole backup path — schedule to primary, primary to
+//     snapshots and object store — shares one line style, so it can be
+//     followed across three frames by colour alone.
 //
 // Deterministic by construction, so it is safe to screenshot and cheap
 // to test: the same page renders the same drawing, always.
@@ -43,20 +56,34 @@ const (
 	// grpAlley separates two frames; the replication and archive buses
 	// run in the cluster-to-storage alley.
 	grpAlley = 60
-	// grpRowGap separates stacked boxes in a column.
+	// grpRowGap separates stacked boxes in a column, and a top-band
+	// frame from the frame below it.
 	grpRowGap = 28
 	// grpPad is a frame's padding around its boxes.
 	grpPad = 16
 	// grpLabelBand is the frame headroom holding the category label.
 	grpLabelBand = 30
-	// grpPortOff separates the ports sharing a box edge, so the archive,
-	// volume and replication wires leave the primary as three lines
-	// rather than one smear.
+	// grpPortOff separates the ports sharing a box edge, so the archive
+	// and replication wires leave the primary as distinct lines rather
+	// than one smear.
 	grpPortOff = 15
 	// grpMargin is the viewBox margin around everything.
 	grpMargin = 8
 	// grpWPvc is the claim boxes' width.
 	grpWPvc = 200
+	// grpWBak is the scheduled-backup boxes' width.
+	grpWBak = 210
+	// grpClaimGap separates the two claim columns; the second column's
+	// drop bus runs inside it.
+	grpClaimGap = 24
+	// grpClaimStack separates two claims of the same instance.
+	grpClaimStack = 10
+	// grpBusInset is how far left of its claim column a disk drop bus
+	// runs.
+	grpBusInset = 10
+	// grpMaxSched bounds the scheduled-backup boxes; more become one
+	// "+N more" box, exactly like the server cap.
+	grpMaxSched = 3
 )
 
 // buildGroupedWiring derives the grouped drawing from the assembled
@@ -73,7 +100,7 @@ func buildGroupedWiring(p *Page) *TopologyView {
 
 	view := &TopologyView{
 		Title: "Physical wiring — grouped",
-		Aria:  "The same wiring grouped into poolers, cluster and storage, with one trunk per fanned flow",
+		Aria:  "The same wiring grouped into poolers, cluster, backups and storage, with one trunk per fanned flow",
 	}
 
 	// The capacity is a provable upper bound on every add below, so the
@@ -86,6 +113,9 @@ func buildGroupedWiring(p *Page) *TopologyView {
 	}
 	if p.Infrastructure != nil {
 		capacity += len(p.Infrastructure.Volumes)
+	}
+	if p.Backups != nil {
+		capacity += len(p.Backups.ScheduledRows)
 	}
 	nodes := make([]TopoNode, 0, capacity)
 	rowsByID := map[string][]TopoGraphText{}
@@ -102,8 +132,10 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		n.Y = int(cy) - n.H/2
 	}
 	cy := func(n *TopoNode) float64 { return float64(n.Y) + float64(n.H)/2 }
+	cx := func(n *TopoNode) float64 { return float64(n.X) + float64(n.W)/2 }
 	right := func(n *TopoNode) float64 { return float64(n.X + n.W) }
 	left := func(n *TopoNode) float64 { return float64(n.X) }
+	bottom := func(n *TopoNode) float64 { return float64(n.Y + n.H) }
 
 	// --- Content, gathered before any placement. ---
 
@@ -157,21 +189,55 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		}
 	}
 
-	// Storage: the object store and snapshots on top, then one claim
-	// box per instance claim, in instance order.
+	// Scheduled backups, bounded like the servers are.
+	var schedules []*TopoNode
+	if p.Backups != nil {
+		shown := p.Backups.ScheduledRows
+		extra := 0
+		if len(shown) > grpMaxSched {
+			extra = len(shown) - (grpMaxSched - 1)
+			shown = shown[:grpMaxSched-1]
+		}
+		for i, s := range shown {
+			schedules = append(schedules,
+				add(fmt.Sprintf("sched-%d", i), "backup", "", grpWBak, scheduleRows(s)))
+		}
+		if extra > 0 {
+			schedules = append(schedules,
+				add("sched-more", "backup", "", grpWBak, []TopoGraphText{
+					{C: "label", T: fmt.Sprintf("+%d more", extra)},
+					{C: "sub", T: "backup schedules"},
+				}))
+		}
+	}
+
+	// Storage: the object store apart in its own frame, the snapshots
+	// and claims in the Kubernetes storage frame. The endpoint moves to
+	// the object frame's label, so the box does not repeat it.
 	cloud, snapCfg := topoStorageConfigured(p)
+	endpoint := ""
+	if p.ObjectStoreDetail != nil {
+		endpoint = p.ObjectStoreDetail.Endpoint
+	}
 	var store, snapshot *TopoNode
 	if cloud {
-		store = add("store", "storage", "", wireWStore, objectStoreRows(p))
+		store = add("store", "storage", "", wireWStore, grpStoreRows(p, endpoint != ""))
 	}
 	if snapCfg {
 		snapshot = add("snapshot", "snapshot", "", wireWStore, snapshotRows(p))
 	}
-	type grpClaim struct {
-		node *TopoNode
-		of   *TopoNode
+
+	// Claims, grouped by the instance that holds them and staggered
+	// over two columns: consecutive instances alternate, so one
+	// instance's wires cross the other column in the corridor its
+	// neighbours leave free.
+	type grpClaimGroup struct {
+		of    *TopoNode
+		col   int
+		nodes []*TopoNode
 	}
-	var claims []grpClaim
+	var claimGroups []grpClaimGroup
+	claimCount := 0
 	if p.Infrastructure != nil {
 		instances := append([]*TopoNode{}, replicas...)
 		if primary != nil {
@@ -182,22 +248,27 @@ func buildGroupedWiring(p *Page) *TopologyView {
 			if name == "" {
 				continue
 			}
+			var group []*TopoNode
 			for _, v := range p.Infrastructure.Volumes {
 				if v.Instance != name {
 					continue
 				}
-				claims = append(claims, grpClaim{
-					node: add("pvc-"+v.Name, "pvc", "", grpWPvc, claimRows(v)),
-					of:   inst,
-				})
+				group = append(group, add("pvc-"+v.Name, "pvc", "", grpWPvc, claimRows(v)))
 			}
+			if len(group) == 0 {
+				continue
+			}
+			claimGroups = append(claimGroups, grpClaimGroup{of: inst, col: len(claimGroups) % 2, nodes: group})
+			claimCount += len(group)
 		}
 	}
+	twoCols := len(claimGroups) > 1
 
-	// --- Placement: columns first, then rows. ---
+	// --- Placement: columns first, then the top band, then rows. ---
 
 	hasPool := len(poolers) > 0
-	hasStore := store != nil || snapshot != nil || len(claims) > 0
+	hasK8s := snapshot != nil || claimCount > 0
+	hasObject := store != nil
 
 	x := float64(grpMargin)
 	var poolX float64
@@ -214,33 +285,69 @@ func buildGroupedWiring(p *Page) *TopologyView {
 	replX := x
 	x += wireWSrv + grpPad
 	clusterRight := x
-	var storeX float64
-	if hasStore {
+	var storeX, regionW float64
+	if hasK8s || hasObject {
 		x += grpAlley + grpPad
 		storeX = x
-		x += float64(maxW(wireWStore, grpWPvc)) + grpPad
+		regionW = float64(grpWPvc)
+		if twoCols {
+			regionW = float64(2*grpWPvc + grpClaimGap)
+		}
+		if (hasObject || snapshot != nil) && regionW < wireWStore {
+			regionW = wireWStore
+		}
+		// The endpoint rides the object frame's label; a long one
+		// widens the region rather than bleeding past it. The estimate
+		// is written out so the rule stays deterministic: the label
+		// itself, a gap, the endpoint at its mono metrics, and slack
+		// so the note never kisses the frame border.
+		if hasObject && endpoint != "" {
+			if need := float64(110 + 8 + 7*len(endpoint)); need > regionW {
+				regionW = need
+			}
+		}
+		x += regionW + grpPad
 	}
 	width := int(x) + grpMargin
 
-	// The storage stack's top half: object store, then snapshots.
-	yTop := float64(grpMargin + grpLabelBand + grpPad)
-	storageY := yTop
-	if store != nil {
-		centre(store, storeX+float64(store.W)/2, storageY+float64(store.H)/2)
-		storageY += float64(store.H) + grpRowGap
+	// The top band: the schedules over the primary column, the object
+	// store over the storage region. Either lifts the frame below it;
+	// with neither, the drawing keeps its one-row shape.
+	bandTop := float64(grpMargin)
+	bandContent := bandTop + grpLabelBand + grpPad
+	primCx := primX + float64(wireWSrv)/2
+	clusterTop := bandTop
+	var bakLeft, bakRight, bakBottom float64
+	if len(schedules) > 0 {
+		total := float64(len(schedules)*grpWBak + (len(schedules)-1)*grpPad)
+		sx := primCx - total/2
+		bakLeft = sx
+		bakBottom = bandContent
+		for _, s := range schedules {
+			s.X = int(sx)
+			s.Y = int(bandContent)
+			sx += float64(grpWBak + grpPad)
+			if b := bottom(s); b > bakBottom {
+				bakBottom = b
+			}
+		}
+		bakRight = sx - grpPad
+		clusterTop = bakBottom + grpPad + grpRowGap
 	}
-	if snapshot != nil {
-		centre(snapshot, storeX+float64(snapshot.W)/2, storageY+float64(snapshot.H)/2)
-		storageY += float64(snapshot.H) + grpRowGap
+	k8sTop := bandTop
+	var objBottom float64
+	if hasObject {
+		store.X = int(storeX)
+		store.Y = int(bandContent)
+		objBottom = bottom(store)
+		if hasK8s {
+			k8sTop = objBottom + grpPad + grpRowGap
+		}
 	}
 
-	// Instance rows start below that stack, so the claims — each
-	// centred on its instance — never collide with it.
-	instTop := yTop
-	if len(claims) > 0 && storageY > instTop {
-		instTop = storageY
-	}
-	rowY := instTop
+	// Instance rows, below the cluster frame's label band.
+	clusterContent := clusterTop + grpLabelBand + grpPad
+	rowY := clusterContent
 	if primary != nil {
 		centre(primary, primX+float64(primary.W)/2, rowY+float64(primary.H)/2)
 		rowY += float64(primary.H) + grpRowGap
@@ -250,18 +357,38 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		rowY += float64(r.H) + grpRowGap
 	}
 
-	// Claims, each centred on its instance; a second claim of the same
-	// instance stacks below the first.
-	usedRows := map[string]float64{}
-	for _, c := range claims {
-		base := cy(c.of) + usedRows[c.of.ID]
-		usedRows[c.of.ID] += float64(c.node.H) + 10
-		centre(c.node, storeX+float64(c.node.W)/2, base)
+	// The Kubernetes storage stack: snapshots on top, then the claim
+	// groups, each centred on its instance and pushed down only when
+	// its own column is already occupied.
+	k8sContent := k8sTop + grpLabelBand + grpPad
+	sY := k8sContent
+	if snapshot != nil {
+		snapshot.X = int(storeX)
+		snapshot.Y = int(sY)
+		sY = bottom(snapshot) + grpRowGap
+	}
+	colX := [2]float64{storeX, storeX + grpWPvc + grpClaimGap}
+	nextFree := [2]float64{sY, sY}
+	for _, g := range claimGroups {
+		total := float64((len(g.nodes) - 1) * grpClaimStack)
+		for _, n := range g.nodes {
+			total += float64(n.H)
+		}
+		top := cy(g.of) - total/2
+		if top < nextFree[g.col] {
+			top = nextFree[g.col]
+		}
+		for _, n := range g.nodes {
+			n.X = int(colX[g.col])
+			n.Y = int(top)
+			top += float64(n.H) + grpClaimStack
+		}
+		nextFree[g.col] = top - grpClaimStack + grpRowGap
 	}
 
 	// Services follow the servers: the write service level with the
 	// primary, the read service level with the first replica.
-	rwCy := yTop + float64(rw.H)/2
+	rwCy := clusterContent + float64(rw.H)/2
 	if primary != nil {
 		rwCy = cy(primary)
 	}
@@ -282,7 +409,7 @@ func buildGroupedWiring(p *Page) *TopologyView {
 			rwPool = append(rwPool, pl.node)
 		}
 	}
-	poolBottom := stackAround(rwPool, poolX, cy(rw), yTop)
+	poolBottom := stackAround(rwPool, poolX, cy(rw), clusterContent)
 	stackAround(roPool, poolX, cy(ro), poolBottom+grpRowGap)
 
 	view.Nodes = nodes
@@ -339,6 +466,22 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		}
 	}
 
+	// Each schedule drops out of the Backups frame into the primary's
+	// top edge: a collector bus in the band-to-cluster gap, one drop.
+	// With a single schedule the whole route collapses to a straight
+	// vertical line, exactly the sketch this drawing derives from.
+	if primary != nil && len(schedules) > 0 {
+		busY := clusterTop - float64(grpRowGap)/2
+		for _, s := range schedules {
+			wire("archive", s, primary, []topoPoint{
+				{cx(s), bottom(s)}, {cx(s), busY}, {primCx, busY}, {primCx, float64(primary.Y)},
+			})
+			if len(schedules) > 1 && cx(s) != primCx {
+				dot("archive", cx(s), busY)
+			}
+		}
+	}
+
 	// Replication leaves the primary once: one trunk to the bus in the
 	// storage alley, then a branch left into each replica's right edge.
 	archBus := clusterRight + grpAlley*0.32
@@ -362,15 +505,24 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		edges[len(edges)-1].LabelY = int(out) - 7
 	}
 
-	// Each instance onto its claim: level, so the wire is straight.
-	for _, c := range claims {
-		wire("disk", c.of, c.node, []topoPoint{
-			{right(c.of), cy(c.of)}, {left(c.node), cy(c.node)},
-		})
+	// Each instance onto its claims: one exit, a drop bus beside the
+	// claim column, a branch per claim. A lone level claim keeps its
+	// straight wire — the route collapses.
+	for _, g := range claimGroups {
+		busX := colX[g.col] - grpBusInset
+		out := cy(g.of)
+		for _, c := range g.nodes {
+			wire("disk", g.of, c, []topoPoint{
+				{right(g.of), out}, {busX, out}, {busX, cy(c)}, {left(c), cy(c)},
+			})
+		}
+		if len(g.nodes) > 1 {
+			dot("disk", busX, out)
+		}
 	}
 
-	// The archive trunk climbs the alley from the primary to the object
-	// store and the snapshots.
+	// The archive trunk climbs the alley from the primary to the
+	// snapshots and on up into the object storage frame.
 	if primary != nil && (store != nil || snapshot != nil) {
 		out := cy(primary) - grpPortOff
 		targets := []*TopoNode{}
@@ -396,76 +548,89 @@ func buildGroupedWiring(p *Page) *TopologyView {
 
 	// --- Frames around what was actually drawn. ---
 
-	frame := func(label string, members []*TopoNode) {
-		if len(members) == 0 {
-			return
-		}
-		minX, minY := members[0].X, members[0].Y
-		maxX, maxY := members[0].X+members[0].W, members[0].Y+members[0].H
+	bounds := func(members []*TopoNode) (minX, minY, maxX, maxY int) {
+		minX, minY = members[0].X, members[0].Y
+		maxX, maxY = members[0].X+members[0].W, members[0].Y+members[0].H
 		for _, m := range members[1:] {
 			minX = minI(minX, m.X)
 			minY = minI(minY, m.Y)
 			maxX = maxI(maxX, m.X+m.W)
 			maxY = maxI(maxY, m.Y+m.H)
 		}
+		return
+	}
+	// The poolers and the cluster share the main row: both frames hang
+	// from the cluster's top line, and each bottom follows its content.
+	if hasPool {
+		var poolMembers []*TopoNode
+		for _, pl := range poolers {
+			poolMembers = append(poolMembers, pl.node)
+		}
+		minX, _, maxX, maxY := bounds(poolMembers)
 		view.Frames = append(view.Frames, TopoFrame{
-			Label: label,
-			X:     minX - grpPad, Y: minY - grpPad - grpLabelBand,
-			W: maxX - minX + 2*grpPad, H: maxY - minY + 2*grpPad + grpLabelBand,
+			Label: "Poolers", Kind: "pool",
+			X: minX - grpPad, Y: int(clusterTop),
+			W: maxX - minX + 2*grpPad, H: maxY + grpPad - int(clusterTop),
 		})
 	}
-	var poolMembers []*TopoNode
-	for _, pl := range poolers {
-		poolMembers = append(poolMembers, pl.node)
-	}
-	frame("Poolers", poolMembers)
 	clusterMembers := []*TopoNode{rw, ro}
 	if primary != nil {
 		clusterMembers = append(clusterMembers, primary)
 	}
 	clusterMembers = append(clusterMembers, replicas...)
-	frame("Cluster", clusterMembers)
-	var storeMembers []*TopoNode
-	if store != nil {
-		storeMembers = append(storeMembers, store)
+	{
+		minX, _, maxX, maxY := bounds(clusterMembers)
+		view.Frames = append(view.Frames, TopoFrame{
+			Label: "Cluster", Kind: "cluster",
+			X: minX - grpPad, Y: int(clusterTop),
+			W: maxX - minX + 2*grpPad, H: maxY + grpPad - int(clusterTop),
+		})
 	}
-	if snapshot != nil {
-		storeMembers = append(storeMembers, snapshot)
+	if len(schedules) > 0 {
+		view.Frames = append(view.Frames, TopoFrame{
+			Label: "Backups", Kind: "backup",
+			X: int(bakLeft) - grpPad, Y: int(bandTop),
+			W: int(bakRight-bakLeft) + 2*grpPad, H: int(bakBottom+grpPad-bandTop),
+		})
 	}
-	for _, c := range claims {
-		storeMembers = append(storeMembers, c.node)
-	}
-	frame("Storage", storeMembers)
-
-	// Every frame's top rides the same line, so the three category
-	// labels read as one header row; the bottoms keep following their
-	// own content.
-	top := view.Frames[0].Y
-	for _, f := range view.Frames[1:] {
-		if f.Y < top {
-			top = f.Y
+	if hasK8s {
+		var members []*TopoNode
+		if snapshot != nil {
+			members = append(members, snapshot)
 		}
+		for _, g := range claimGroups {
+			members = append(members, g.nodes...)
+		}
+		_, _, _, maxY := bounds(members)
+		view.Frames = append(view.Frames, TopoFrame{
+			Label: "Kubernetes storage", Kind: "store",
+			X: int(storeX) - grpPad, Y: int(k8sTop),
+			W: int(regionW) + 2*grpPad, H: maxY + grpPad - int(k8sTop),
+		})
 	}
-	for i := range view.Frames {
-		view.Frames[i].H += view.Frames[i].Y - top
-		view.Frames[i].Y = top
+	if hasObject {
+		view.Frames = append(view.Frames, TopoFrame{
+			Label: "Object storage", Note: endpoint, Kind: "store",
+			X: int(storeX) - grpPad, Y: int(bandTop),
+			W: int(regionW) + 2*grpPad, H: int(objBottom+grpPad-bandTop),
+		})
 	}
 
 	// The viewBox wraps every frame with the outer margin.
-	bottom := 0
+	bottomEdge := 0
 	for _, f := range view.Frames {
-		if f.Y+f.H > bottom {
-			bottom = f.Y + f.H
+		if f.Y+f.H > bottomEdge {
+			bottomEdge = f.Y + f.H
 		}
 	}
 	view.Width = width
-	view.Height = bottom + grpMargin
+	view.Height = bottomEdge + grpMargin
 
 	for i := range view.Nodes {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
-	view.Caption = "The same observations as the drawing above, grouped by role: poolers, the cluster, and everything its data rests on. Placement is fixed — rw above ro, the primary left of its replicas, each claim beside its instance."
+	view.Caption = "The same observations as the drawing above, grouped by role: poolers, the cluster, its backup schedules, and everything the data rests on — Kubernetes claims and snapshots apart from the object store. Placement is fixed — rw above ro, the primary left of its replicas, the claims staggered beside their instances."
 	return view
 }
 
@@ -491,6 +656,41 @@ func claimRows(v VolumeRowView) []TopoGraphText {
 	return rows
 }
 
+// scheduleRows describes one ScheduledBackup box: the resource name,
+// its cron expression exactly as the operator wrote it, and its state
+// — suspended, or the next firing when one was reported.
+func scheduleRows(s ScheduledBackupRowView) []TopoGraphText {
+	rows := []TopoGraphText{{C: "label", T: s.Name}}
+	if s.Schedule != "" && s.Schedule != unknown {
+		rows = append(rows, TopoGraphText{C: "disk", T: s.Schedule})
+	}
+	switch {
+	case s.Suspended == "true":
+		rows = append(rows, TopoGraphText{C: "sub", T: "suspended"})
+	case s.NextSchedule != "" && s.NextSchedule != unknown:
+		rows = append(rows, TopoGraphText{C: "sub", T: "next " + s.NextSchedule})
+	}
+	return rows
+}
+
+// grpStoreRows is objectStoreRows with the endpoint row dropped when
+// the object storage frame already says it: a fact stated once, at the
+// level it describes.
+func grpStoreRows(p *Page, endpointOnFrame bool) []TopoGraphText {
+	rows := objectStoreRows(p)
+	if !endpointOnFrame {
+		return rows
+	}
+	kept := rows[:0:0]
+	for _, r := range rows {
+		if r.C == "sub" && strings.HasPrefix(r.T, "endpoint ") {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept
+}
+
 // stackAround places a column of boxes centred on a level, pushed down
 // when the level would ride into the space above. Returns the bottom.
 func stackAround(boxes []*TopoNode, x, level, minTop float64) float64 {
@@ -513,8 +713,6 @@ func stackAround(boxes []*TopoNode, x, level, minTop float64) float64 {
 	}
 	return top - grpRowGap
 }
-
-func maxW(a, b int) int { return maxI(a, b) }
 
 func minI(a, b int) int {
 	if a < b {

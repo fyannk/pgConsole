@@ -20,9 +20,9 @@
       </marker>
     </defs>
     {{- range .Frames}}
-    <g class="topo-frame">
+    <g class="topo-frame{{if .Kind}} topo-frame-{{.Kind}}{{end}}">
       <rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="10"></rect>
-      <text class="topo-frame-label" x="{{add .X 14}}" y="{{add .Y 20}}">{{.Label}}</text>
+      <text class="topo-frame-label" x="{{add .X 14}}" y="{{add .Y 20}}">{{.Label}}{{if .Note}} <tspan class="topo-frame-note">{{.Note}}</tspan>{{end}}</text>
     </g>
     {{- end}}
     {{- range .Edges}}
