@@ -137,50 +137,27 @@ async function checkEnhancement(browser) {
   check('flows are routed orthogonally', topo.cubic === 0, `${topo.cubic} cubic curves`);
   check('the legend keys the styles taken off the wires', topo.legend > 0, `${topo.legend} entries`);
 
-  // The Cytoscape panel on the cluster overview is an enhancement: it
-  // ships hidden and unhides itself once it has drawn into a canvas.
-  // Cytoscape wants to inject a <style> the policy refuses, so a blocked
-  // inline style here would mean the panel is drawing on borrowed luck.
+  // The cluster overview serves the children inventory: the Cluster
+  // box, the owned kinds in their frames inside the owned super-frame,
+  // and the referencing objects apart. Server-drawn, no script.
   await page.goto(new URL('/cluster/overview', STATES.healthy).toString(), { waitUntil: 'networkidle' });
-  const cyto = await page.evaluate(() => {
-    const section = document.querySelector('[data-topo-cyto]');
-    if (!section) return { present: false };
+  const children = await page.evaluate(() => {
+    const panel = document.querySelector('.topo-panel-grouped');
+    if (!panel) return { present: false };
+    const svg = panel.querySelector('svg.topo');
+    const labels = [...panel.querySelectorAll('.topo-frame-label')].map((t) => t.textContent);
     return {
       present: true,
-      shown: !section.hidden,
-      canvases: section.querySelectorAll('canvas').length,
-      painted: [...section.querySelectorAll('canvas')]
-        .some((c) => c.getBoundingClientRect().width > 0),
-    };
-  });
-  check('the Cytoscape panel draws the same graph',
-    cyto.present && cyto.shown && cyto.canvases > 0 && cyto.painted,
-    `${cyto.canvases} canvases, shown ${cyto.shown}`);
-  // The ELK panel is the same bargain drawn a different way: ELK decides
-  // the geometry and the console emits its own SVG, so the drawing must
-  // use the stylesheet's classes rather than colours of its own — that
-  // is what makes it follow the theme without being redrawn.
-  const elk = await page.evaluate(() => {
-    const section = document.querySelector('[data-topo-elk]');
-    if (!section) return { present: false };
-    const svg = section.querySelector('svg.topo');
-    const routes = svg ? [...svg.querySelectorAll('.topo-edge[marker-end]')]
-      .map((p) => p.getAttribute('d')) : [];
-    return {
-      present: true,
-      shown: !section.hidden,
+      labels,
       boxes: svg ? svg.querySelectorAll('.topo-node').length : 0,
-      routes: routes.length,
-      cubic: routes.filter((d) => d.includes('C')).length,
-      inline: svg ? svg.querySelectorAll('[fill],[stroke]').length : -1,
+      edges: svg ? svg.querySelectorAll('.topo-edge').length : 0,
     };
   });
-  check('the ELK panel draws the same graph as SVG',
-    elk.present && elk.shown && elk.boxes > 0 && elk.routes > 0,
-    `${elk.boxes} boxes, ${elk.routes} routes`);
-  check('ELK routes are orthogonal runs', elk.cubic === 0, `${elk.cubic} cubic curves`);
-  check('the ELK drawing leaves colour to the stylesheet',
-    elk.inline === 0, `${elk.inline} elements paint themselves`);
+  check('the children inventory draws the cluster and its frames',
+    children.present && children.boxes > 1 && children.edges > 0
+      && children.labels.some((l) => l.includes('Owned by the cluster'))
+      && children.labels.some((l) => l.includes('References the cluster')),
+    `frames [${children.labels}], ${children.boxes} boxes`);
 
   const refusedStyles = errors.filter((e) => /Content Security Policy/i.test(e));
   check('nothing is refused by the content security policy',
@@ -310,19 +287,9 @@ async function checkNoScript(browser) {
     topoNoJs.boxes > 0 && topoNoJs.edges > 0,
     `${topoNoJs.boxes} boxes, ${topoNoJs.edges} flows`);
 
-  // Its Cytoscape counterpart is the other way round: with no script it
-  // must stay hidden, so the page never shows an empty frame where a
-  // diagram was promised.
+  // The children inventory is server-drawn like the first one, so with
+  // no script it must be complete: frames, boxes and wires.
   await page.goto(new URL('/cluster/overview', STATES.healthy).toString(), { waitUntil: 'domcontentloaded' });
-  const cytoNoJs = await page.evaluate(() => {
-    const section = document.querySelector('[data-topo-cyto]');
-    return { present: !!section, hidden: section ? section.hidden : null };
-  });
-  check('the Cytoscape panel stays hidden without JavaScript',
-    cytoNoJs.present && cytoNoJs.hidden === true,
-    `present ${cytoNoJs.present}, hidden ${cytoNoJs.hidden}`);
-  // The grouped drawing is server-drawn like the first one, so with no
-  // script it must be complete: frames, boxes, wires and tee dots.
   const groupedNoJs = await page.evaluate(() => {
     const panel = document.querySelector('.topo-panel-grouped');
     if (!panel) return { present: false };
@@ -335,22 +302,10 @@ async function checkNoScript(browser) {
       dots: svg ? svg.querySelectorAll('.topo-dot').length : 0,
     };
   });
-  check('the grouped drawing is complete without JavaScript',
-    groupedNoJs.present && groupedNoJs.frames === 5 && groupedNoJs.boxes > 0 && groupedNoJs.dots > 0
-      && groupedNoJs.labels.includes('Backups') && groupedNoJs.labels.includes('Object storage'),
-    `frames [${groupedNoJs.labels}], ${groupedNoJs.boxes} boxes, ${groupedNoJs.dots} tees`);
-
-  const elkNoJs = await page.evaluate(() => {
-    const section = document.querySelector('[data-topo-elk]');
-    return {
-      present: !!section,
-      hidden: section ? section.hidden : null,
-      drawn: section ? section.querySelectorAll('svg.topo').length : -1,
-    };
-  });
-  check('the ELK panel stays hidden and undrawn without JavaScript',
-    elkNoJs.present && elkNoJs.hidden === true && elkNoJs.drawn === 0,
-    `hidden ${elkNoJs.hidden}, ${elkNoJs.drawn} drawings`);
+  check('the children inventory is complete without JavaScript',
+    groupedNoJs.present && groupedNoJs.frames > 2 && groupedNoJs.boxes > 1
+      && groupedNoJs.labels.includes('Owned by the cluster'),
+    `frames [${groupedNoJs.labels}], ${groupedNoJs.boxes} boxes`);
 
   await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'domcontentloaded' });
   check('panel bodies visible without JavaScript',

@@ -1,20 +1,15 @@
 {{- /*
-  Cluster overview: the power-user wiring. The diagram restates the
-  Overview's observed shape with the facts a DBA reaches for — placement,
-  the operator's timeline, quorum membership — and the panels beneath it
-  carry the derived placement spread, the reported replication quorum,
-  and the configured backup path. Every claim keeps its origin; a fact
-  the snapshot does not carry has no row.
+  Cluster overview: the Cluster resource and every object attached to
+  it, drawn as an inventory — owned kinds grouped in their frames, the
+  referencing objects apart — and the panels beneath carry the derived
+  placement spread, the reported replication quorum, and the configured
+  backup path. Every claim keeps its origin; a fact the snapshot does
+  not carry has no row.
 */ -}}
 {{template "page-head" "cluster overview"}}
 {{template "shell-open" .Shell}}
     {{- if .ClusterOverview}}
-    {{- with .ClusterOverview.Wiring}}
-    {{template "topology" .}}
-    {{template "topology-cytoscape" .}}
-    {{template "topology-elk" .}}
-    {{- end}}
-    {{- with .ClusterOverview.WiringGrouped}}
+    {{- with .ClusterOverview.Children}}
     {{template "topology" .}}
     {{- end}}
     {{- with .ClusterOverview}}

@@ -199,6 +199,37 @@ YAML
   kubectl apply -f deploy/operations-role.yaml > /dev/null
   kubectl apply -f deploy/access-review-role.yaml > /dev/null
 
+  # The shipped example grants nothing on secrets — that is the
+  # console's read-only guarantee. Dev opts in, exactly as it opts into
+  # the dba capabilities, so the children drawing shows the cluster's
+  # Secrets as metadata (name, type, key count; never a value).
+  log "granting the dev-only secrets-metadata read"
+  cat <<'YAML' | kubectl apply -f - > /dev/null
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pgconsole-orders-secrets-meta
+  namespace: payments
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pgconsole-orders-secrets-meta
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pgconsole-orders-secrets-meta
+subjects:
+  - kind: ServiceAccount
+    name: pgconsole-orders
+    namespace: payments
+YAML
+
   # The example ships a default-deny NetworkPolicy whose proxy/API
   # exceptions the operator would supply. kind's CNI enforces it, which
   # would block the port-forward — drop it for local dev (a throwaway

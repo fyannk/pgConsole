@@ -15,7 +15,6 @@
 package web
 
 import (
-	"context"
 	"fmt"
 	"strings"
 )
@@ -68,17 +67,6 @@ func wireNodeHeight(rows int) int {
 	return 32 + 10*rows
 }
 
-// wireNode builds one lines[]-style node: height from the row count,
-// text placed centred inside the box once the caller sets X and Y.
-func wireNode(kind, state string, w int, rows []TopoGraphText) TopoNode {
-	return TopoNode{Kind: kind, State: state, W: w, H: wireNodeHeight(len(rows)),
-		Lines: make([]TopoText, 0, len(rows)), // placed by wirePlace
-		Label: "",                             // lines carry all text
-		Sub:   "", Disk: "",
-		X: 0, Y: 0, ID: "", Layer: 0,
-	}
-}
-
 // wirePlace positions a node's rows now that the box has its X and Y.
 func wirePlace(n *TopoNode, rows []TopoGraphText) {
 	x := n.X + 14
@@ -87,148 +75,6 @@ func wirePlace(n *TopoNode, rows []TopoGraphText) {
 		y += wireLineStep(i)
 		n.Lines = append(n.Lines, TopoText{Class: row.C, Text: row.T, X: x, Y: y})
 	}
-}
-
-// buildClusterWiring derives the power-user wiring diagram from the
-// assembled page. Like buildTopology it reads only p and invents
-// nothing: absent facts drop their row rather than rendering a guess.
-func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
-	if p.Cluster == nil || p.Cluster.Absent {
-		return nil
-	}
-	serverRows := wireServers(p, true)
-	if len(serverRows) == 0 {
-		return nil
-	}
-
-	view := &TopologyView{
-		Title: "Physical wiring",
-		Aria:  "Services, instances with node placement, replication and backup targets",
-	}
-
-	// Nodes carry their rows and extent; the layout engine places them,
-	// and the rows are positioned inside each box once it has a home.
-	nodes := make([]TopoNode, 0, len(serverRows)+4)
-	rowsByID := map[string][]TopoGraphText{}
-	addNode := func(id string, layer int, n TopoNode, rows []TopoGraphText) *TopoNode {
-		n.ID, n.Layer = id, layer
-		rowsByID[id] = rows
-		nodes = append(nodes, n)
-		return &nodes[len(nodes)-1]
-	}
-
-	// Endpoints, the left column: the services clients actually dial,
-	// as observed. Their addresses and selectors are read from the
-	// Service objects, not built from the cluster's name.
-	rwRows := endpointRows(p, "read-write", p.ClusterName+"-rw", "routes to the current primary")
-	roRows := endpointRows(p, "read-only", p.ClusterName+"-ro", "routes to the read-only copies")
-	rw := addNode("rw", 1, wireNode("endpoint", "", wireWSvc, rwRows), rwRows)
-	ro := addNode("ro", 1, wireNode("endpoint", "", wireWSvc, roRows), roRows)
-
-	// Connection poolers sit in front of the services: a client that
-	// uses one never dials the cluster directly, so a wiring diagram
-	// without them describes a path nobody takes.
-	type pooled struct {
-		node *TopoNode
-		to   *TopoNode
-	}
-	var poolers []pooled
-	if p.Poolers != nil {
-		for i, pooler := range p.Poolers.Poolers {
-			rows := poolerRows(pooler)
-			node := addNode(fmt.Sprintf("pool-%d", i), 0,
-				wireNode("pooler", poolerState(pooler), wireWPool, rows), rows)
-			// A read-only pooler fronts the read service; every other
-			// type fronts the write one. Matched against the operator's
-			// token, never against the prose spelling of it.
-			target := rw
-			if pooler.TypeToken == "ro" {
-				target = ro
-			}
-			poolers = append(poolers, pooled{node: node, to: target})
-		}
-	}
-
-	// Servers, primary first, each carrying its observed facts.
-	var primary *TopoNode
-	var replicas []*TopoNode
-	for i, s := range serverRows {
-		ptr := addNode(fmt.Sprintf("srv-%d", i), 2, wireNode(s.kind, s.state, wireWSrv, s.rows), s.rows)
-		if s.kind == "primary" {
-			primary = ptr
-		} else {
-			replicas = append(replicas, ptr)
-		}
-	}
-
-	// Storage, evidence-based exactly like the Overview.
-	cloud, snap := topoStorageConfigured(p)
-	var storeN, snapshotN *TopoNode
-	storeRows := objectStoreRows(p)
-	snapRows := snapshotRows(p)
-	if cloud {
-		storeN = addNode("store", 3, wireNode("storage", "", wireWStore, storeRows), storeRows)
-	}
-	if snap {
-		snapshotN = addNode("snapshot", 3, wireNode("snapshot", "", wireWStore, snapRows), snapRows)
-	}
-
-	view.Nodes = nodes
-
-	// Flows, recorded once and routed by the layout engine.
-	link := func(kind string, from, to *TopoNode) {
-		view.Graph.Links = append(view.Graph.Links,
-			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind})
-	}
-	for _, pooler := range poolers {
-		kind := "write"
-		if pooler.to == ro {
-			kind = "read"
-		}
-		link(kind, pooler.node, pooler.to)
-	}
-	if primary != nil {
-		link("write", rw, primary)
-	}
-	for _, r := range replicas {
-		link("read", ro, r)
-		if primary != nil {
-			link("replicate", primary, r)
-		}
-	}
-	if primary != nil && storeN != nil {
-		link("archive", primary, storeN)
-	}
-	if primary != nil && snapshotN != nil {
-		link("archive", primary, snapshotN)
-	}
-
-	// A layout that cannot be trusted is no diagram at all.
-	geo, err := layoutDiagram(ctx, view.Nodes, view.Graph.Links)
-	if err != nil {
-		return nil
-	}
-	view.Width, view.Height = geo.Width, geo.Height
-	view.Edges = geo.Edges
-	view.Legend = topoLegend(view.Graph.Links)
-	for i := range view.Nodes {
-		centre, ok := geo.Centres[view.Nodes[i].ID]
-		if !ok {
-			return nil
-		}
-		view.Nodes[i].X = int(centre.x) - view.Nodes[i].W/2
-		view.Nodes[i].Y = int(centre.y) - view.Nodes[i].H/2
-		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
-	}
-
-	// The same diagram as a graph, for the Cytoscape panel: the boxes and
-	// what connects them, without the geometry settled above. It carries
-	// no fact the SVG does not already show — a reader who never runs a
-	// script has lost nothing.
-	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
-
-	view.Caption = "Instances, roles, placement, claims, services and snapshots are observed; the timeline and quorum membership are operator-reported; the object store is read from its own resource."
-	return view
 }
 
 // wireGraphNodes restates the placed boxes as a positionless graph.

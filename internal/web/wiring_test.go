@@ -67,7 +67,9 @@ func TestClusterOverviewRendersWiringPlacementAndQuorum(t *testing.T) {
 	// The served drawing is real geometry with the DBA rows, not an
 	// empty frame for the enhancement script to fill.
 	for _, want := range []string{
-		"Physical wiring", `<svg class="topo"`, `<rect x=`,
+		"The cluster and everything attached to it", `<svg class="topo"`, `<rect x=`,
+		"Cluster/orders", "Owned by the cluster", "References the cluster",
+		"Instances", "Backup schedules",
 		"orders-1 — primary", "node node-a",
 		"potentially synchronous (quorum)", "not in the reported standby set",
 	} {
@@ -135,7 +137,7 @@ func TestWiringDrawsPoolersAgainstTheServiceTheyFront(t *testing.T) {
 		poolersOK: true,
 	}, testNow, Links{})
 
-	view := buildClusterWiring(context.Background(), &page)
+	view := buildGroupedWiring(&page)
 	if view == nil {
 		t.Fatal("no wiring diagram was built")
 	}
@@ -191,53 +193,6 @@ func TestWiringDrawsPoolersAgainstTheServiceTheyFront(t *testing.T) {
 		if got := fronts[pooler]; got != want {
 			t.Errorf("%s is drawn against %q, want %q", pooler, got, want)
 		}
-	}
-}
-
-// The Cytoscape panel is an enhancement: it ships hidden, carrying the
-// same graph the drawing above already shows, so a reader without
-// scripting sees the finished SVG and no empty frame.
-func TestClusterOverviewShipsTheCytoscapePanelInert(t *testing.T) {
-	t.Parallel()
-	h, _ := newTestHandler(t, wiringSources(), kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
-
-	if !strings.Contains(body, `data-topo-cyto data-topo-graph=`) {
-		t.Fatal("the interactive panel carries no graph")
-	}
-	if !strings.Contains(body, `data-topo-graph="{{`) && !strings.Contains(body, `&#34;nodes&#34;`) {
-		t.Error("the graph attribute is not the escaped JSON the template promises")
-	}
-	// Hidden in the served markup: the script unhides it once it draws.
-	i := strings.Index(body, "data-topo-cyto ")
-	if i < 0 {
-		t.Fatal("no interactive panel")
-	}
-	if tag := body[i : strings.Index(body[i:], ">")+i]; !strings.Contains(tag, "hidden") {
-		t.Errorf("the interactive panel is not hidden in the served markup: %q", tag)
-	}
-
-	// The ELK panel is the same bargain, and reads the same attribute.
-	j := strings.Index(body, "data-topo-elk ")
-	if j < 0 {
-		t.Fatal("no ELK panel")
-	}
-	if tag := body[j : strings.Index(body[j:], ">")+j]; !strings.Contains(tag, "hidden") {
-		t.Errorf("the ELK panel is not hidden in the served markup: %q", tag)
-	}
-
-	// Both diagrams describe the same graph, so the panel adds no fact.
-	page := buildPage(context.Background(), "orders", "payments", snapshots{
-		window: time.Hour, cluster: wiringSources().snap, ok: true,
-		pods: wiringSources().pods, podsOK: true,
-	}, testNow, Links{})
-	view := buildClusterWiring(context.Background(), &page)
-	if view == nil {
-		t.Fatal("no wiring diagram was built")
-	}
-	if len(view.Graph.Nodes) != len(view.Nodes) {
-		t.Errorf("the graph has %d boxes, the drawing %d",
-			len(view.Graph.Nodes), len(view.Nodes))
 	}
 }
 

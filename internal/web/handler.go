@@ -813,3 +813,8 @@ func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, boo
 func (EmptySnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool) {
 	return observe.DatabaseObjectsSnapshot{}, false
 }
+
+// CurrentInfrastructure reports no infrastructure snapshot.
+func (EmptySnapshots) CurrentInfrastructure() (observe.InfrastructureSnapshot, bool) {
+	return observe.InfrastructureSnapshot{}, false
+}

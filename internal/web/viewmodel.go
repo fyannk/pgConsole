@@ -702,8 +702,9 @@ type Page struct {
 	// Summary is the plain-language overview, derived from this page's
 	// own sections. Nil when nothing has been observed.
 	Summary *SummaryView
-	// Topology is the plain-language wiring diagram that opens the
-	// Overview, derived from this page. Nil without a cluster snapshot.
+	// Topology is the grouped wiring drawing that opens the Overview:
+	// poolers, the cluster, its backup schedules and its storage, laid
+	// out by stated rules. Nil without a cluster snapshot.
 	Topology *TopologyView
 	// ClusterName is the configured target cluster.
 	ClusterName string
@@ -919,8 +920,8 @@ func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, 
 	// Derived last, so they read the finished page and can restate only
 	// what the attributed sections above already carry.
 	page.Summary = buildSummary(&page)
-	page.Topology = buildTopology(ctx, &page)
-	page.ClusterOverview = buildClusterOverview(ctx, &page)
+	page.Topology = buildGroupedWiring(&page)
+	page.ClusterOverview = buildClusterOverview(&page)
 	return page
 }
 
@@ -940,8 +941,33 @@ type InfrastructureView struct {
 	// False states that the console did not read snapshots, which is not
 	// a claim that none exist.
 	SnapshotsObservable bool
+	// Children are the further owned kinds — secrets, config maps,
+	// disruption budgets, the RBAC triple, jobs — each reduced to a
+	// name and one or two observed details.
+	Children []ChildRowView
+	// ChildrenUnobserved lists the child kinds that were not granted,
+	// which the drawing states instead of implying none exist.
+	ChildrenUnobserved []string
 	// Truncated reports a display ceiling on any list.
 	Truncated bool
+}
+
+// ChildRowView is one further owned object, formatted for the children
+// drawing: the kind token, the name, and up to two detail lines.
+type ChildRowView struct {
+	// Kind is the Kubernetes kind: Secret, ConfigMap,
+	// PodDisruptionBudget, ServiceAccount, Role, RoleBinding, Job.
+	Kind string
+	// Name is the object name.
+	Name string
+	// Detail is the first observed line: a secret's type, a budget's
+	// constraint, a binding's role. Empty when nothing was reported.
+	Detail string
+	// Extra is the second line: a key count, reported headroom, a
+	// job's pod counts. Empty when nothing was reported.
+	Extra string
+	// Age is relative to the creation time, or unknown.
+	Age string
 }
 
 // ServiceRowView is one observed service.
@@ -1058,7 +1084,80 @@ func buildInfrastructureView(snap observe.InfrastructureSnapshot, ok bool, now t
 		}
 		view.Snapshots = append(view.Snapshots, row)
 	}
+	for _, child := range snap.Children {
+		view.Children = append(view.Children, buildChildRow(child, now))
+	}
+	view.ChildrenUnobserved = append([]string(nil), snap.ChildrenUnobserved...)
 	return view
+}
+
+// buildChildRow states one owned object's observed details in the
+// drawing's two lines. A fact the snapshot does not carry has no text.
+func buildChildRow(child observe.ChildFacts, now time.Time) ChildRowView {
+	row := ChildRowView{Kind: child.Kind, Name: child.Name, Age: unknown}
+	if child.CreatedAt != nil {
+		row.Age = formatAge(now.Sub(*child.CreatedAt))
+	}
+	keys := func() string {
+		if child.Keys == nil {
+			return ""
+		}
+		if *child.Keys == 1 {
+			return "1 key"
+		}
+		return strconv.Itoa(*child.Keys) + " keys"
+	}
+	switch child.Kind {
+	case "Secret":
+		row.Detail = child.SecretType
+		row.Extra = keys()
+	case "ConfigMap":
+		row.Extra = keys()
+	case "PodDisruptionBudget":
+		var terms []string
+		if child.MinAvailable != "" {
+			terms = append(terms, "min available "+child.MinAvailable)
+		}
+		if child.MaxUnavailable != "" {
+			terms = append(terms, "max unavailable "+child.MaxUnavailable)
+		}
+		row.Detail = strings.Join(terms, " · ")
+		if child.DisruptionsAllowed != nil {
+			row.Extra = strconv.FormatInt(int64(*child.DisruptionsAllowed), 10) + " disruptions allowed"
+		}
+	case "Role":
+		if child.Rules != nil {
+			plural := " rules"
+			if *child.Rules == 1 {
+				plural = " rule"
+			}
+			row.Detail = strconv.Itoa(*child.Rules) + plural
+		}
+	case "RoleBinding":
+		if child.RoleRef != "" {
+			row.Detail = "grants " + child.RoleRef
+		}
+		if child.Subjects != nil {
+			plural := " subjects"
+			if *child.Subjects == 1 {
+				plural = " subject"
+			}
+			row.Extra = strconv.Itoa(*child.Subjects) + plural
+		}
+	case "Job":
+		var counts []string
+		if child.Succeeded != nil && *child.Succeeded > 0 {
+			counts = append(counts, strconv.FormatInt(int64(*child.Succeeded), 10)+" succeeded")
+		}
+		if child.Active != nil && *child.Active > 0 {
+			counts = append(counts, strconv.FormatInt(int64(*child.Active), 10)+" active")
+		}
+		if child.Failed != nil && *child.Failed > 0 {
+			counts = append(counts, strconv.FormatInt(int64(*child.Failed), 10)+" failed")
+		}
+		row.Detail = strings.Join(counts, " · ")
+	}
+	return row
 }
 
 // buildObjectStoreDetail states where backups go, when a store is
@@ -1077,16 +1176,14 @@ func buildObjectStoreDetail(ref observe.ObjectStoreReference) *ObjectStoreDetail
 	}
 }
 
-// ClusterOverviewView is the power-user wiring screen: the observed
-// shape drawn with the facts a DBA reaches for, and the placement
-// spread derived from the same pod snapshot.
+// ClusterOverviewView is the power-user screen: the Cluster resource
+// with every object attached to it, and the placement spread derived
+// from the same pod snapshot.
 type ClusterOverviewView struct {
-	// Wiring is the lines[]-style diagram; nil without observed servers.
-	Wiring *TopologyView
-	// WiringGrouped is the same wiring drawn a fourth way: static
-	// placement, dotted category frames, trunked fans. Nil whenever
-	// Wiring is.
-	WiringGrouped *TopologyView
+	// Children is the inventory drawing — the Cluster, the objects it
+	// owns grouped by kind, and the objects referencing it. Nil
+	// without an observed cluster.
+	Children *TopologyView
 	// Placement is one row per observed instance pod.
 	Placement []PlacementRowView
 	// PlacementNote is the derived spread statement, empty when there
@@ -1106,10 +1203,9 @@ type PlacementRowView struct {
 // buildClusterOverview derives the power-user screen from the assembled
 // page. Nil when nothing relevant has been observed, so the route
 // renders its empty state instead of an empty diagram.
-func buildClusterOverview(ctx context.Context, p *Page) *ClusterOverviewView {
+func buildClusterOverview(p *Page) *ClusterOverviewView {
 	view := &ClusterOverviewView{
-		Wiring:        buildClusterWiring(ctx, p),
-		WiringGrouped: buildGroupedWiring(p),
+		Children: buildClusterChildren(p),
 	}
 	if p.Pods != nil {
 		for _, row := range p.Pods.Rows {
@@ -1119,7 +1215,7 @@ func buildClusterOverview(ctx context.Context, p *Page) *ClusterOverviewView {
 		}
 	}
 	view.PlacementNote, view.PlacementWarn = placementNote(view.Placement)
-	if view.Wiring == nil && len(view.Placement) == 0 {
+	if view.Children == nil && len(view.Placement) == 0 {
 		return nil
 	}
 	return view

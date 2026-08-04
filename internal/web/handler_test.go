@@ -54,6 +54,8 @@ type staticSnapshots struct {
 	catalogsOK   bool
 	declared     observe.DatabaseObjectsSnapshot
 	declaredOK   bool
+	infra        observe.InfrastructureSnapshot
+	infraOK      bool
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {
@@ -92,6 +94,10 @@ func (s staticSnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapsh
 	return s.declared, s.declaredOK
 }
 
+func (s staticSnapshots) CurrentInfrastructure() (observe.InfrastructureSnapshot, bool) {
+	return s.infra, s.infraOK
+}
+
 // allSources is the snapshot-supplier bundle of the tests.
 type allSources interface {
 	SnapshotSource
@@ -103,6 +109,7 @@ type allSources interface {
 	FailoverQuorumSource
 	ImageCatalogsSource
 	DatabaseObjectsSource
+	InfrastructureSource
 }
 
 // newTestHandlerFull builds a Handler with explicit log configuration,
@@ -112,7 +119,7 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: allowLogs, LevelHeader: "X-PgToolBox-Level", Links: links},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots},
 		prober, tailer, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -128,7 +135,7 @@ func newLeveledHandler(t *testing.T, snapshots allSources) (*Handler, *bytes.Buf
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
@@ -344,8 +351,11 @@ func TestHandlerIndexUnreportedFactsRenderUnknown(t *testing.T) {
 	}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
 	body := get(t, h, http.MethodGet, "/").Body.String()
-	if got := strings.Count(body, ">unknown<"); got < 5 {
-		t.Errorf("unreported facts rendered as unknown %d times, want at least 5", got)
+	// The four summary cards: servers, primary, version, timeline. The
+	// drawing contributes none — with no observed pods it is absent
+	// rather than drawn around a box named "unknown".
+	if got := strings.Count(body, ">unknown<"); got < 4 {
+		t.Errorf("unreported facts rendered as unknown %d times, want at least 4", got)
 	}
 }
 
@@ -1349,7 +1359,7 @@ func TestDatabasesDistinguishesNotObservedFromNone(t *testing.T) {
 // routed and every box placed, with no script involved at all.
 func TestTopologyIsServedDrawn(t *testing.T) {
 	t.Parallel()
-	h, _ := newTestHandler(t, fullPage(), kube.FakeProber{}, Links{})
+	h, _ := newTestHandler(t, wiringSources(), kube.FakeProber{}, Links{})
 	body := get(t, h, http.MethodGet, "/").Body.String()
 
 	for _, want := range []string{

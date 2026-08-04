@@ -101,6 +101,30 @@ rules:
   - apiGroups: ["barmancloud.cnpg.io"]
     resources: ["objectstores"]
     verbs: ["get"]
+  # Optional, for the cluster-overview children drawing: the further
+  # objects the Cluster owns, kept only when their controller owner
+  # reference names it. Each rule can be omitted on its own; the
+  # console then states the kind as not granted rather than absent.
+  #
+  # Deliberately absent: any grant on the secret resource. The console's
+  # read-only guarantee includes "nothing on secrets", and this example
+  # keeps it. The children drawing can show the cluster's Secrets as
+  # metadata — name, type, key count, never a value — but only if you
+  # add that grant yourself, accepting that RBAC cannot express
+  # "metadata only"; without it the drawing states the kind as not
+  # granted.
+  - apiGroups: [""]
+    resources: ["configmaps", "serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

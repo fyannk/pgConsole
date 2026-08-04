@@ -15,9 +15,7 @@
 package web
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -206,177 +204,8 @@ type TopoEdge struct {
 	LabelX, LabelY int
 }
 
-// Box extents, in viewBox units. Placement is the layout engine's.
-const (
-	topoWApps  = 150
-	topoWSvc   = 158
-	topoWSrv   = 176
-	topoWStore = 184
-	topoSrvH   = 60
-	topoMaxSrv = 6
-)
-
-// buildTopology derives the wiring diagram from the assembled page. It
-// reads only p, so it can invent nothing: with no observed servers it
-// returns nil and the Overview simply omits the diagram.
-func buildTopology(ctx context.Context, p *Page) *TopologyView {
-	if p.Cluster == nil || p.Cluster.Absent {
-		return nil
-	}
-	servers := topoServers(p)
-	if len(servers) == 0 {
-		return nil
-	}
-
-	view := &TopologyView{
-		Title: "How your database is wired",
-		Aria:  "How applications reach the database and where the data is stored",
-	}
-
-	// Nodes carry only their extent and tier; the layout engine places
-	// them. Order within a tier is ours — the primary leads.
-	serverNodes := make([]TopoNode, 0, len(servers))
-	for i, s := range servers {
-		s.W, s.H = topoWSrv, topoSrvH
-		s.ID, s.Layer = fmt.Sprintf("srv-%d", i), 2
-		serverNodes = append(serverNodes, s)
-	}
-
-	// Infrastructure nodes: apps, the two endpoints, and whatever storage
-	// is actually configured.
-	head := []TopoNode{
-		{ID: "apps", Layer: 0, Kind: "apps", Label: "Your applications", Sub: "clients that connect",
-			W: topoWApps, H: 60},
-		{ID: "rw", Layer: 1, Kind: "endpoint", Label: "Write endpoint", Sub: p.ClusterName + "-rw",
-			W: topoWSvc, H: 48},
-		{ID: "ro", Layer: 1, Kind: "endpoint", Label: "Read endpoint", Sub: p.ClusterName + "-ro",
-			W: topoWSvc, H: 48},
-	}
-	store, snapshot := topoStorage(p)
-	if store != nil {
-		store.ID, store.Layer = "store", 3
-		head = append(head, *store)
-	}
-	if snapshot != nil {
-		snapshot.ID, snapshot.Layer = "snapshot", 3
-		head = append(head, *snapshot)
-	}
-
-	// Assemble once, then take every anchor from the final slice so no
-	// pointer outlives a reallocation.
-	view.Nodes = append(head, serverNodes...)
-	var primary, storeN, snapshotN *TopoNode
-	var replicas []*TopoNode
-	for i := range view.Nodes {
-		switch view.Nodes[i].Kind {
-		case "primary":
-			primary = &view.Nodes[i]
-		case "replica":
-			replicas = append(replicas, &view.Nodes[i])
-		case "storage":
-			storeN = &view.Nodes[i]
-		case "snapshot":
-			snapshotN = &view.Nodes[i]
-		}
-	}
-	apps, rw, ro := view.Nodes[0], view.Nodes[1], view.Nodes[2]
-
-	// Flows. Apps reach the two doors; the doors reach the servers; the
-	// primary copies to the replicas and streams backups to storage.
-	link := func(kind string, from, to TopoNode) {
-		view.Graph.Links = append(view.Graph.Links,
-			TopoGraphLink{Source: from.ID, Target: to.ID, Kind: kind})
-	}
-
-	link("write", apps, rw)
-	link("read", apps, ro)
-	if primary != nil {
-		link("write", rw, *primary)
-	}
-	for _, r := range replicas {
-		link("read", ro, *r)
-		if primary != nil {
-			link("replicate", *primary, *r)
-		}
-	}
-	if storeN != nil && primary != nil {
-		link("archive", *primary, *storeN)
-	}
-	if snapshotN != nil && primary != nil {
-		link("archive", *primary, *snapshotN)
-	}
-
-	// A layout that cannot be trusted is no diagram at all: the page
-	// omits it rather than drawing boxes in the wrong places.
-	geo, err := layoutDiagram(ctx, view.Nodes, view.Graph.Links)
-	if err != nil {
-		return nil
-	}
-	view.Width, view.Height = geo.Width, geo.Height
-	view.Edges = geo.Edges
-	view.Legend = topoLegend(view.Graph.Links)
-	for i := range view.Nodes {
-		centre, ok := geo.Centres[view.Nodes[i].ID]
-		if !ok {
-			return nil
-		}
-		view.Nodes[i].X = int(centre.x) - view.Nodes[i].W/2
-		view.Nodes[i].Y = int(centre.y) - view.Nodes[i].H/2
-	}
-
-	// The caption states what is observed versus fixed wiring, and only
-	// promises a backup path when one is actually drawn.
-	if store != nil || snapshot != nil {
-		view.Caption = "The servers and their roles are observed; the endpoints and backup path follow the standard CloudNativePG wiring."
-	} else {
-		view.Caption = "The servers and their roles are observed; the read and write endpoints follow the standard CloudNativePG wiring. No backup destination is configured, so none is shown."
-	}
-	return view
-}
-
-// topoServers builds the server nodes: the primary first, then the
-// replicas, from the observed pods. It falls back to the operator's
-// instance count when no pod snapshot exists.
-func topoServers(p *Page) []TopoNode {
-	var nodes []TopoNode
-	primaryName := ""
-	if p.Cluster != nil {
-		primaryName = p.Cluster.CurrentPrimary
-	}
-	if p.Pods != nil && len(p.Pods.Rows) > 0 {
-		var primary *TopoNode
-		var replicas []TopoNode
-		for _, row := range p.Pods.Rows {
-			node := TopoNode{Label: row.Name, State: podState(row), Disk: "keeps data on its own disk"}
-			if row.Role == "primary" {
-				node.Kind, node.Sub = "primary", "main server — takes writes"
-				n := node
-				primary = &n
-				continue
-			}
-			node.Kind, node.Sub = "replica", "copy — read-only"
-			replicas = append(replicas, node)
-		}
-		if primary != nil {
-			nodes = append(nodes, *primary)
-		}
-		nodes = append(nodes, replicas...)
-	} else {
-		// No pod snapshot: draw the primary the operator names, and any
-		// remaining desired instances as copies, all state-unknown.
-		if primaryName != "" {
-			nodes = append(nodes, TopoNode{Kind: "primary", Label: primaryName,
-				Sub: "main server — takes writes", State: unknown, Disk: "keeps data on its own disk"})
-		}
-	}
-	if len(nodes) > topoMaxSrv {
-		extra := len(nodes) - (topoMaxSrv - 1)
-		nodes = nodes[:topoMaxSrv-1]
-		nodes = append(nodes, TopoNode{Kind: "replica", Label: fmt.Sprintf("+%d more copies", extra),
-			Sub: "read-only", State: unknown})
-	}
-	return nodes
-}
+// topoMaxSrv bounds the drawn servers; more become one "+N more" box.
+const topoMaxSrv = 6
 
 // podState maps a pod row to the diagram's presentation token.
 func podState(row PodRowView) string {
@@ -391,28 +220,6 @@ func podState(row PodRowView) string {
 	default:
 		return unknown
 	}
-}
-
-// topoStorage builds the storage-lane nodes actually backed by evidence:
-// a cloud-backup node when a repository or backup catalog exists, and a
-// volume-snapshot node when a Backup used that method. Returns nils when
-// nothing is configured, so the lane is simply absent.
-func topoStorage(p *Page) (store, snapshot *TopoNode) {
-	cloud, snap := topoStorageConfigured(p)
-	switch {
-	case cloud && snap:
-		store = &TopoNode{Kind: "storage", Label: "Cloud backup", Sub: "object storage (WAL + backups)",
-			W: topoWStore, H: 48}
-		snapshot = &TopoNode{Kind: "snapshot", Label: "Volume snapshots", Sub: "disk-level copies",
-			W: topoWStore, H: 48}
-	case cloud:
-		store = &TopoNode{Kind: "storage", Label: "Cloud backup", Sub: "object storage (WAL + backups)",
-			W: topoWStore, H: 52}
-	case snap:
-		snapshot = &TopoNode{Kind: "snapshot", Label: "Volume snapshots", Sub: "disk-level copies",
-			W: topoWStore, H: 52}
-	}
-	return store, snapshot
 }
 
 // topoStorageConfigured reports which storage lanes the page's evidence

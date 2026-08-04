@@ -15,7 +15,6 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -167,10 +166,6 @@ func TestStaticAssetsAreServed(t *testing.T) {
 		"/static/htmx-2.0.10.min.js",
 		"/static/alpine.csp.js",
 		"/static/history-timeline.js",
-		"/static/cytoscape-3.34.0.min.js",
-		"/static/topology-cytoscape.js",
-		"/static/elk-0.12.0.bundled.js",
-		"/static/topology-elk.js",
 		// Without this the browser requests /favicon.ico on every page
 		// load, takes a 404, and logs a console error. img-src 'self'
 		// rules out a data: URI, so it has to be a served asset.
@@ -211,10 +206,8 @@ func TestEveryPageRendersTheSharedShell(t *testing.T) {
 	}
 	// Partials are composed into a page rather than being one.
 	partials := map[string]bool{
-		"shell.html.tmpl":              true,
-		"topology.html.tmpl":           true,
-		"topology-cytoscape.html.tmpl": true,
-		"topology-elk.html.tmpl":       true,
+		"shell.html.tmpl":    true,
+		"topology.html.tmpl": true,
 	}
 	for _, entry := range entries {
 		if partials[entry.Name()] {
@@ -364,81 +357,6 @@ func TestVendoredUPlotIsPinned(t *testing.T) {
 		}
 		if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != want {
 			t.Fatalf("vendored %s digest = %s, want %s", path, got, want)
-		}
-	}
-}
-
-// TestVendoredCytoscapeIsPinned does the same for the graph library, and
-// asserts the property that lets it run at all: the served
-// Content-Security-Policy has no 'unsafe-eval', so a build that reached
-// for eval or new Function would be dead code in a browser.
-func TestVendoredCytoscapeIsPinned(t *testing.T) {
-	t.Parallel()
-	raw, err := assets.ReadFile("static/cytoscape-3.34.0.min.js")
-	if err != nil {
-		t.Fatalf("read vendored Cytoscape: %v", err)
-	}
-	const want = "9c2a3bf2592e0b14a1f7bec07c03a54f16dedf32af9cd0af155c716aa6c87bc3"
-	if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != want {
-		t.Fatalf("vendored Cytoscape digest = %s, want %s", got, want)
-	}
-	for _, forbidden := range []string{"new Function", "eval("} {
-		if bytes.Contains(raw, []byte(forbidden)) {
-			t.Errorf("vendored Cytoscape contains %q, which the served CSP forbids", forbidden)
-		}
-	}
-}
-
-// TestVendoredELKIsPinned does the same for the layout engine, and
-// asserts the two properties that let it run at all under the served
-// policy: no eval or new Function against 'script-src self', and no
-// unconditional Worker against 'default-src none'. ELK reaches for a
-// Worker only when the caller passes workerUrl or workerFactory, and
-// the console passes neither.
-func TestVendoredELKIsPinned(t *testing.T) {
-	t.Parallel()
-	raw, err := assets.ReadFile("static/elk-0.12.0.bundled.js")
-	if err != nil {
-		t.Fatalf("read vendored ELK: %v", err)
-	}
-	const want = "1222e44f953ce7746af23801e723708f8e6f436b8b377a6a5fc7552f34a307b3"
-	if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != want {
-		t.Fatalf("vendored ELK digest = %s, want %s", got, want)
-	}
-	for _, forbidden := range []string{"new Function", "eval("} {
-		if bytes.Contains(raw, []byte(forbidden)) {
-			t.Errorf("vendored ELK contains %q, which the served CSP forbids", forbidden)
-		}
-	}
-	// The console never asks for one, so no call site may exist that
-	// does not first read a caller-supplied worker option.
-	if got := bytes.Count(raw, []byte("new Worker")); got != 2 {
-		t.Errorf("vendored ELK has %d Worker call sites, want the 2 gated on workerUrl/workerFactory", got)
-	}
-}
-
-// The layout engines draw nothing on their own: the ELK panel is the
-// console's own SVG, so it has to keep using the stylesheet's classes
-// rather than growing a second appearance.
-func TestELKPanelDrawsWithTheStylesheetsClasses(t *testing.T) {
-	t.Parallel()
-	raw, err := assets.ReadFile("static/topology-elk.js")
-	if err != nil {
-		t.Fatalf("read the ELK drawing layer: %v", err)
-	}
-	body := string(raw)
-	for _, want := range []string{
-		"'topo-node topo-'", "'topo-edge topo-edge-'", "'topo-' + row.c",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the ELK panel does not draw with %s", want)
-		}
-	}
-	// Colour belongs to the stylesheet. A literal here would be a second
-	// palette that the theme swap cannot reach.
-	for _, forbidden := range []string{"fill=", "stroke=", "#0", "rgb("} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("the ELK panel sets its own %q instead of leaving colour to the stylesheet", forbidden)
 		}
 	}
 }

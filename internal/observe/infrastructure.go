@@ -106,21 +106,70 @@ type SnapshotFacts struct {
 	CreatedAt *time.Time
 }
 
+// ChildFacts is one further object the Cluster owns: a Secret, a
+// ConfigMap, a PodDisruptionBudget, a ServiceAccount, a Role, a
+// RoleBinding or a Job. These kinds share one facts shape because each
+// contributes a name and at most two observed details; the per-kind
+// fields below are nil or empty for every other kind.
+//
+// For a Secret only the metadata is retained: its name, its type and
+// how many keys it holds. No key name and no value ever leaves the
+// adapter, and none of these objects is recorded into history.
+type ChildFacts struct {
+	// Kind is the Kubernetes kind: Secret, ConfigMap,
+	// PodDisruptionBudget, ServiceAccount, Role, RoleBinding, Job.
+	Kind string
+	// Name is the object name.
+	Name string
+	// UID distinguishes incarnations sharing a name.
+	UID string
+	// CreatedAt is the object's creation time; nil when unreported.
+	CreatedAt *time.Time
+	// SecretType is the Secret's reported type.
+	SecretType string
+	// Keys counts a Secret's or ConfigMap's entries; nil elsewhere.
+	Keys *int
+	// MinAvailable and MaxUnavailable are the PodDisruptionBudget's
+	// constraint exactly as declared; empty when the side is unset.
+	MinAvailable   string
+	MaxUnavailable string
+	// DisruptionsAllowed is the PodDisruptionBudget's reported headroom.
+	DisruptionsAllowed *int32
+	// Rules counts a Role's rules; Subjects a RoleBinding's subjects.
+	Rules    *int
+	Subjects *int
+	// RoleRef is the role a RoleBinding grants.
+	RoleRef string
+	// Active, Succeeded and Failed are a Job's reported pod counts.
+	Active    *int32
+	Succeeded *int32
+	Failed    *int32
+}
+
 // InfrastructureState is one complete observation of the set.
 type InfrastructureState struct {
 	Services  []ServiceFacts
 	Volumes   []VolumeFacts
 	Snapshots []SnapshotFacts
+	// Children are the further owned kinds, gathered as one list and
+	// distinguished by their Kind field.
+	Children []ChildFacts
 	// SnapshotsObservable reports that the VolumeSnapshot API answered
 	// at all. False means the cluster does not install it, which the
 	// rendering states rather than reading as "no snapshots".
 	SnapshotsObservable bool
+	// ChildrenUnobserved lists the child kinds whose API refused or
+	// lacked the resource, sorted. "Not granted" and "none exist" are
+	// different claims, and the rendering states the first.
+	ChildrenUnobserved []string
 	// Truncated reports a source or display ceiling on any list.
 	Truncated bool
 	// ServiceResourceVersion and the rest resume each watch.
 	ServiceResourceVersion  string
 	VolumeResourceVersion   string
 	SnapshotResourceVersion string
+	// ChildResourceVersions resumes each observed child kind's watch.
+	ChildResourceVersions map[string]string
 }
 
 // InfrastructureChange is one watch event, already reduced.
@@ -128,6 +177,7 @@ type InfrastructureChange struct {
 	Service  *ServiceFacts
 	Volume   *VolumeFacts
 	Snapshot *SnapshotFacts
+	Child    *ChildFacts
 	// Deleted names the object removed, when the event was a deletion.
 	Deleted *InfrastructureDeletion
 }
@@ -163,7 +213,9 @@ type InfrastructureSnapshot struct {
 	Services            []ServiceFacts
 	Volumes             []VolumeFacts
 	Snapshots           []SnapshotFacts
+	Children            []ChildFacts
 	SnapshotsObservable bool
+	ChildrenUnobserved  []string
 	Truncated           bool
 }
 
@@ -192,6 +244,7 @@ func (s *InfrastructureStore) publish(state InfrastructureState, observedAt time
 		func(a, b VolumeFacts) bool { return a.Name < b.Name }, MaxInfrastructureObjects)
 	snapshots, cutSnapshots := bounded(state.Snapshots,
 		func(a, b SnapshotFacts) bool { return a.Name < b.Name }, MaxInfrastructureObjects)
+	children, cutChildren := boundedChildren(state.Children)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -201,10 +254,38 @@ func (s *InfrastructureStore) publish(state InfrastructureState, observedAt time
 		Services:            services,
 		Volumes:             volumes,
 		Snapshots:           snapshots,
+		Children:            children,
 		SnapshotsObservable: state.SnapshotsObservable,
-		Truncated:           state.Truncated || cutServices || cutVolumes || cutSnapshots,
+		ChildrenUnobserved:  append([]string(nil), state.ChildrenUnobserved...),
+		Truncated:           state.Truncated || cutServices || cutVolumes || cutSnapshots || cutChildren,
 	}
 	s.present = true
+}
+
+// boundedChildren sorts the children by kind then name and bounds each
+// kind on its own, so a burst of one kind never pushes another out.
+func boundedChildren(in []ChildFacts) ([]ChildFacts, bool) {
+	kept, _ := bounded(in, func(a, b ChildFacts) bool {
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		return a.Name < b.Name
+	}, len(in))
+	out := kept[:0:0]
+	cut := false
+	perKind := 0
+	for i, c := range kept {
+		if i > 0 && kept[i-1].Kind != c.Kind {
+			perKind = 0
+		}
+		if perKind >= MaxInfrastructureObjects {
+			cut = true
+			continue
+		}
+		perKind++
+		out = append(out, c)
+	}
+	return out, cut
 }
 
 // markStale flags lost contact while keeping the last-good set.
@@ -265,6 +346,11 @@ func (c *InfrastructureCollector) apply(change InfrastructureChange) bool {
 	case change.Snapshot != nil:
 		c.state.Snapshots = upsertNamed(c.state.Snapshots, *change.Snapshot,
 			func(s SnapshotFacts) string { return s.Name })
+	case change.Child != nil:
+		// Kinds share the list, so the key is kind and name together —
+		// a PodDisruptionBudget and a ServiceAccount may share a name.
+		c.state.Children = upsertNamed(c.state.Children, *change.Child,
+			func(f ChildFacts) string { return f.Kind + "/" + f.Name })
 	case change.Deleted != nil:
 		switch change.Deleted.Kind {
 		case "Service":
@@ -276,6 +362,8 @@ func (c *InfrastructureCollector) apply(change InfrastructureChange) bool {
 		case "VolumeSnapshot":
 			c.state.Snapshots = removeNamed(c.state.Snapshots, change.Deleted,
 				func(s SnapshotFacts) (string, string) { return s.Name, s.UID })
+		default:
+			c.state.Children = removeChild(c.state.Children, change.Deleted)
 		}
 	default:
 		return false
@@ -298,6 +386,18 @@ func upsertNamed[T any](in []T, item T, name func(T) string) []T {
 		}
 	}
 	return append(in, item)
+}
+
+// removeChild drops the child whose kind, name and UID all match, so a
+// deletion of one kind never removes a same-named object of another.
+func removeChild(in []ChildFacts, gone *InfrastructureDeletion) []ChildFacts {
+	for i := range in {
+		if in[i].Kind == gone.Kind && in[i].Name == gone.Name &&
+			(gone.UID == "" || in[i].UID == gone.UID) {
+			return append(in[:i], in[i+1:]...)
+		}
+	}
+	return in
 }
 
 // removeNamed drops the entry whose name and UID both match, so a

@@ -1348,6 +1348,8 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-pooler rect { fill: var(--surface-2); stroke: var(--border-strong); }
 /* A ScheduledBackup box: the head of the backup path, in its blue. */
 .topo-backup rect { fill: var(--accent-weak); stroke: var(--accent); }
+/* A Secret box: metadata only, and visibly its own kind. */
+.topo-secret rect { fill: var(--warn-weak); stroke: var(--warn); }
 
 /* Domain tints, grouped drawing only: the boxes inside a coloured frame
    answer it. Declared before the data-state rules so an actual health
@@ -1378,6 +1380,10 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 /* The volume wire ties an instance to the claim it writes; dotted so a
    mount never reads as a data flow. */
 .topo-edge-disk { stroke: var(--text-muted); stroke-dasharray: 1.5 3.5; }
+/* The children drawing's two relations: ownership solid, reference
+   dashed. Each wire carries its own word, so there is no legend. */
+.topo-edge-owns { stroke: var(--ok); }
+.topo-edge-refs { stroke: var(--accent); stroke-dasharray: 5 4; }
 #topo-arrow path { fill: var(--border-strong); }
 
 /* The legend keys the line styles the router took off the wires; the

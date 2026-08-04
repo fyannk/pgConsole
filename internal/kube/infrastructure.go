@@ -67,19 +67,19 @@ func (c *Client) FetchInfrastructure(ctx context.Context) (observe.Infrastructur
 	var err error
 
 	if state.Services, state.ServiceResourceVersion, truncated, err = listOwned(
-		ctx, c, serviceGVR, scopeServices, c.convertService); err != nil {
+		ctx, c, serviceGVR, scopeServices, true, c.convertService); err != nil {
 		return observe.InfrastructureState{}, err
 	}
 	state.Truncated = state.Truncated || truncated
 
 	if state.Volumes, state.VolumeResourceVersion, truncated, err = listOwned(
-		ctx, c, pvcGVR, scopeVolumes, c.convertVolume); err != nil {
+		ctx, c, pvcGVR, scopeVolumes, true, c.convertVolume); err != nil {
 		return observe.InfrastructureState{}, err
 	}
 	state.Truncated = state.Truncated || truncated
 
 	state.Snapshots, state.SnapshotResourceVersion, truncated, err = listOwned(
-		ctx, c, snapshotGVR, scopeSnapshots, c.convertSnapshot)
+		ctx, c, snapshotGVR, scopeSnapshots, true, c.convertSnapshot)
 	switch {
 	case err == nil:
 		state.SnapshotsObservable = true
@@ -93,22 +93,33 @@ func (c *Client) FetchInfrastructure(ctx context.Context) (observe.Infrastructur
 		return observe.InfrastructureState{}, err
 	}
 
+	if err := c.fetchChildren(ctx, &state); err != nil {
+		return observe.InfrastructureState{}, err
+	}
+
 	return state, nil
 }
 
 // listOwned pages one kind, keeping only the objects this cluster owns.
+// record=false keeps the listing out of the history journal — the child
+// kinds are never recorded, because the journal must never see a
+// Secret's payload and the set travels together.
 func listOwned[T any](
 	ctx context.Context,
 	c *Client,
 	gvr schema.GroupVersionResource,
 	op string,
+	record bool,
 	convert func(map[string]any) (T, bool, error),
 ) ([]T, string, bool, error) {
 	var kept []T
 	examined := 0
 	opts := metav1.ListOptions{Limit: infrastructurePageSize}
 	rv := ""
-	seed := c.seedRecord(op)
+	var seed *seedRecorder
+	if record {
+		seed = c.seedRecord(op)
+	}
 	for {
 		list, err := c.dyn.Resource(gvr).Namespace(c.opts.Namespace).List(ctx, opts)
 		if err != nil {
@@ -160,6 +171,21 @@ func (c *Client) WatchInfrastructure(ctx context.Context, state observe.Infrastr
 			op   string
 			pump pump[observe.InfrastructureChange]
 		}{snapshotGVR, state.SnapshotResourceVersion, "snapshots watch", tap(c, scopeSnapshots, c.pumpSnapshot)})
+	}
+	// One stream per child kind the seed actually observed; a kind that
+	// was refused has no resource version and gets no watch. Untapped:
+	// the children stay out of the history journal.
+	for _, child := range childKinds {
+		rv, ok := state.ChildResourceVersions[child.kind]
+		if !ok {
+			continue
+		}
+		specs = append(specs, struct {
+			gvr  schema.GroupVersionResource
+			rv   string
+			op   string
+			pump pump[observe.InfrastructureChange]
+		}{child.gvr, rv, child.op + " watch", c.childPump(child.kind)})
 	}
 
 	var started []watch.Interface
@@ -285,15 +311,24 @@ func (c *Client) convertSnapshot(content map[string]any) (observe.SnapshotFacts,
 // ownedByCluster verifies the controller owner reference names the
 // configured Cluster, which is the same proof the pod roster uses.
 func (c *Client) ownedByCluster(meta *metav1.ObjectMeta) bool {
-	ref := metav1.GetControllerOf(meta)
-	if ref == nil {
-		return false
+	return c.ownedRefs(meta.OwnerReferences)
+}
+
+// ownedRefs is the same proof over a bare reference list, for objects
+// read without a typed conversion.
+func (c *Client) ownedRefs(refs []metav1.OwnerReference) bool {
+	for i := range refs {
+		ref := &refs[i]
+		if ref.Controller == nil || !*ref.Controller {
+			continue
+		}
+		group, _, ok := splitAPIVersion(ref.APIVersion)
+		if !ok || group != clusterGVR.Group {
+			return false
+		}
+		return ref.Kind == "Cluster" && ref.Name == c.opts.ClusterName
 	}
-	group, _, ok := splitAPIVersion(ref.APIVersion)
-	if !ok || group != clusterGVR.Group {
-		return false
-	}
-	return ref.Kind == "Cluster" && ref.Name == c.opts.ClusterName
+	return false
 }
 
 func (c *Client) pumpService(event watch.Event) (observe.InfrastructureChange, bool, bool) {

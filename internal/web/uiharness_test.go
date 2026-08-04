@@ -188,6 +188,33 @@ func uiPopulated(stale bool) staticSnapshots {
 		poolersOK:    true,
 		poolerPods:   poolerPodFixture(),
 		poolerPodsOK: true,
+		infra: observe.InfrastructureSnapshot{
+			Generation: 4, ObservedAt: testNow.Add(-4 * time.Second), Stale: stale,
+			Services: []observe.ServiceFacts{
+				{Name: "orders-rw", UID: "svc-rw", Role: "read-write", Type: "ClusterIP",
+					ClusterIP: "10.96.10.1", Port: int32p(5432),
+					TargetSelector: []string{"cnpg.io/cluster=orders", "cnpg.io/instanceRole=primary"}},
+				{Name: "orders-ro", UID: "svc-ro", Role: "read-only", Type: "ClusterIP",
+					ClusterIP: "10.96.10.2", Port: int32p(5432),
+					TargetSelector: []string{"cnpg.io/cluster=orders", "cnpg.io/instanceRole=replica"}},
+			},
+			Volumes: []observe.VolumeFacts{
+				{Name: "orders-1", UID: "vol-1", Instance: "orders-1", Role: "PG_DATA", Phase: "Bound", Capacity: "1Gi", StorageClass: "standard"},
+				{Name: "orders-2", UID: "vol-2", Instance: "orders-2", Role: "PG_DATA", Phase: "Bound", Capacity: "1Gi", StorageClass: "standard"},
+				{Name: "orders-3", UID: "vol-3", Instance: "orders-3", Role: "PG_DATA", Phase: "Bound", Capacity: "1Gi", StorageClass: "standard"},
+			},
+			Children: []observe.ChildFacts{
+				{Kind: "Secret", Name: "orders-app", UID: "sec-app", SecretType: "kubernetes.io/basic-auth", Keys: intp(2)},
+				{Kind: "Secret", Name: "orders-ca", UID: "sec-ca", SecretType: "Opaque", Keys: intp(2)},
+				{Kind: "Secret", Name: "orders-server", UID: "sec-server", SecretType: "kubernetes.io/tls", Keys: intp(3)},
+				{Kind: "PodDisruptionBudget", Name: "orders", UID: "pdb-1", MinAvailable: "1", DisruptionsAllowed: int32p(1)},
+				{Kind: "PodDisruptionBudget", Name: "orders-primary", UID: "pdb-2", MinAvailable: "1", DisruptionsAllowed: int32p(0)},
+				{Kind: "ServiceAccount", Name: "orders", UID: "sa-1"},
+				{Kind: "Role", Name: "orders", UID: "role-1", Rules: intp(3)},
+				{Kind: "RoleBinding", Name: "orders", UID: "rb-1", RoleRef: "orders", Subjects: intp(1)},
+			},
+		},
+		infraOK: true,
 		quorum: observe.FailoverQuorumSnapshot{
 			Generation: 2, ObservedAt: testNow.Add(-4 * time.Second), Stale: stale,
 			Quorum: observe.FailoverQuorumFacts{
@@ -334,7 +361,7 @@ func uiHandler(t *testing.T, snapshots allSources, status evidence.Status, autho
 		ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour,
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: uiLinks,
 	}
-	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots,
+	sources := Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots,
 		Evidence: fakeEvidence{status: status}, History: uiHistorySource(), Metrics: uiMetricsSource()}
 	var executor OpsExecutor
 	var reviewer ReviewExecutor

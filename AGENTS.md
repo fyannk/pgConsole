@@ -256,44 +256,36 @@ scans, and the tests. In short:
 - Makefile targets `build`, `test`, `test-race`, `test-integration`,
   `test-scale`, `test-container`, `test-multiarch`, `test-ui`, `test-e2e`,
   `lint`, `check`, `docker-build`, `supply-chain`, and `release-check`.
-- The wiring diagrams are laid out by Graphviz, which runs in-process as
-  WebAssembly (no cgo, no subprocess, no network). It answers only where
-  the boxes and wires go: the tiers and their order are the console's,
-  and the drawing is the console's own SVG with the design system's
-  classes. Layout is serialised — Graphviz keeps process-wide state — and
-  a layout that fails omits the diagram rather than drawing a wrong one.
-  The grouped wiring drawing uses no engine at all: its placement is a
-  set of stated rules — pinned columns and rows, trunk buses in the
-  alleys between its dotted category frames — computed as arithmetic,
-  deterministic by construction.
+- The two wiring drawings use no layout engine: placement is a set of
+  stated rules — pinned columns and rows, trunk buses in the alleys
+  between dotted category frames, kind frames flowing into fixed
+  columns — computed as arithmetic, deterministic by construction, so
+  each drawing is safe to screenshot and cheap to test. The Overview
+  serves the grouped wiring (poolers, cluster, backup schedules,
+  storage); the cluster overview serves the children inventory (the
+  Cluster, the objects it owns via controller owner reference, and the
+  objects referencing it). Earlier engine-backed drawings — Graphviz in
+  WebAssembly, a Cytoscape panel, an ELK panel — were retired with the
+  fourth iteration; only their orthogonal-route renderer
+  (`toporoute.go`) survives.
 - The console UI is server-rendered `html/template` plus one embedded
-  stylesheet and five narrowly separated, vendored enhancement layers:
+  stylesheet and three narrowly separated, vendored enhancement layers:
   htmx 2.x owns same-origin HTML navigation and atomic screen refresh;
   the Alpine CSP build owns local component state (never the standard
   Alpine build, which would require `script-src 'unsafe-eval'`); uPlot
   draws the metrics charts from series the document already carries and
-  a same-origin JSON poll; Cytoscape.js and ELK.js each lay out a second
-  and third copy of the cluster-overview wiring beside the served one.
-  No layer draws the diagram of record: that ships finished, and both
-  extra panels are hidden until they have drawn, so a reader without
-  scripting sees the finished drawing and never an empty frame. The two
-  differ in what they own — Cytoscape renders on its own canvas and has
-  to be handed the palette and redrawn on a theme swap, while ELK
-  answers only where the boxes and corners go and the console emits its
-  own SVG with the stylesheet's classes, so that one follows the theme
-  for free. All are served from the binary, htmx evaluation and browser
-  history caching are disabled, and no layer decides authorization or
-  interprets cluster state. Content is never gated behind scripting: the
-  document is complete before any script runs, enhancement-only controls
-  carry `x-cloak`, a chart's window summary is stated in text beside it,
-  and no state word is ever replaced by a colour or a mark. `make
-  test-ui` enforces all of that in a browser.
-- Every vendored browser asset is MIT except ELK, which is taken under
-  the EPL-2.0 half of its `EPL-2.0 OR GPL-3.0-or-later` dual licence.
-  That copyleft is file-scoped and the file is redistributed unmodified
-  under its own licence, so it imposes nothing on the Apache-2.0 sources
-  around it — but it is never patched: replacing it means taking a new
-  upstream release whole.
+  a same-origin JSON poll. No layer draws the diagram of record: that
+  ships finished, so a reader without scripting sees the finished
+  drawing and never an empty frame. All are served from the binary,
+  htmx evaluation and browser history caching are disabled, and no
+  layer decides authorization or interprets cluster state. Content is
+  never gated behind scripting: the document is complete before any
+  script runs, enhancement-only controls carry `x-cloak`, a chart's
+  window summary is stated in text beside it, and no state word is ever
+  replaced by a colour or a mark. `make test-ui` enforces all of that
+  in a browser.
+- Every vendored browser asset is MIT-licensed and never patched:
+  replacing one means taking a new upstream release whole.
 
 ## Naming — settled, use exactly these
 

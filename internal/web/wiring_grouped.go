@@ -99,8 +99,8 @@ func buildGroupedWiring(p *Page) *TopologyView {
 	}
 
 	view := &TopologyView{
-		Title: "Physical wiring — grouped",
-		Aria:  "The same wiring grouped into poolers, cluster, backups and storage, with one trunk per fanned flow",
+		Title: "Physical wiring",
+		Aria:  "The cluster's wiring grouped into poolers, cluster, backups and storage, with one trunk per fanned flow",
 	}
 
 	// The capacity is a provable upper bound on every add below, so the
@@ -590,7 +590,7 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		view.Frames = append(view.Frames, TopoFrame{
 			Label: "Backups", Kind: "backup",
 			X: int(bakLeft) - grpPad, Y: int(bandTop),
-			W: int(bakRight-bakLeft) + 2*grpPad, H: int(bakBottom+grpPad-bandTop),
+			W: int(bakRight-bakLeft) + 2*grpPad, H: int(bakBottom + grpPad - bandTop),
 		})
 	}
 	if hasK8s {
@@ -612,7 +612,7 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		view.Frames = append(view.Frames, TopoFrame{
 			Label: "Object storage", Note: endpoint, Kind: "store",
 			X: int(storeX) - grpPad, Y: int(bandTop),
-			W: int(regionW) + 2*grpPad, H: int(objBottom+grpPad-bandTop),
+			W: int(regionW) + 2*grpPad, H: int(objBottom + grpPad - bandTop),
 		})
 	}
 
@@ -630,7 +630,7 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
-	view.Caption = "The same observations as the drawing above, grouped by role: poolers, the cluster, its backup schedules, and everything the data rests on — Kubernetes claims and snapshots apart from the object store. Placement is fixed — rw above ro, the primary left of its replicas, the claims staggered beside their instances."
+	view.Caption = "The observed wiring grouped by role: poolers, the cluster, its backup schedules, and everything the data rests on — Kubernetes claims and snapshots apart from the object store. Placement is fixed — rw above ro, the primary left of its replicas, the claims staggered beside their instances."
 	return view
 }
 
