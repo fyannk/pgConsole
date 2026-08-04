@@ -6,6 +6,9 @@
 */ -}}
 {{template "page-head" "backups"}}
 {{template "shell-open" .Shell}}
+    {{- with .BackupsDrawing}}
+    {{template "topology" .}}
+    {{- end}}
     {{- with .Backups}}
     <section class="panel">
       <h2>Backups at a glance</h2>

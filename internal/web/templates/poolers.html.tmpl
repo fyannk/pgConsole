@@ -76,6 +76,9 @@
     </section>
 
     {{- else}}
+    {{- with .PoolersDrawing}}
+    {{template "topology" .}}
+    {{- end}}
     {{- with .Poolers}}
     <section class="panel sectioned" id="poolers">
       <div class="panel-head">

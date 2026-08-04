@@ -706,6 +706,13 @@ type Page struct {
 	// poolers, the cluster, its backup schedules and its storage, laid
 	// out by stated rules. Nil without a cluster snapshot.
 	Topology *TopologyView
+	// BackupsDrawing, PoolersDrawing and DatabasesDrawing open their
+	// section screens with the same schema language, each adapted to
+	// the one question that screen answers. Nil when the section has
+	// nothing to draw.
+	BackupsDrawing   *TopologyView
+	PoolersDrawing   *TopologyView
+	DatabasesDrawing *TopologyView
 	// ClusterName is the configured target cluster.
 	ClusterName string
 	// Namespace is the configured target namespace.
@@ -922,6 +929,9 @@ func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, 
 	page.Summary = buildSummary(&page)
 	page.Topology = buildGroupedWiring(&page)
 	page.ClusterOverview = buildClusterOverview(&page)
+	page.BackupsDrawing = buildBackupsDrawing(&page)
+	page.PoolersDrawing = buildPoolersWiring(&page)
+	page.DatabasesDrawing = buildDatabasesDrawing(&page)
 	return page
 }
 

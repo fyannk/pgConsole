@@ -185,8 +185,18 @@ func uiPopulated(stale bool) staticSnapshots {
 				},
 			},
 		},
-		poolersOK:    true,
-		poolerPods:   poolerPodFixture(),
+		poolersOK: true,
+		poolerPods: observe.PodsSnapshot{
+			Generation: 5, ObservedAt: testNow.Add(-2 * time.Second), Stale: stale,
+			Pods: []observe.PodFacts{
+				{Name: "orders-rw-abc-1", UID: "pp1", Role: "orders-rw", Phase: "Running",
+					Ready: boolp(true), Restarts: intp(0), Node: "node-a", Image: "pgbouncer:1.24"},
+				{Name: "orders-rw-abc-2", UID: "pp2", Role: "orders-rw", Phase: "Running",
+					Ready: boolp(true), Restarts: intp(0), Node: "node-b", Image: "pgbouncer:1.24"},
+				{Name: "orders-ro-def-1", UID: "pp3", Role: "orders-ro", Phase: "Running",
+					Ready: boolp(false), Restarts: intp(1), Node: "node-c", Image: "pgbouncer:1.24"},
+			},
+		},
 		poolerPodsOK: true,
 		infra: observe.InfrastructureSnapshot{
 			Generation: 4, ObservedAt: testNow.Add(-4 * time.Second), Stale: stale,

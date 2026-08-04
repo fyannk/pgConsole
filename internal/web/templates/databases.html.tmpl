@@ -17,6 +17,11 @@
 {{template "page-head" "databases"}}
 {{template "shell-open" .Shell}}
     {{- $current := .Shell.Current}}
+    {{- if eq $current "databases-overview"}}
+    {{- with .DatabasesDrawing}}
+    {{template "topology" .}}
+    {{- end}}
+    {{- end}}
     {{- with .Databases}}
     <section class="panel sectioned" id="databases">
       <div class="panel-head">
