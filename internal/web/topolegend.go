@@ -31,6 +31,7 @@ var legendOrder = []LegendItem{
 	{Kind: "read", Label: "reads"},
 	{Kind: "replicate", Label: "replication"},
 	{Kind: "archive", Label: "backup"},
+	{Kind: "disk", Label: "volume"},
 }
 
 // topoLegend lists the entries for the styles a diagram actually drew.

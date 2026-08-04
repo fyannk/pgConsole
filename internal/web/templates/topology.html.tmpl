@@ -8,7 +8,7 @@
   server-side by the layout engine; the template only draws it.
 */ -}}
 {{- define "topology" -}}
-<section class="panel topo-panel">
+<section class="panel topo-panel{{if .Frames}} topo-panel-grouped{{end}}">
   <h2 class="topo-title">{{.Title}}</h2>
   <div class="topo-scroll">
   <svg class="topo" viewBox="0 0 {{.Width}} {{.Height}}" role="img"
@@ -19,11 +19,20 @@
         <path d="M0 0 L10 5 L0 10 z"></path>
       </marker>
     </defs>
+    {{- range .Frames}}
+    <g class="topo-frame">
+      <rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="10"></rect>
+      <text class="topo-frame-label" x="{{add .X 14}}" y="{{add .Y 20}}">{{.Label}}</text>
+    </g>
+    {{- end}}
     {{- range .Edges}}
     <path class="topo-edge topo-edge-{{.Kind}}" d="{{.Path}}" marker-end="url(#topo-arrow)"></path>
     {{- if .Label}}
     <text class="topo-elabel" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle">{{.Label}}</text>
     {{- end}}
+    {{- end}}
+    {{- range .Dots}}
+    <circle class="topo-dot topo-dot-{{.Kind}}" cx="{{.X}}" cy="{{.Y}}" r="3"></circle>
     {{- end}}
     {{- range .Nodes}}
     <g class="topo-node topo-{{.Kind}}"{{if .State}} data-state="{{.State}}"{{end}}>

@@ -14,6 +14,9 @@
     {{template "topology-cytoscape" .}}
     {{template "topology-elk" .}}
     {{- end}}
+    {{- with .ClusterOverview.WiringGrouped}}
+    {{template "topology" .}}
+    {{- end}}
     {{- with .ClusterOverview}}
     {{- if .Placement}}
     <h2 class="section-title">Scheduling</h2>

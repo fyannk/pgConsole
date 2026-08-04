@@ -1,0 +1,262 @@
+// Copyright 2026 The pgConsole Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package web
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/observe"
+)
+
+// groupedPage builds a page with everything the grouped drawing can
+// show: two poolers, two services, a primary with two replicas, one
+// claim per instance, a backup path.
+func groupedPage(t *testing.T) Page {
+	t.Helper()
+	src := wiringSources()
+	port := int32(5432)
+	return buildPage(context.Background(), "orders", "payments", snapshots{
+		window: time.Hour, cluster: src.snap, ok: true,
+		pods: src.pods, podsOK: true,
+		quorum: src.quorum, quorumOK: true,
+		backups: observe.BackupsSnapshot{
+			Generation: 6, ObservedAt: testNow.Add(-2 * time.Second),
+			Backups: []observe.BackupFacts{{Name: "orders-first", UID: "b1", Phase: "completed", Method: "plugin"}},
+		},
+		backupsOK: true,
+		poolers: observe.PoolersSnapshot{
+			Generation: 4, ObservedAt: testNow.Add(-time.Second),
+			Poolers: []observe.PoolerFacts{
+				{Name: "orders-pool-ro", UID: "p2", Type: "ro", PoolMode: "session", Phase: "active"},
+				{Name: "orders-pool-rw", UID: "p1", Type: "rw", PoolMode: "transaction", Phase: "active"},
+			},
+		},
+		poolersOK: true,
+		infra: observe.InfrastructureSnapshot{
+			Generation: 3, ObservedAt: testNow.Add(-time.Second),
+			Services: []observe.ServiceFacts{
+				{Name: "orders-rw", UID: "s1", Role: "read-write", Type: "ClusterIP", ClusterIP: "10.0.0.1", Port: &port},
+				{Name: "orders-ro", UID: "s2", Role: "read-only", Type: "ClusterIP", ClusterIP: "10.0.0.2", Port: &port},
+			},
+			Volumes: []observe.VolumeFacts{
+				{Name: "orders-1", UID: "v1", Instance: "orders-1", Role: "PG_DATA", Phase: "Bound", Capacity: "1Gi", StorageClass: "standard"},
+				{Name: "orders-2", UID: "v2", Instance: "orders-2", Role: "PG_DATA", Phase: "Bound", Capacity: "1Gi", StorageClass: "standard"},
+				{Name: "orders-3", UID: "v3", Instance: "orders-3", Role: "PG_DATA", Phase: "Bound", Capacity: "1Gi", StorageClass: "standard"},
+			},
+		},
+		infraOK: true,
+	}, testNow, Links{})
+}
+
+// The grouped drawing's placement is a set of stated rules, so each one
+// is asserted as geometry: rw above ro, the primary left of its
+// replicas, the claims right of the instances, the object store and
+// snapshots on top of the storage column.
+func TestGroupedWiringPinsEveryStatedPlacement(t *testing.T) {
+	t.Parallel()
+	page := groupedPage(t)
+	view := buildGroupedWiring(&page)
+	if view == nil {
+		t.Fatal("no grouped drawing was built")
+	}
+
+	byID := map[string]*TopoNode{}
+	name := func(n *TopoNode) string {
+		for _, l := range n.Lines {
+			if l.Class == "label" {
+				return l.Text
+			}
+		}
+		return ""
+	}
+	byName := map[string]*TopoNode{}
+	for i := range view.Nodes {
+		n := &view.Nodes[i]
+		byID[n.ID] = n
+		byName[name(n)] = n
+	}
+
+	above := func(top, bottom string) {
+		t.Helper()
+		a, b := byName[top], byName[bottom]
+		if a == nil || b == nil {
+			t.Fatalf("%q or %q is not drawn", top, bottom)
+		}
+		if a.Y >= b.Y {
+			t.Errorf("%s (y=%d) is not above %s (y=%d)", top, a.Y, bottom, b.Y)
+		}
+	}
+	leftOf := func(l, r string) {
+		t.Helper()
+		a, b := byName[l], byName[r]
+		if a == nil || b == nil {
+			t.Fatalf("%q or %q is not drawn", l, r)
+		}
+		if a.X+a.W > b.X {
+			t.Errorf("%s does not stand left of %s", l, r)
+		}
+	}
+
+	// rw above ro, for poolers and services alike.
+	above("orders-pool-rw", "orders-pool-ro")
+	above("orders-rw", "orders-ro")
+	// The primary left of its replicas, replicas left of their claims.
+	leftOf("orders-1 — primary", "orders-2 — replica")
+	leftOf("orders-2 — replica", "Cloud backup")
+	// The object store on top of the storage column, above every claim.
+	above("Cloud backup", "orders-1")
+	// Each claim is level with its instance, so the volume wire is
+	// straight: same centre, and the edge path carries no corner.
+	for _, pair := range [][2]string{
+		{"orders-1 — primary", "orders-1"},
+		{"orders-2 — replica", "orders-2"},
+		{"orders-3 — replica", "orders-3"},
+	} {
+		inst, claim := byName[pair[0]], byName[pair[1]]
+		if inst == nil || claim == nil {
+			t.Fatalf("%q or %q is not drawn", pair[0], pair[1])
+		}
+		if instC, claimC := inst.Y+inst.H/2, claim.Y+claim.H/2; instC != claimC {
+			t.Errorf("%s (centre %d) is not level with its claim (centre %d)", pair[0], instC, claimC)
+		}
+	}
+
+	// Three dotted frames, in reading order.
+	var labels []string
+	for _, f := range view.Frames {
+		labels = append(labels, f.Label)
+	}
+	if got, want := strings.Join(labels, ","), "Poolers,Cluster,Storage"; got != want {
+		t.Errorf("frames = %s, want %s", got, want)
+	}
+	// Frames do not overlap each other.
+	for i := 0; i < len(view.Frames); i++ {
+		for j := i + 1; j < len(view.Frames); j++ {
+			a, b := view.Frames[i], view.Frames[j]
+			if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
+				t.Errorf("frame %s overlaps frame %s", a.Label, b.Label)
+			}
+		}
+	}
+
+	// The drawing is taller than the ungrouped one's 3.6:1 shape, even
+	// in this fixture's snapshotless case; snapshots and extra replicas
+	// only push it taller.
+	if ratio := float64(view.Width) / float64(view.Height); ratio > 3.3 {
+		t.Errorf("aspect ratio %.2f is flatter than the stated 3.3", ratio)
+	}
+}
+
+// A fanned flow leaves its box once: every replication branch shares
+// the primary's single exit, every disk wire is straight, and each tee
+// carries a dot in the flow's own style.
+func TestGroupedWiringTrunksItsFans(t *testing.T) {
+	t.Parallel()
+	page := groupedPage(t)
+	view := buildGroupedWiring(&page)
+	if view == nil {
+		t.Fatal("no grouped drawing was built")
+	}
+
+	kinds := map[string][]TopoEdge{}
+	for i, e := range view.Edges {
+		kinds[e.Kind] = append(kinds[e.Kind], e)
+		if strings.Contains(e.Path, "C") {
+			t.Errorf("edge %d is a cubic curve rather than an orthogonal run", i)
+		}
+	}
+
+	// Two replicas, two replication branches, one shared exit: the
+	// trunk prefix of both paths is byte-identical.
+	repl := kinds["replicate"]
+	if len(repl) != 2 {
+		t.Fatalf("%d replication branches, want 2", len(repl))
+	}
+	prefix := func(path string) string {
+		return path[:strings.Index(path, " L")]
+	}
+	if prefix(repl[0].Path) != prefix(repl[1].Path) {
+		t.Errorf("replication branches leave from different points: %q vs %q",
+			prefix(repl[0].Path), prefix(repl[1].Path))
+	}
+	if repl[0].Label != "replication" && repl[1].Label != "replication" {
+		t.Error("no replication branch carries the label")
+	}
+
+	// The read fan shares its exit the same way.
+	reads := kinds["read"]
+	if len(reads) < 3 { // one pooler wire, two replica branches
+		t.Fatalf("%d read wires, want at least 3", len(reads))
+	}
+
+	// Volume wires are straight lines: two points, no corner.
+	disks := kinds["disk"]
+	if len(disks) != 3 {
+		t.Fatalf("%d volume wires, want 3", len(disks))
+	}
+	for _, d := range disks {
+		if strings.Contains(d.Path, "Q") {
+			t.Errorf("a volume wire turns a corner: %q", d.Path)
+		}
+	}
+
+	// Tees carry dots in the styles of the flows that split.
+	dotKinds := map[string]int{}
+	for _, d := range view.Dots {
+		dotKinds[d.Kind]++
+	}
+	if dotKinds["replicate"] == 0 {
+		t.Error("the replication trunk splits with no tee dot")
+	}
+	if dotKinds["read"] == 0 {
+		t.Error("the read trunk splits with no tee dot")
+	}
+
+	// The legend keys every drawn style, including the volume wire.
+	var legend []string
+	for _, l := range view.Legend {
+		legend = append(legend, l.Kind)
+	}
+	if got, want := strings.Join(legend, ","), "write,read,replicate,archive,disk"; got != want {
+		t.Errorf("legend = %s, want %s", got, want)
+	}
+}
+
+// The grouped drawing shrinks honestly: no poolers means no Poolers
+// frame, no storage evidence means no Storage frame, and the page
+// still renders.
+func TestGroupedWiringDropsAbsentGroups(t *testing.T) {
+	t.Parallel()
+	src := wiringSources()
+	page := buildPage(context.Background(), "orders", "payments", snapshots{
+		window: time.Hour, cluster: src.snap, ok: true,
+		pods: src.pods, podsOK: true,
+	}, testNow, Links{})
+	view := buildGroupedWiring(&page)
+	if view == nil {
+		t.Fatal("no grouped drawing was built")
+	}
+	for _, f := range view.Frames {
+		if f.Label != "Cluster" {
+			t.Errorf("frame %s drawn with nothing observed for it", f.Label)
+		}
+	}
+	if len(view.Frames) != 1 {
+		t.Errorf("%d frames, want the cluster frame alone", len(view.Frames))
+	}
+}

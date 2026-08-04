@@ -96,7 +96,7 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 	if p.Cluster == nil || p.Cluster.Absent {
 		return nil
 	}
-	serverRows := wireServers(p)
+	serverRows := wireServers(p, true)
 	if len(serverRows) == 0 {
 		return nil
 	}
@@ -245,6 +245,7 @@ func wireGraphNodes(nodes []TopoNode, rows map[string][]TopoGraphText) []TopoGra
 
 // wireServer is one server node before layout: its facts as rows.
 type wireServer struct {
+	name  string
 	kind  string
 	state string
 	rows  []TopoGraphText
@@ -252,8 +253,10 @@ type wireServer struct {
 
 // wireServers builds the server rows from the observed pods, primary
 // first. Each row is an observed or operator-reported fact; a fact the
-// snapshot does not carry simply has no row.
-func wireServers(p *Page) []wireServer {
+// snapshot does not carry simply has no row. withVolumes keeps the
+// claim line inside the box; the grouped drawing drops it because its
+// PVC boxes state the same facts with more room.
+func wireServers(p *Page, withVolumes bool) []wireServer {
 	if p.Pods == nil || len(p.Pods.Rows) == 0 {
 		return nil
 	}
@@ -268,7 +271,7 @@ func wireServers(p *Page) []wireServer {
 	var primary *wireServer
 	var replicas []wireServer
 	for _, row := range p.Pods.Rows {
-		s := wireServer{state: podState(row)}
+		s := wireServer{name: row.Name, state: podState(row)}
 		if row.Role == "primary" {
 			s.kind = "primary"
 			s.rows = append(s.rows, TopoGraphText{C: "label", T: row.Name + " — primary"})
@@ -292,8 +295,10 @@ func wireServers(p *Page) []wireServer {
 		}
 		s.rows = append(s.rows, TopoGraphText{C: "sub", T: instanceCondition(row)})
 		s.rows = append(s.rows, TopoGraphText{C: "disk", T: "node " + row.Node})
-		if disk := volumeLine(p, row.Name); disk != "" {
-			s.rows = append(s.rows, TopoGraphText{C: "disk", T: disk})
+		if withVolumes {
+			if disk := volumeLine(p, row.Name); disk != "" {
+				s.rows = append(s.rows, TopoGraphText{C: "disk", T: disk})
+			}
 		}
 		if image := shortImage(row.Image); image != "" {
 			s.rows = append(s.rows, TopoGraphText{C: "disk", T: image})

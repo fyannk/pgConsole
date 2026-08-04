@@ -48,6 +48,12 @@ type TopologyView struct {
 	// Legend keys the line styles actually drawn, so the wires carry no
 	// labels of their own.
 	Legend []LegendItem
+	// Frames are the dotted category boxes of the grouped drawing,
+	// drawn under everything else; empty for the ungrouped diagrams.
+	Frames []TopoFrame
+	// Dots mark the tee of a trunk that splits: the point where one
+	// flow leaves its bus for one destination.
+	Dots []TopoDot
 	// Graph is the same diagram with the layout removed: which boxes
 	// exist, which tier each sits in, and what connects to what.
 	//
@@ -121,6 +127,23 @@ func (v TopologyView) GraphJSON() (string, error) {
 		return "", err
 	}
 	return string(raw), nil
+}
+
+// TopoFrame is one dotted category box: a labelled region the reader
+// can take in at a glance before reading the boxes inside it.
+type TopoFrame struct {
+	// Label names the category: Poolers, Cluster, Storage.
+	Label string
+	// X, Y, W, H place the frame in the viewBox.
+	X, Y, W, H int
+}
+
+// TopoDot is one tee: the point where a trunk splits toward one of its
+// destinations. Its kind matches the flow it belongs to, so the dot is
+// drawn in the same colour as its wire.
+type TopoDot struct {
+	Kind string
+	X, Y int
 }
 
 // TopoNode is one box in the diagram.

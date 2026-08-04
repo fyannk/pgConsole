@@ -262,6 +262,10 @@ scans, and the tests. In short:
   and the drawing is the console's own SVG with the design system's
   classes. Layout is serialised — Graphviz keeps process-wide state — and
   a layout that fails omits the diagram rather than drawing a wrong one.
+  The grouped wiring drawing uses no engine at all: its placement is a
+  set of stated rules — pinned columns and rows, trunk buses in the
+  alleys between its dotted category frames — computed as arithmetic,
+  deterministic by construction.
 - The console UI is server-rendered `html/template` plus one embedded
   stylesheet and five narrowly separated, vendored enhancement layers:
   htmx 2.x owns same-origin HTML navigation and atomic screen refresh;

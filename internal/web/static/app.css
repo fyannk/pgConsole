@@ -1295,6 +1295,11 @@ h2.section-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: 
    wide screen inflating the box labels to headline size. Once capped the
    drawing centres in the panel rather than hugging the left edge. */
 svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; min-width: 420px; width: 100%; }
+/* The grouped drawing carries five columns and three frames, so the
+   58rem ceiling that suits the four-tier drawing would shrink its type
+   past reading. It takes the panel's full width instead; its height
+   follows from the taller viewBox. */
+.topo-panel-grouped svg.topo { max-width: none; }
 
 .topo text { font-family: var(--font-ui); }
 .topo-label { fill: var(--text); font-size: 13px; font-weight: 600; }
@@ -1302,10 +1307,23 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-disk { fill: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
 .topo-elabel { fill: var(--text-muted); font-size: 10.5px; }
 
+/* The grouped drawing's dotted category frames, drawn under everything
+   else, and the tee dots marking where a trunk splits. */
+.topo-frame rect { fill: none; stroke: var(--border-strong); stroke-dasharray: 2 5; stroke-width: 1.2; }
+.topo-frame-label { fill: var(--text-muted); font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+.topo-dot { stroke: var(--surface); stroke-width: 1; }
+.topo-dot-write, .topo-dot-archive { fill: var(--accent); }
+.topo-dot-read { fill: var(--text-muted); }
+.topo-dot-replicate { fill: var(--ok); }
+.topo-dot-disk { fill: var(--text-muted); }
+
 .topo-node rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.5; }
 .topo-apps rect, .topo-endpoint rect { fill: var(--surface-2); stroke: var(--border); }
 .topo-storage rect { fill: var(--accent-weak); stroke: var(--accent); }
 .topo-snapshot rect { fill: var(--surface-2); stroke: var(--border-strong); }
+/* A claim is infrastructure the instance rests on, quieter than the
+   instance itself. */
+.topo-pvc rect { fill: var(--surface-2); stroke: var(--border); }
 /* A pooler is infrastructure the cluster does not own, so it reads as a
    neighbour of the endpoints rather than one of the servers. */
 .topo-pooler rect { fill: var(--surface-2); stroke: var(--border-strong); }
@@ -1327,6 +1345,9 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-edge-read { stroke: var(--text-muted); }
 .topo-edge-replicate { stroke: var(--ok); stroke-dasharray: 5 4; }
 .topo-edge-archive { stroke: var(--accent); stroke-dasharray: 2 4; }
+/* The volume wire ties an instance to the claim it writes; dotted so a
+   mount never reads as a data flow. */
+.topo-edge-disk { stroke: var(--text-muted); stroke-dasharray: 1.5 3.5; }
 #topo-arrow path { fill: var(--border-strong); }
 
 /* The legend keys the line styles the router took off the wires; the

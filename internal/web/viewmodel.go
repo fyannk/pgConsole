@@ -1083,6 +1083,10 @@ func buildObjectStoreDetail(ref observe.ObjectStoreReference) *ObjectStoreDetail
 type ClusterOverviewView struct {
 	// Wiring is the lines[]-style diagram; nil without observed servers.
 	Wiring *TopologyView
+	// WiringGrouped is the same wiring drawn a fourth way: static
+	// placement, dotted category frames, trunked fans. Nil whenever
+	// Wiring is.
+	WiringGrouped *TopologyView
 	// Placement is one row per observed instance pod.
 	Placement []PlacementRowView
 	// PlacementNote is the derived spread statement, empty when there
@@ -1103,7 +1107,10 @@ type PlacementRowView struct {
 // page. Nil when nothing relevant has been observed, so the route
 // renders its empty state instead of an empty diagram.
 func buildClusterOverview(ctx context.Context, p *Page) *ClusterOverviewView {
-	view := &ClusterOverviewView{Wiring: buildClusterWiring(ctx, p)}
+	view := &ClusterOverviewView{
+		Wiring:        buildClusterWiring(ctx, p),
+		WiringGrouped: buildGroupedWiring(p),
+	}
 	if p.Pods != nil {
 		for _, row := range p.Pods.Rows {
 			view.Placement = append(view.Placement, PlacementRowView{

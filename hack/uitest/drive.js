@@ -321,6 +321,24 @@ async function checkNoScript(browser) {
   check('the Cytoscape panel stays hidden without JavaScript',
     cytoNoJs.present && cytoNoJs.hidden === true,
     `present ${cytoNoJs.present}, hidden ${cytoNoJs.hidden}`);
+  // The grouped drawing is server-drawn like the first one, so with no
+  // script it must be complete: frames, boxes, wires and tee dots.
+  const groupedNoJs = await page.evaluate(() => {
+    const panel = document.querySelector('.topo-panel-grouped');
+    if (!panel) return { present: false };
+    const svg = panel.querySelector('svg.topo');
+    return {
+      present: true,
+      frames: panel.querySelectorAll('.topo-frame').length,
+      labels: [...panel.querySelectorAll('.topo-frame-label')].map((t) => t.textContent).join(','),
+      boxes: svg ? svg.querySelectorAll('.topo-node').length : 0,
+      dots: svg ? svg.querySelectorAll('.topo-dot').length : 0,
+    };
+  });
+  check('the grouped drawing is complete without JavaScript',
+    groupedNoJs.present && groupedNoJs.frames === 3 && groupedNoJs.boxes > 0 && groupedNoJs.dots > 0,
+    `frames [${groupedNoJs.labels}], ${groupedNoJs.boxes} boxes, ${groupedNoJs.dots} tees`);
+
   const elkNoJs = await page.evaluate(() => {
     const section = document.querySelector('[data-topo-elk]');
     return {
