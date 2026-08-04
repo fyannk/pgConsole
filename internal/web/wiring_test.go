@@ -194,6 +194,44 @@ func TestWiringDrawsPoolersAgainstTheServiceTheyFront(t *testing.T) {
 	}
 }
 
+// The Cytoscape panel is an enhancement: it ships hidden, carrying the
+// same graph the drawing above already shows, so a reader without
+// scripting sees the finished SVG and no empty frame.
+func TestClusterOverviewShipsTheCytoscapePanelInert(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, wiringSources(), kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
+
+	if !strings.Contains(body, `data-topo-cyto data-topo-graph=`) {
+		t.Fatal("the interactive panel carries no graph")
+	}
+	if !strings.Contains(body, `data-topo-graph="{{`) && !strings.Contains(body, `&#34;nodes&#34;`) {
+		t.Error("the graph attribute is not the escaped JSON the template promises")
+	}
+	// Hidden in the served markup: the script unhides it once it draws.
+	i := strings.Index(body, "data-topo-cyto ")
+	if i < 0 {
+		t.Fatal("no interactive panel")
+	}
+	if tag := body[i : strings.Index(body[i:], ">")+i]; !strings.Contains(tag, "hidden") {
+		t.Errorf("the interactive panel is not hidden in the served markup: %q", tag)
+	}
+
+	// Both diagrams describe the same graph, so the panel adds no fact.
+	page := buildPage(context.Background(), "orders", "payments", snapshots{
+		window: time.Hour, cluster: wiringSources().snap, ok: true,
+		pods: wiringSources().pods, podsOK: true,
+	}, testNow, Links{})
+	view := buildClusterWiring(context.Background(), &page)
+	if view == nil {
+		t.Fatal("no wiring diagram was built")
+	}
+	if len(view.Graph.Nodes) != len(view.Nodes) {
+		t.Errorf("the graph has %d boxes, the drawing %d",
+			len(view.Graph.Nodes), len(view.Nodes))
+	}
+}
+
 func TestInstanceConditionReportsRestartsOnlyWhenThereAreSome(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ restarts, want string }{

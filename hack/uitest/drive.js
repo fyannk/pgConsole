@@ -137,6 +137,29 @@ async function checkEnhancement(browser) {
   check('flows are routed orthogonally', topo.cubic === 0, `${topo.cubic} cubic curves`);
   check('the legend keys the styles taken off the wires', topo.legend > 0, `${topo.legend} entries`);
 
+  // The Cytoscape panel on the cluster overview is an enhancement: it
+  // ships hidden and unhides itself once it has drawn into a canvas.
+  // Cytoscape wants to inject a <style> the policy refuses, so a blocked
+  // inline style here would mean the panel is drawing on borrowed luck.
+  await page.goto(new URL('/cluster/overview', STATES.healthy).toString(), { waitUntil: 'networkidle' });
+  const cyto = await page.evaluate(() => {
+    const section = document.querySelector('[data-topo-cyto]');
+    if (!section) return { present: false };
+    return {
+      present: true,
+      shown: !section.hidden,
+      canvases: section.querySelectorAll('canvas').length,
+      painted: [...section.querySelectorAll('canvas')]
+        .some((c) => c.getBoundingClientRect().width > 0),
+    };
+  });
+  check('the Cytoscape panel draws the same graph',
+    cyto.present && cyto.shown && cyto.canvases > 0 && cyto.painted,
+    `${cyto.canvases} canvases, shown ${cyto.shown}`);
+  const refusedStyles = errors.filter((e) => /Content Security Policy/i.test(e));
+  check('nothing is refused by the content security policy',
+    refusedStyles.length === 0, refusedStyles.slice(0, 2).join(' | '));
+
   // Tabs, on the pod detail: with no script every panel is served
   // visible; the enhancement shows one at a time and the click moves it.
   await page.goto(new URL('/cluster/pods/orders-1', STATES.healthy).toString(), { waitUntil: 'networkidle' });
@@ -260,6 +283,18 @@ async function checkNoScript(browser) {
   check('wiring diagram is drawn without JavaScript',
     topoNoJs.boxes > 0 && topoNoJs.edges > 0,
     `${topoNoJs.boxes} boxes, ${topoNoJs.edges} flows`);
+
+  // Its Cytoscape counterpart is the other way round: with no script it
+  // must stay hidden, so the page never shows an empty frame where a
+  // diagram was promised.
+  await page.goto(new URL('/cluster/overview', STATES.healthy).toString(), { waitUntil: 'domcontentloaded' });
+  const cytoNoJs = await page.evaluate(() => {
+    const section = document.querySelector('[data-topo-cyto]');
+    return { present: !!section, hidden: section ? section.hidden : null };
+  });
+  check('the Cytoscape panel stays hidden without JavaScript',
+    cytoNoJs.present && cytoNoJs.hidden === true,
+    `present ${cytoNoJs.present}, hidden ${cytoNoJs.hidden}`);
 
   await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'domcontentloaded' });
   check('panel bodies visible without JavaScript',

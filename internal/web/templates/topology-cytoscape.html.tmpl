@@ -1,0 +1,27 @@
+{{- /*
+  The same wiring diagram, laid out in the browser by Cytoscape.js.
+
+  This panel is an enhancement and nothing else: the SVG above it is the
+  complete rendering, settled server-side, and every fact here is already
+  in it. The section ships hidden and the script unhides it only once it
+  has drawn, so a reader without scripting sees the finished drawing and
+  no empty frame. The graph travels in an attribute rather than a script
+  block, so html/template's contextual escaping stays in charge.
+*/ -}}
+{{- define "topology-cytoscape" -}}
+{{- $graph := .GraphJSON}}
+{{- if $graph}}
+<section class="panel topo-panel" data-topo-cyto data-topo-graph="{{$graph}}" hidden>
+  <h2 class="topo-title">{{.Title}} — interactive</h2>
+  <div class="topo-cyto" data-topo-cyto-canvas></div>
+  {{- if .Legend}}
+  <div class="topo-legend">
+    {{- range .Legend}}
+    <span><svg viewBox="0 0 26 8"><path class="topo-edge topo-edge-{{.Kind}}" d="M0 4H26"></path></svg> {{.Label}}</span>
+    {{- end}}
+  </div>
+  {{- end}}
+  <p class="origin">The same graph as the drawing above, laid out in the browser by Cytoscape.js and draggable; it states no fact the drawing does not.</p>
+</section>
+{{- end}}
+{{- end -}}

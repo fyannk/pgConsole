@@ -1361,11 +1361,14 @@ func TestTopologyIsServedDrawn(t *testing.T) {
 			t.Errorf("served diagram misses %q", want)
 		}
 	}
-	// Nothing in the browser redraws diagrams any more, so no diagram
-	// script may be referenced.
-	if strings.Contains(body, "topology") && strings.Contains(body, ".js") &&
-		strings.Contains(body, `src="/static/topology`) {
-		t.Error("a diagram script is still referenced")
+	// A script may draw a diagram beside this one, but never this one:
+	// the served SVG above carries no scripted hook of its own.
+	svg := body[strings.Index(body, `<svg class="topo"`):]
+	svg = svg[:strings.Index(svg, "</svg>")]
+	for _, hook := range []string{"data-topo-graph", "data-topo-cyto", "onload", "x-data"} {
+		if strings.Contains(svg, hook) {
+			t.Errorf("the served drawing carries the scripted hook %q", hook)
+		}
 	}
 	// Every drawn box carries its own placement: a layout that failed
 	// would stack them all on one spot.

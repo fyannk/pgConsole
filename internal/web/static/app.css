@@ -1332,6 +1332,13 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 /* The legend keys the line styles the router took off the wires; the
    swatches reuse the edge classes, so a style can never drift from the
    line it names. */
+/* The Cytoscape panel's canvas. Cytoscape measures this box and draws
+   into it, so it needs a height of its own — the drawing has no
+   intrinsic one the way the served SVG's viewBox does. The positioning
+   is stated here rather than left to Cytoscape, which would inject a
+   <style> element the served Content-Security-Policy blocks. */
+.topo-cyto { block-size: 26rem; inline-size: 100%; position: relative; }
+
 .topo-legend { color: var(--text-muted); display: flex; flex-wrap: wrap; font-size: var(--text-xs); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
 .topo-legend span { align-items: center; display: flex; gap: var(--space-2); }
 .topo-legend svg { display: block; height: 8px; width: 26px; }

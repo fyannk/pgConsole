@@ -11,6 +11,7 @@
     {{- if .ClusterOverview}}
     {{- with .ClusterOverview.Wiring}}
     {{template "topology" .}}
+    {{template "topology-cytoscape" .}}
     {{- end}}
     {{- with .ClusterOverview}}
     {{- if .Placement}}

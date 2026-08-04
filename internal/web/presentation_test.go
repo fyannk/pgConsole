@@ -15,6 +15,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -166,6 +167,8 @@ func TestStaticAssetsAreServed(t *testing.T) {
 		"/static/htmx-2.0.10.min.js",
 		"/static/alpine.csp.js",
 		"/static/history-timeline.js",
+		"/static/cytoscape-3.34.0.min.js",
+		"/static/topology-cytoscape.js",
 		// Without this the browser requests /favicon.ico on every page
 		// load, takes a 404, and logs a console error. img-src 'self'
 		// rules out a data: URI, so it has to be a served asset.
@@ -204,8 +207,14 @@ func TestEveryPageRendersTheSharedShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read templates: %v", err)
 	}
+	// Partials are composed into a page rather than being one.
+	partials := map[string]bool{
+		"shell.html.tmpl":              true,
+		"topology.html.tmpl":           true,
+		"topology-cytoscape.html.tmpl": true,
+	}
 	for _, entry := range entries {
-		if entry.Name() == "shell.html.tmpl" || entry.Name() == "topology.html.tmpl" {
+		if partials[entry.Name()] {
 			continue
 		}
 		raw, err := assets.ReadFile("templates/" + entry.Name())
@@ -352,6 +361,27 @@ func TestVendoredUPlotIsPinned(t *testing.T) {
 		}
 		if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != want {
 			t.Fatalf("vendored %s digest = %s, want %s", path, got, want)
+		}
+	}
+}
+
+// TestVendoredCytoscapeIsPinned does the same for the graph library, and
+// asserts the property that lets it run at all: the served
+// Content-Security-Policy has no 'unsafe-eval', so a build that reached
+// for eval or new Function would be dead code in a browser.
+func TestVendoredCytoscapeIsPinned(t *testing.T) {
+	t.Parallel()
+	raw, err := assets.ReadFile("static/cytoscape-3.34.0.min.js")
+	if err != nil {
+		t.Fatalf("read vendored Cytoscape: %v", err)
+	}
+	const want = "9c2a3bf2592e0b14a1f7bec07c03a54f16dedf32af9cd0af155c716aa6c87bc3"
+	if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != want {
+		t.Fatalf("vendored Cytoscape digest = %s, want %s", got, want)
+	}
+	for _, forbidden := range []string{"new Function", "eval("} {
+		if bytes.Contains(raw, []byte(forbidden)) {
+			t.Errorf("vendored Cytoscape contains %q, which the served CSP forbids", forbidden)
 		}
 	}
 }

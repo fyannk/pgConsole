@@ -221,8 +221,26 @@ func buildClusterWiring(ctx context.Context, p *Page) *TopologyView {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 
+	// The same diagram as a graph, for the Cytoscape panel: the boxes and
+	// what connects them, without the geometry settled above. It carries
+	// no fact the SVG does not already show — a reader who never runs a
+	// script has lost nothing.
+	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
+
 	view.Caption = "Instances, roles, placement, claims, services and snapshots are observed; the timeline and quorum membership are operator-reported; the object store is read from its own resource."
 	return view
+}
+
+// wireGraphNodes restates the placed boxes as a positionless graph.
+func wireGraphNodes(nodes []TopoNode, rows map[string][]TopoGraphText) []TopoGraphNode {
+	out := make([]TopoGraphNode, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, TopoGraphNode{
+			ID: n.ID, Layer: n.Layer, Cls: n.Kind, State: n.State,
+			Lines: rows[n.ID], W: n.W, H: n.H,
+		})
+	}
+	return out
 }
 
 // wireServer is one server node before layout: its facts as rows.

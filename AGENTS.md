@@ -263,17 +263,21 @@ scans, and the tests. In short:
   classes. Layout is serialised — Graphviz keeps process-wide state — and
   a layout that fails omits the diagram rather than drawing a wrong one.
 - The console UI is server-rendered `html/template` plus one embedded
-  stylesheet and three narrowly separated, vendored enhancement layers:
+  stylesheet and four narrowly separated, vendored enhancement layers:
   htmx 2.x owns same-origin HTML navigation and atomic screen refresh;
   the Alpine CSP build owns local component state (never the standard
   Alpine build, which would require `script-src 'unsafe-eval'`); uPlot
   draws the metrics charts from series the document already carries and
-  a same-origin JSON poll. No layer draws a diagram: those ship finished. All are served from the binary, htmx
-  evaluation and browser history caching are disabled, and no layer
-  decides authorization or interprets cluster state. Content is never
-  gated behind scripting: the document is complete before any script
-  runs, enhancement-only controls carry `x-cloak`, a chart's window
-  summary is stated in text beside it, and no state word is ever
+  a same-origin JSON poll; Cytoscape.js lays out a second, pannable copy
+  of the cluster-overview wiring beside the served one. No layer draws
+  the diagram of record: that ships finished, and the Cytoscape panel is
+  hidden until it has drawn, so a reader without scripting sees the
+  finished drawing and never an empty frame. All are served from the
+  binary, htmx evaluation and browser history caching are disabled, and
+  no layer decides authorization or interprets cluster state. Content is
+  never gated behind scripting: the document is complete before any
+  script runs, enhancement-only controls carry `x-cloak`, a chart's
+  window summary is stated in text beside it, and no state word is ever
   replaced by a colour or a mark. `make test-ui` enforces all of that in
   a browser.
 
