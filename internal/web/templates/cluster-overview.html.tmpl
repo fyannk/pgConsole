@@ -12,6 +12,7 @@
     {{- with .ClusterOverview.Wiring}}
     {{template "topology" .}}
     {{template "topology-cytoscape" .}}
+    {{template "topology-elk" .}}
     {{- end}}
     {{- with .ClusterOverview}}
     {{- if .Placement}}

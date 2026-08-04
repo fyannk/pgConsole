@@ -217,6 +217,15 @@ func TestClusterOverviewShipsTheCytoscapePanelInert(t *testing.T) {
 		t.Errorf("the interactive panel is not hidden in the served markup: %q", tag)
 	}
 
+	// The ELK panel is the same bargain, and reads the same attribute.
+	j := strings.Index(body, "data-topo-elk ")
+	if j < 0 {
+		t.Fatal("no ELK panel")
+	}
+	if tag := body[j : strings.Index(body[j:], ">")+j]; !strings.Contains(tag, "hidden") {
+		t.Errorf("the ELK panel is not hidden in the served markup: %q", tag)
+	}
+
 	// Both diagrams describe the same graph, so the panel adds no fact.
 	page := buildPage(context.Background(), "orders", "payments", snapshots{
 		window: time.Hour, cluster: wiringSources().snap, ok: true,

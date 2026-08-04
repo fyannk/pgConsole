@@ -156,6 +156,32 @@ async function checkEnhancement(browser) {
   check('the Cytoscape panel draws the same graph',
     cyto.present && cyto.shown && cyto.canvases > 0 && cyto.painted,
     `${cyto.canvases} canvases, shown ${cyto.shown}`);
+  // The ELK panel is the same bargain drawn a different way: ELK decides
+  // the geometry and the console emits its own SVG, so the drawing must
+  // use the stylesheet's classes rather than colours of its own — that
+  // is what makes it follow the theme without being redrawn.
+  const elk = await page.evaluate(() => {
+    const section = document.querySelector('[data-topo-elk]');
+    if (!section) return { present: false };
+    const svg = section.querySelector('svg.topo');
+    const routes = svg ? [...svg.querySelectorAll('.topo-edge[marker-end]')]
+      .map((p) => p.getAttribute('d')) : [];
+    return {
+      present: true,
+      shown: !section.hidden,
+      boxes: svg ? svg.querySelectorAll('.topo-node').length : 0,
+      routes: routes.length,
+      cubic: routes.filter((d) => d.includes('C')).length,
+      inline: svg ? svg.querySelectorAll('[fill],[stroke]').length : -1,
+    };
+  });
+  check('the ELK panel draws the same graph as SVG',
+    elk.present && elk.shown && elk.boxes > 0 && elk.routes > 0,
+    `${elk.boxes} boxes, ${elk.routes} routes`);
+  check('ELK routes are orthogonal runs', elk.cubic === 0, `${elk.cubic} cubic curves`);
+  check('the ELK drawing leaves colour to the stylesheet',
+    elk.inline === 0, `${elk.inline} elements paint themselves`);
+
   const refusedStyles = errors.filter((e) => /Content Security Policy/i.test(e));
   check('nothing is refused by the content security policy',
     refusedStyles.length === 0, refusedStyles.slice(0, 2).join(' | '));
@@ -295,6 +321,17 @@ async function checkNoScript(browser) {
   check('the Cytoscape panel stays hidden without JavaScript',
     cytoNoJs.present && cytoNoJs.hidden === true,
     `present ${cytoNoJs.present}, hidden ${cytoNoJs.hidden}`);
+  const elkNoJs = await page.evaluate(() => {
+    const section = document.querySelector('[data-topo-elk]');
+    return {
+      present: !!section,
+      hidden: section ? section.hidden : null,
+      drawn: section ? section.querySelectorAll('svg.topo').length : -1,
+    };
+  });
+  check('the ELK panel stays hidden and undrawn without JavaScript',
+    elkNoJs.present && elkNoJs.hidden === true && elkNoJs.drawn === 0,
+    `hidden ${elkNoJs.hidden}, ${elkNoJs.drawn} drawings`);
 
   await page.goto(new URL('/cluster/pods', STATES.healthy).toString(), { waitUntil: 'domcontentloaded' });
   check('panel bodies visible without JavaScript',

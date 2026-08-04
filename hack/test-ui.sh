@@ -60,10 +60,34 @@ else
 fi
 cd "$ROOT"
 
+# Refuse to run against someone else's listener. A survivor from an
+# earlier run answers on these ports with an older build, and every
+# check then passes or fails against code that is not in the tree —
+# which is worse than not running at all.
+p=0
+while [ "$p" -lt 4 ]; do
+  port=$((PORT_BASE + p))
+  if curl -fsS --max-time 2 "http://127.0.0.1:$port/healthz" > /dev/null 2>&1; then
+    echo "[ui] a console is already answering on port $port — a harness from an" >&2
+    echo "[ui] earlier run is still up, and every check would be made against" >&2
+    echo "[ui] whatever build it is serving. Stop it first:" >&2
+    echo "[ui]   pkill -f uiharness.test" >&2
+    exit 1
+  fi
+  p=$((p + 1))
+done
+
+# Build the harness and run the binary directly. Backgrounding `go test`
+# would make harness_pid the wrapper, not the server it spawns, so the
+# cleanup below would kill the wrapper and orphan a listener holding
+# these ports.
+log "building the fixture harness"
+$GO test -tags=uiharness -c -o "$OUT/uiharness.test" ./internal/web/ > "$OUT/harness.log" 2>&1
+
 log "starting fixture harness on ports $PORT_BASE-$((PORT_BASE + 3))"
 PGCONSOLE_UI_PORT_BASE="$PORT_BASE" \
-  $GO test -tags=uiharness ./internal/web/ -run TestUIHarness -count=1 -v -timeout 12m \
-  > "$OUT/harness.log" 2>&1 &
+  "$OUT/uiharness.test" -test.run TestUIHarness -test.count=1 -test.v -test.timeout 12m \
+  >> "$OUT/harness.log" 2>&1 &
 harness_pid=$!
 
 log "waiting for the harness to accept connections"
