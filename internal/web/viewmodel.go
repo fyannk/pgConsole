@@ -760,6 +760,9 @@ type Page struct {
 	// ClusterOverview is the power-user wiring screen, derived from
 	// this page; nil without a snapshot.
 	ClusterOverview *ClusterOverviewView
+	// Objects is the inventory screen, grouped by the resource each
+	// object belongs to and carrying each kind's own freshness.
+	Objects *ObjectsView
 	// PodHistory is the roster screen's merged recent timeline, set by
 	// its handler only.
 	PodHistory []PodTimelineEntry
@@ -943,6 +946,7 @@ func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, 
 	page.Summary = buildSummary(&page)
 	page.Topology = buildGroupedWiring(&page)
 	page.ClusterOverview = buildClusterOverview(&page)
+	page.Objects = buildObjectsView(&page)
 	page.BackupsDrawing = buildBackupsDrawing(&page)
 	page.PoolersDrawing = buildPoolersWiring(&page)
 	page.DatabasesDrawing = buildDatabasesDrawing(&page)

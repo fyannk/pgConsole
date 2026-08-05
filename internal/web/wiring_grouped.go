@@ -725,7 +725,9 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
-	view.Caption = "The observed wiring grouped by role: poolers, the cluster, its backup schedules, and everything the data rests on — Kubernetes claims and snapshots apart from the object store. Placement is fixed — rw above ro, the primary left of its replicas, the claims staggered beside their instances."
+	// No caption: the frames and the legend already name every part, so
+	// a paragraph restating the layout rules speaks to whoever maintains
+	// the drawing rather than to the operator reading it.
 	return view
 }
 

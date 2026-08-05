@@ -1,0 +1,69 @@
+{{- /*
+  Objects. The inventory of everything this console observes, grouped by
+  the custom resource each object belongs to. Freshness is stated per
+  kind, not per screen: the kinds come from separate watches with
+  separate generations, so one line over the whole page would be a claim
+  no single source supports. A kind the console could not read says so
+  in its own words rather than rendering as an empty list, because
+  permission denied and none exist are different answers.
+*/ -}}
+{{template "page-head" "objects"}}
+{{template "shell-open" .Shell}}
+    {{- with .Objects}}
+    {{- range .Groups}}
+    <section class="panel sectioned" data-panel="objects">
+      <div class="panel-head">
+        <h2>{{.Parent}}</h2>
+        <p class="meta">{{.Summary}}</p>
+      </div>
+      <div class="panel-body">
+      <p class="state">{{.Detail}}</p>
+      {{- range .Kinds}}
+      <section class="objects-kind">
+        <div class="objects-kind-head">
+          <h3>{{.Kind}}</h3>
+          {{- if .Observed}}
+          <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
+          {{- else}}
+          <p class="meta" data-state="unknown">not observed</p>
+          {{- end}}
+        </div>
+        {{- if .Rows}}
+        <div class="table-scroll">
+        <table class="objects">
+          <thead><tr><th>Name</th><th>Detail</th></tr></thead>
+          <tbody>
+            {{- range .Rows}}
+            <tr{{if .State}} data-state="{{stateToken .State}}"{{end}}><td>{{.Name}}</td><td>{{.Detail}}</td></tr>
+            {{- end}}
+          </tbody>
+        </table>
+        </div>
+        {{- end}}
+        {{- if .Note}}
+        <p class="state">{{.Note}}</p>
+        {{- end}}
+        {{- if .Truncated}}
+        <p class="state">truncated: more objects matched than the display bound</p>
+        {{- end}}
+        <p class="origin">source: {{.Origin.Label}}</p>
+      </section>
+      {{- end}}
+      </div>
+    </section>
+    {{- end}}
+    {{- if not .Groups}}
+    <section class="panel">
+      <h2>Objects</h2>
+      <div class="empty"><strong>Nothing observed yet</strong>No source has answered for this cluster, so the console has no inventory to state.</div>
+      <p class="origin">source: kubernetes-observed</p>
+    </section>
+    {{- end}}
+    {{- else}}
+    <section class="panel">
+      <h2>Objects</h2>
+      <div class="empty"><strong>Nothing observed yet</strong>No source has answered for this cluster, so the console has no inventory to state.</div>
+      <p class="origin">source: kubernetes-observed</p>
+    </section>
+    {{- end}}
+{{template "shell-close"}}

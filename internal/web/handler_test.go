@@ -296,12 +296,17 @@ func TestHandlerClusterStatusRendersOperatorReportedStatus(t *testing.T) {
 		"3/3 ready",
 		"ClusterIsReady",
 		"ghcr.io/cloudnative-pg/postgresql:16.4",
-		"current — age 3s (generation 7)",
 		OriginOperator.Label(),
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index body misses %q", want)
 		}
+	}
+	// The cluster watch's own freshness is stated on the inventory, the
+	// one screen that sets every source's freshness beside the others.
+	objects := get(t, h, http.MethodGet, "/objects").Body.String()
+	if !strings.Contains(objects, "current — age 3s (generation 7)") {
+		t.Error("the cluster snapshot's freshness is stated nowhere")
 	}
 }
 
@@ -316,7 +321,7 @@ func TestHandlerIndexStaleSnapshotIsVisible(t *testing.T) {
 		Cluster:    healthyFacts(),
 	}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/objects").Body.String()
 	if !strings.Contains(body, "stale — age 2m30s (generation 9)") {
 		t.Errorf("stale snapshot not labeled: %s", body)
 	}
@@ -549,8 +554,14 @@ func TestHandlerClusterPodsSectionOwnStaleness(t *testing.T) {
 	if !strings.Contains(body, "snapshot: stale — age 2s (generation 5)") {
 		t.Error("stale pod snapshot not labeled in its own section")
 	}
-	if !strings.Contains(body, "current — age 0s (generation 3)") {
-		t.Error("cluster snapshot line lost its independent freshness")
+	// A stale pod watch must not drag the cluster watch down with it.
+	// The inventory is where the two freshnesses are read side by side.
+	objects := get(t, h, http.MethodGet, "/objects").Body.String()
+	if !strings.Contains(objects, "current — age 0s (generation 3)") {
+		t.Error("cluster snapshot lost its independent freshness")
+	}
+	if !strings.Contains(objects, "stale — age 2s (generation 5)") {
+		t.Error("the pod watch's own staleness is not stated on the inventory")
 	}
 }
 
@@ -781,8 +792,14 @@ func TestHandlerBackupObjectsSectionOwnStaleness(t *testing.T) {
 	if !strings.Contains(body, "snapshot: stale — age 2m00s (generation 8)") || !strings.Contains(body, "last-good") {
 		t.Fatal("last-good Backup catalog is not visibly stale")
 	}
-	if !strings.Contains(body, "current — age 0s (generation 3)") {
+	// A stale backup catalog must not degrade the cluster watch. Both
+	// freshnesses are stated on the inventory, from their own sources.
+	objects := get(t, h, http.MethodGet, "/objects").Body.String()
+	if !strings.Contains(objects, "current — age 0s (generation 3)") {
 		t.Fatal("backup staleness incorrectly degraded the cluster snapshot")
+	}
+	if !strings.Contains(objects, "stale — age 2m00s (generation 8)") {
+		t.Fatal("the backup watch's own staleness is not stated on the inventory")
 	}
 }
 

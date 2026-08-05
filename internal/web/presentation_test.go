@@ -73,8 +73,9 @@ func TestStateTokenAccompaniesTheStateWord(t *testing.T) {
 	if !strings.Contains(body, `data-state="stale"`) {
 		t.Error("stale snapshot carries no presentation token")
 	}
-	// The word survives alongside the token.
-	if !strings.Contains(body, "stale — age 2m30s (generation 9)") {
+	// The word survives alongside the token, on the section's own
+	// freshness line.
+	if !strings.Contains(body, "snapshot: stale — age 2s (generation 5)") {
 		t.Error("state word lost when the token was added")
 	}
 	if strings.Contains(body, `data-state="current"`) {

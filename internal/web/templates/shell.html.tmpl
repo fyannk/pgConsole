@@ -55,9 +55,6 @@
     <dt>Namespace</dt><dd>{{.Namespace}}</dd>
     {{- end}}
     <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
-    {{- if .SnapshotState}}
-    <dt>Snapshot</dt><dd data-state="{{stateToken .SnapshotState}}">{{.SnapshotState}}{{if .SnapshotAge}} — age {{.SnapshotAge}} (generation {{.Generation}}){{end}}</dd>
-    {{- end}}
     {{- with .Identity}}
     <dt>Identity</dt><dd>{{.User}} — {{.Level}} ({{.Label}})</dd>
     {{- end}}
@@ -72,7 +69,7 @@
 </header>
 {{- end -}}
 
-{{- /* sidebar renders a ShellView. Current keys: overview,
+{{- /* sidebar renders a ShellView. Current keys: overview, objects,
        cluster-overview, cluster-status, cluster-pods, cluster-events, cluster-metrics,
        backups-overview, backups-objects, backups-evidence,
        databases-overview, databases-roles, databases-publications,
@@ -86,6 +83,7 @@
   </div>
   <nav class="sidebar-nav" hx-boost="true">
     <a class="sidebar-link" href="/"{{if eq .Current "overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
+    <a class="sidebar-link" href="/objects"{{if eq .Current "objects"}} aria-current="page"{{end}} title="Objects"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></a>
 
     <div class="sidebar-group">
       <a class="sidebar-link sidebar-group-label" href="/cluster/overview" title="Cluster"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></a>

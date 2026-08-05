@@ -280,6 +280,7 @@ func (h *Handler) Routes() http.Handler {
 	// confines ingress to that proxy. Each section is its own screen; the
 	// Overview restates them in plain language.
 	mux.HandleFunc("GET /{$}", h.handleIndex)
+	mux.HandleFunc("GET /objects", h.handleObjects)
 	mux.HandleFunc("GET /cluster/overview", h.handleClusterOverview)
 	mux.HandleFunc("GET /cluster/status", h.handleClusterStatus)
 	mux.HandleFunc("GET /cluster/pods", h.handleClusterPods)
@@ -420,6 +421,12 @@ func (h *Handler) renderPage(w http.ResponseWriter, route, name string, data any
 // screen. The detail lives on the section screens the sidebar maps.
 func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "index", "index.html.tmpl", h.assemble(r, "overview"))
+}
+
+// handleObjects renders the inventory: every observed object grouped by
+// the resource it belongs to, each kind carrying its own freshness.
+func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "objects", "objects.html.tmpl", h.assemble(r, "objects"))
 }
 
 // handleClusterOverview renders the power-user wiring: the observed
