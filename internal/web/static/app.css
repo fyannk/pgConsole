@@ -814,13 +814,14 @@ section.panel h2 {
    down the whole screen instead of each card finding its own widths.
    The measures are in ch, which ties them to the text they hold rather
    than to a guess in pixels. Content longer than its column ends in an
-   ellipsis and carries the full text as a tooltip, which is the price
-   of the alignment — and cheaper than a ragged edge on nineteen
-   tables. */
+   ellipsis and carries the full text as a tooltip — but the measures
+   are set past the longest thing the screen actually holds, so that is
+   a safety net rather than a routine outcome: a truncated value is
+   useless, and the card is allowed to scroll instead. */
 .objects-kind table.objects {
   min-width: 0;
   table-layout: fixed;
-  width: 92ch;
+  width: 111ch;
 }
 .objects-kind table.objects th,
 .objects-kind table.objects td {
@@ -829,10 +830,15 @@ section.panel h2 {
   white-space: nowrap;
 }
 .objects-kind table.objects th:nth-child(1),
-.objects-kind table.objects td:nth-child(1) { width: 36ch; }
+.objects-kind table.objects td:nth-child(1) { width: 40ch; }
 .objects-kind table.objects th:nth-child(2),
-.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); width: 46ch; }
-.objects-raw-col { text-align: left; width: 10ch; }
+.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); width: 58ch; }
+.objects-raw-col { text-align: left; width: 13ch; }
+/* The state dot is an inline-block ::before, and inside a tr the browser
+   wraps it in an anonymous cell — which shifted every column one place
+   right on exactly the kinds that report a state. It belongs on the name
+   cell, where it marks the object it describes. */
+.objects-kind table.objects td[data-state] { font-weight: 500; }
 .objects-raw { color: var(--accent); font-weight: 600; }
 
 /* ------------------------------------------------------ Text primitives */

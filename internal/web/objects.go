@@ -282,7 +282,12 @@ func objectsBackupGroup(p *Page) ObjectGroupView {
 	backups := ObjectKindView{Kind: "Backups", APIKind: "Backup", Origin: b.Origin, Meta: b.Meta,
 		Observed: true, Truncated: b.BackupsTruncated}
 	for _, r := range b.Rows {
-		detail := r.Method + " · " + r.Phase
+		// The catalog's phase carries "— operator-reported claim", which
+		// the card already says twice: in the group's own words and in
+		// the footer's attribution. Here it only pushes the useful half
+		// of the line out of view.
+		phase, _, _ := strings.Cut(r.Phase, " — ")
+		detail := r.Method + " · " + phase
 		if r.SourceInstance != "" {
 			detail += " · from " + r.SourceInstance
 		}
