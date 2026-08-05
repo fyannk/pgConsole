@@ -36,7 +36,13 @@ func groupedPage(t *testing.T) Page {
 		quorum: src.quorum, quorumOK: true,
 		backups: observe.BackupsSnapshot{
 			Generation: 6, ObservedAt: testNow.Add(-2 * time.Second),
-			Backups: []observe.BackupFacts{{Name: "orders-first", UID: "b1", Phase: "completed", Method: "plugin"}},
+			// The operator served this backup from a replica, which is
+			// CloudNativePG's default target — the case the drawing must
+			// not redraw as if it had left the primary.
+			Backups: []observe.BackupFacts{{
+				Name: "orders-first", UID: "b1", Phase: "completed", Method: "plugin",
+				SourceInstance: "orders-2",
+			}},
 			ScheduledBackups: []observe.ScheduledBackupFacts{
 				{Name: "daily", UID: "sb1", Method: "plugin", Schedule: "0 0 2 * * *", Suspended: boolp(false)},
 			},
@@ -249,8 +255,8 @@ func TestGroupedWiringTrunksItsFans(t *testing.T) {
 	}
 
 	// The backup path is two archive wires — the schedule into the
-	// primary, the primary into the object store — and the lone
-	// schedule's drop collapses to one straight vertical line.
+	// cluster, the attributed instance into the object store — and the
+	// lone schedule's drop collapses to one straight vertical line.
 	archives := kinds["archive"]
 	if len(archives) != 2 {
 		t.Fatalf("%d archive wires, want 2", len(archives))
@@ -263,6 +269,40 @@ func TestGroupedWiringTrunksItsFans(t *testing.T) {
 	}
 	if straight != 1 {
 		t.Errorf("%d straight archive wires, want exactly the schedule drop", straight)
+	}
+
+	// WAL shipping and base backups are separate flows that happen to
+	// share a destination, so the store is reached by one wire of each
+	// kind — and they leave different instances, because the operator
+	// served the backup from a replica.
+	if got := len(kinds["wal"]); got != 1 {
+		t.Fatalf("%d WAL wires, want 1", got)
+	}
+	source := map[string]string{}
+	for _, l := range view.Graph.Links {
+		if l.Target == "store" {
+			source[l.Kind] = l.Source
+		}
+	}
+	if source["wal"] == "" || source["archive"] == "" {
+		t.Fatalf("the object store is not reached by both flows: %v", source)
+	}
+	if source["wal"] == source["archive"] {
+		t.Errorf("both object-store flows leave %q; the backup was served by a replica, "+
+			"so only WAL should leave the primary", source["wal"])
+	}
+	labels := map[string]string{}
+	for _, n := range view.Graph.Nodes {
+		for _, l := range n.Lines {
+			if l.C == "label" {
+				labels[n.ID] = l.T
+				break
+			}
+		}
+	}
+	if !strings.HasPrefix(labels[source["archive"]], "orders-2") {
+		t.Errorf("the base-backup wire leaves %q, want the attributed instance orders-2",
+			labels[source["archive"]])
 	}
 
 	// Tees carry dots in the styles of the flows that split.
@@ -282,7 +322,7 @@ func TestGroupedWiringTrunksItsFans(t *testing.T) {
 	for _, l := range view.Legend {
 		legend = append(legend, l.Kind)
 	}
-	if got, want := strings.Join(legend, ","), "write,read,replicate,archive,disk"; got != want {
+	if got, want := strings.Join(legend, ","), "write,read,replicate,wal,archive,disk"; got != want {
 		t.Errorf("legend = %s, want %s", got, want)
 	}
 }
@@ -308,5 +348,45 @@ func TestGroupedWiringDropsAbsentGroups(t *testing.T) {
 	}
 	if len(view.Frames) != 1 {
 		t.Errorf("%d frames, want the cluster frame alone", len(view.Frames))
+	}
+}
+
+// A Backup the operator never attributed to an instance buys no
+// base-backup wire. The console has no word on where that flow began,
+// and drawing it from the primary would restate the assumption the
+// split exists to retire — CloudNativePG serves base backups from a
+// standby by default. WAL shipping is unaffected: that one is the
+// primary's duty whatever the backup target says.
+func TestGroupedWiringDrawsNoBaseWireWithoutAnAttributedInstance(t *testing.T) {
+	t.Parallel()
+	src := wiringSources()
+	page := buildPage(context.Background(), "orders", "payments", snapshots{
+		window: time.Hour, cluster: src.snap, ok: true,
+		pods: src.pods, podsOK: true,
+		backups: observe.BackupsSnapshot{
+			Generation: 6, ObservedAt: testNow.Add(-2 * time.Second),
+			Backups: []observe.BackupFacts{
+				{Name: "orders-first", UID: "b1", Phase: "completed", Method: "plugin"},
+			},
+		},
+		backupsOK: true,
+	}, testNow, Links{})
+	view := buildGroupedWiring(&page)
+	if view == nil {
+		t.Fatal("no grouped drawing was built")
+	}
+	for _, l := range view.Graph.Links {
+		if l.Kind == "archive" && l.Target == "store" {
+			t.Errorf("a base-backup wire reaches the store from %q with no instance attributed", l.Source)
+		}
+	}
+	wal := 0
+	for _, l := range view.Graph.Links {
+		if l.Kind == "wal" && l.Target == "store" {
+			wal++
+		}
+	}
+	if wal != 1 {
+		t.Errorf("%d WAL wires into the store, want 1 regardless of backup attribution", wal)
 	}
 }

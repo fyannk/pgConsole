@@ -176,11 +176,15 @@ func buildGroupedWiring(p *Page) *TopologyView {
 	var primary *TopoNode
 	var replicas []*TopoNode
 	names := map[string]string{}
+	// The reverse map lets a flow the operator attributed to an instance
+	// by name — a base backup's source — leave that instance's box.
+	byName := map[string]*TopoNode{}
 	for i, s := range servers {
 		id := fmt.Sprintf("srv-%d", i)
 		n := add(id, s.kind, s.state, wireWSrv, s.rows)
 		if s.name != "" {
 			names[id] = s.name
+			byName[s.name] = n
 		}
 		if s.kind == "primary" && primary == nil {
 			primary = n
@@ -484,7 +488,11 @@ func buildGroupedWiring(p *Page) *TopologyView {
 
 	// Replication leaves the primary once: one trunk to the bus in the
 	// storage alley, then a branch left into each replica's right edge.
-	archBus := clusterRight + grpAlley*0.32
+	// The two object-store flows get their own lanes in the alley so a
+	// cluster that ships WAL and takes base backups from the same
+	// instance still reads as two wires rather than one thick smear.
+	walBus := clusterRight + grpAlley*0.24
+	baseBus := clusterRight + grpAlley*0.44
 	replBus := clusterRight + grpAlley*0.68
 	if primary != nil && len(replicas) > 0 {
 		out := cy(primary) + grpPortOff
@@ -521,23 +529,57 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		}
 	}
 
-	// The archive trunk climbs the alley from the primary to the
-	// snapshots and on up into the object storage frame.
-	if primary != nil && (store != nil || snapshot != nil) {
-		out := cy(primary) - grpPortOff
-		targets := []*TopoNode{}
+	// The trunk climbs the alley to the snapshots and on up into the
+	// object storage frame. Two flows end in that frame and they do not
+	// share an origin: shipping WAL is the primary's continuous duty,
+	// while a base backup is served by whichever instance the operator
+	// picked — by default a standby, not the primary. One wire for both
+	// would assert an origin the Backup resources deny, so the WAL wire
+	// leaves the primary and the base wire leaves the instance the
+	// operator actually named.
+	//
+	// When no Backup named an instance the base wire is simply not
+	// drawn: the console has no word on where that flow began, and
+	// inventing the primary is the claim this split exists to retire.
+	// The frame's own rows still say the repository holds both
+	// prefixes, so nothing about the destination goes unsaid.
+	var baseSrc *TopoNode
+	if p.Backups != nil && p.Backups.BaseSourceInstance != "" {
+		baseSrc = byName[p.Backups.BaseSourceInstance]
+	}
+	// Each flow enters the frames it reaches at its own port, so two
+	// arrows land on the Cloud backup box rather than one doubled line.
+	archTrunk := func(kind string, from *TopoNode, bus, inOff float64, targets []*TopoNode) {
+		out := cy(from) - grpPortOff
+		for i, tgt := range targets {
+			in := cy(tgt) + inOff
+			wire(kind, from, tgt, []topoPoint{
+				{right(from), out}, {bus, out}, {bus, in}, {left(tgt), in},
+			})
+			if len(targets) > 1 && i < len(targets)-1 {
+				dot(kind, bus, in)
+			}
+		}
+	}
+	if primary != nil && store != nil {
+		archTrunk("wal", primary, walBus, -grpPortOff/2, []*TopoNode{store})
+	}
+	// A volume snapshot is a base backup taken by another method, so it
+	// leaves the same attributed instance rather than the primary.
+	if baseSrc != nil {
+		var targets []*TopoNode
 		if snapshot != nil {
 			targets = append(targets, snapshot)
 		}
 		if store != nil {
 			targets = append(targets, store)
 		}
-		for i, tgt := range targets {
-			wire("archive", primary, tgt, []topoPoint{
-				{right(primary), out}, {archBus, out}, {archBus, cy(tgt)}, {left(tgt), cy(tgt)},
-			})
-			if len(targets) > 1 && i < len(targets)-1 {
-				dot("archive", archBus, cy(tgt))
+		if len(targets) > 0 {
+			archTrunk("archive", baseSrc, baseBus, grpPortOff/2, targets)
+			// When the operator picked the primary, both flows leave one
+			// port: mark the split the way every other fan marks it.
+			if baseSrc == primary && store != nil {
+				dot("archive", right(baseSrc), cy(baseSrc)-grpPortOff)
 			}
 		}
 	}

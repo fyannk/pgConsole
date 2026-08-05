@@ -30,7 +30,12 @@ var legendOrder = []LegendItem{
 	{Kind: "write", Label: "writes"},
 	{Kind: "read", Label: "reads"},
 	{Kind: "replicate", Label: "replication"},
-	{Kind: "archive", Label: "backup"},
+	// The two object-store flows are separate everywhere but the box
+	// they end in: continuous WAL shipping leaves the primary, periodic
+	// base backups leave whichever instance the operator picked. One
+	// wire for both would assert a shared origin the resources deny.
+	{Kind: "wal", Label: "WAL streaming"},
+	{Kind: "archive", Label: "base backup"},
 	{Kind: "disk", Label: "volume"},
 }
 
