@@ -78,8 +78,17 @@ package:
 	cd $(DIST_DIR) && sha256sum pgconsole-* > SHA256SUMS
 	printf 'version=%s\n' '$(VERSION)' > $(DIST_DIR)/VERSION
 
+# The daemon's own proxy settings cover image pulls but not RUN steps, so
+# behind a mandatory proxy `go mod download` inside the builder has neither
+# a route out nor working DNS. These are Docker's predefined build args:
+# passing them without a value forwards the caller's environment, and on a
+# machine with no proxy they stay unset and change nothing.
+DOCKER_BUILD_PROXY_ARGS = \
+	--build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY \
+	--build-arg http_proxy --build-arg https_proxy --build-arg no_proxy
+
 docker-build:
-	docker build --tag $(IMAGE) .
+	docker build $(DOCKER_BUILD_PROXY_ARGS) --tag $(IMAGE) .
 
 supply-chain: docker-build
 	./hack/generate-supply-chain-artifacts.sh $(IMAGE) $(ARTIFACT_DIR)/release

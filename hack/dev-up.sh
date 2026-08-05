@@ -33,6 +33,12 @@
 # CERT_MANAGER_MANIFEST, BARMAN_MANIFEST, IMAGE, SKIP_BUILD=true,
 # SKIP_BACKUP=true, RECREATE=true, NO_FORWARD=true.
 #
+# Behind a mandatory HTTP proxy, export HTTP_PROXY/HTTPS_PROXY/NO_PROXY
+# before running: kubectl reads them to fetch the manifests above, kind
+# copies them into the node so containerd can pull images, and
+# `make docker-build` forwards them into the builder. Nothing here needs
+# the proxy on loopback, and nothing injects it into the pods.
+#
 # Ctrl-C stops the forward and proxies; the cluster stays up.
 # Tear down with:  kind delete cluster --name "$CLUSTER"
 set -eu
@@ -326,7 +332,9 @@ kubectl -n payments port-forward deploy/pgconsole-orders 3000:3000 > /dev/null 2
 PIDS="$PIDS $!"
 
 # Wait until the raw console answers before the proxies start pointing at it.
-if ! curl --retry 30 --retry-connrefused --retry-delay 1 -fsS -o /dev/null http://127.0.0.1:3000/healthz; then
+# --noproxy keeps this off any http_proxy the machine mandates: the console
+# is on loopback, and a proxy asked to reach it would answer for itself.
+if ! curl --noproxy '*' --retry 30 --retry-connrefused --retry-delay 1 -fsS -o /dev/null http://127.0.0.1:3000/healthz; then
   log "console never became reachable on 127.0.0.1:3000"
   exit 1
 fi
