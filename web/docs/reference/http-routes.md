@@ -16,7 +16,6 @@ refuses.
 |---|---|---|---|---|
 | GET | `/` | baseline | always | Plain-language overview assembled from the attributed screens. |
 | GET | `/objects` | baseline | always | Inventory of every observed object, grouped by the resource it belongs to, each kind carrying its own watch's freshness. |
-| GET | `/cluster/status` | baseline | always | Operator-reported cluster status, conditions, topology, quorum, and image catalog. |
 | GET | `/cluster/pods` | baseline | always | Membership-verified instance pods observed by Kubernetes. |
 | GET | `/cluster/events` | baseline | always | Bounded, age-windowed Kubernetes events for cluster candidates. |
 | GET | `/cluster/logs` | baseline | always | Per-pod log-tail launch points; actual tails remain level-gated. |

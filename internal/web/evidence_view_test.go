@@ -162,7 +162,7 @@ func TestHandlerBackupEvidenceUnknownWithoutContact(t *testing.T) {
 	// The independence of the two sources is the point: a silent sidecar
 	// must not take the operator-reported cluster section down with it,
 	// and that section is now its own screen.
-	if cluster := get(t, h, http.MethodGet, "/cluster/status").Body.String(); !strings.Contains(cluster, "Cluster in healthy state") {
+	if cluster := get(t, h, http.MethodGet, "/cluster/overview").Body.String(); !strings.Contains(cluster, "Cluster in healthy state") {
 		t.Error("sidecar absence degraded the cluster section")
 	}
 	if rec := get(t, h, http.MethodGet, "/readyz"); rec.Code != http.StatusOK {

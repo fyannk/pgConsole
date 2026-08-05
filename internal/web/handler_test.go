@@ -289,7 +289,7 @@ func TestHandlerClusterStatusRendersOperatorReportedStatus(t *testing.T) {
 		Cluster:    healthyFacts(),
 	}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/cluster/status").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
 	for _, want := range []string{
 		"Cluster in healthy state",
 		"orders-1",
@@ -336,7 +336,7 @@ func TestHandlerClusterStatusAbsentClusterIsExplicit(t *testing.T) {
 	t.Parallel()
 	snap := observe.Snapshot{Generation: 2, ObservedAt: testNow, Cluster: observe.ClusterFacts{Present: false}}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	rec := get(t, h, http.MethodGet, "/cluster/status")
+	rec := get(t, h, http.MethodGet, "/cluster/overview")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("index status = %d", rec.Code)
 	}
@@ -527,7 +527,7 @@ func TestHandlerClusterStatusRendersPrimaryDisagreement(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/cluster/status").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
 	for _, want := range []string{
 		"disagreement on the primary instance",
 		"current primary is orders-1",
@@ -1140,7 +1140,7 @@ func TestClusterStatusRendersTheFailoverQuorum(t *testing.T) {
 		quorumOK: true,
 	}
 	h, _ := newTestHandler(t, configured, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/cluster/status").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
 	for _, want := range []string{"Failover quorum", "orders-1", "orders-2", "operator-reported"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("quorum panel misses %q", want)
@@ -1150,7 +1150,7 @@ func TestClusterStatusRendersTheFailoverQuorum(t *testing.T) {
 	absent := configured
 	absent.quorum = observe.FailoverQuorumSnapshot{Generation: 2, ObservedAt: testNow}
 	h, _ = newTestHandler(t, absent, kube.FakeProber{}, Links{})
-	if body := get(t, h, http.MethodGet, "/cluster/status").Body.String(); !strings.Contains(body, "Not configured") {
+	if body := get(t, h, http.MethodGet, "/cluster/overview").Body.String(); !strings.Contains(body, "Not configured") {
 		t.Error("a cluster without a quorum does not say so")
 	}
 }

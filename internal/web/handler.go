@@ -282,7 +282,6 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", h.handleIndex)
 	mux.HandleFunc("GET /objects", h.handleObjects)
 	mux.HandleFunc("GET /cluster/overview", h.handleClusterOverview)
-	mux.HandleFunc("GET /cluster/status", h.handleClusterStatus)
 	mux.HandleFunc("GET /cluster/pods", h.handleClusterPods)
 	mux.HandleFunc("GET /cluster/pods/{pod}", h.handlePodDetail)
 	mux.HandleFunc("GET /cluster/events", h.handleClusterEvents)
@@ -487,12 +486,6 @@ func (h *Handler) attachRetainedRevisions(objects *ObjectsView) {
 // path.
 func (h *Handler) handleClusterOverview(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, "cluster-overview", "cluster-overview.html.tmpl", h.assemble(r, "cluster-overview"))
-}
-
-// handleClusterStatus renders the operator-reported cluster verdict,
-// topology, and conditions.
-func (h *Handler) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
-	h.renderPage(w, "cluster-status", "cluster-status.html.tmpl", h.assemble(r, "cluster-status"))
 }
 
 // handleClusterPods renders the Kubernetes-observed instance pods and
