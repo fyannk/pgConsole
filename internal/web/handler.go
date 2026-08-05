@@ -284,7 +284,6 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /cluster/overview", h.handleClusterOverview)
 	mux.HandleFunc("GET /cluster/pods", h.handleClusterPods)
 	mux.HandleFunc("GET /cluster/pods/{pod}", h.handlePodDetail)
-	mux.HandleFunc("GET /cluster/events", h.handleClusterEvents)
 	mux.HandleFunc("GET /backups", h.handleBackupsOverview)
 	mux.HandleFunc("GET /backups/objects", h.handleBackupsObjects)
 	mux.HandleFunc("GET /backups/evidence", h.handleBackupsEvidence)
@@ -499,11 +498,6 @@ func (h *Handler) handleClusterPods(w http.ResponseWriter, r *http.Request) {
 // recentPodHistoryBound caps the roster screen's timeline; the per-pod
 // detail carries the rest.
 const recentPodHistoryBound = 8
-
-// handleClusterEvents renders the age-windowed cluster events.
-func (h *Handler) handleClusterEvents(w http.ResponseWriter, r *http.Request) {
-	h.renderPage(w, "cluster-events", "cluster-events.html.tmpl", h.assemble(r, "cluster-events"))
-}
 
 // handleBackupsOverview renders the backup catalog verdict and the
 // operator-versus-repository cross-check.

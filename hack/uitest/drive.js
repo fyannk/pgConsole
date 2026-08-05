@@ -174,7 +174,6 @@ async function checkEnhancement(browser) {
   const historyAfter = (await historyPanel.isVisible()) && !(await statusPanel.isVisible());
   check('pod detail tabs switch panels', statusFirst && historyAfter,
     `status-first=${statusFirst}, history-after=${historyAfter}`);
-  await page.goto(new URL('/cluster/events', STATES.healthy).toString(), { waitUntil: 'networkidle' });
 
   // Auto-refresh must never be on unless asked for.
   check('auto-refresh defaults to off',

@@ -70,7 +70,7 @@
 {{- end -}}
 
 {{- /* sidebar renders a ShellView. Current keys: overview, objects,
-       cluster-overview, cluster-pods, cluster-events, cluster-metrics,
+       cluster-overview, cluster-pods, cluster-metrics,
        backups-overview, backups-objects, backups-evidence,
        databases-overview, databases-roles, databases-publications,
        databases-subscriptions,
@@ -90,7 +90,6 @@
       <div class="sidebar-sub">
         <a class="sidebar-link" href="/cluster/overview"{{if eq .Current "cluster-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
         <a class="sidebar-link" href="/cluster/pods"{{if eq .Current "cluster-pods"}} aria-current="page"{{end}} title="Pods"><svg><use href="#i-pods"></use></svg><span class="sidebar-label">Pods</span></a>
-        <a class="sidebar-link" href="/cluster/events"{{if eq .Current "cluster-events"}} aria-current="page"{{end}} title="Events"><svg><use href="#i-events"></use></svg><span class="sidebar-label">Events</span></a>
 		{{- if .MetricsAvailable}}
 		<a class="sidebar-link" href="/cluster/metrics"{{if eq .Current "cluster-metrics"}} aria-current="page"{{end}} title="Instance metrics"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></a>
 		{{- else}}
