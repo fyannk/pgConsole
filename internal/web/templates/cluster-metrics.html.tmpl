@@ -21,6 +21,16 @@
     <p class="origin">source: instance-reported metrics</p>
   </section>
   {{- end}}
+  {{- if .HasSamples}}
+  <div class="metrics-window" data-metrics-window hidden aria-hidden="true">
+    <label for="metrics-window">Window</label>
+    <select id="metrics-window" data-metrics-window-select>
+      <option value="raw">Live — the scrape window</option>
+      <option value="retention">Full retention</option>
+    </select>
+    <span class="metrics-hint">drag across a chart to zoom, double-click to reset</span>
+  </div>
+  {{- end}}
   {{- range .Series}}
   <section class="panel">
     <h2>{{.Title}}{{if .Unit}} <span class="origin">({{.Unit}})</span>{{end}}</h2>

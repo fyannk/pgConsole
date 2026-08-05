@@ -229,6 +229,31 @@ body {
 .manifest .j-null { color: var(--storage); font-weight: 600; }
 
 .metric-chart { margin: var(--space-3) 0 var(--space-2); overflow-x: auto; }
+.metrics-window { align-items: center; display: flex; gap: var(--space-2); margin: var(--space-3) 0 0; }
+/* The cursor readout. Positioned by transform inside uPlot's own over
+   box, and pointer-events:none so it can never sit between the pointer
+   and the plot it is reporting on. */
+.metric-tip {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px oklch(0% 0 0 / 0.18);
+  font-size: var(--text-xs);
+  left: 0;
+  padding: var(--space-2);
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+  z-index: 2;
+}
+.metric-tip-time { color: var(--text-muted); margin-bottom: var(--space-1); }
+.metric-tip-row { align-items: center; display: flex; gap: var(--space-2); }
+.metric-tip-key { border-radius: 2px; display: inline-block; height: 0.5rem; width: 0.5rem; }
+.metric-tip-name { color: var(--text-muted); }
+.metric-tip-val { font-family: var(--font-mono); font-weight: 600; margin-left: auto; }
+.metrics-window label { color: var(--text-muted); font-size: var(--text-sm); }
+.metrics-hint { color: var(--text-faint); font-size: var(--text-xs); margin-left: var(--space-3); }
 .metric-chart .u-legend { color: var(--text-muted); font-size: var(--text-xs); }
 
 /* ------------------------------------------------------------- Tabs
