@@ -129,19 +129,25 @@ YAML
 
   # The sidecar is a native (restartable init) container, so it shows up
   # in .spec.initContainers, not .spec.containers.
+  #
+  # Select on podRole=instance, not on cnpg.io/cluster: the latter also
+  # matches the two poolers added just above, and a PgBouncer pod never
+  # gains a barman sidecar — waiting on it can only time out. Counting
+  # Running instances against spec.instances rather than looking for a
+  # missing one also keeps the rolling restart honest: mid-roll the list
+  # is short, and "none of the pods I can see lacks it" would pass on an
+  # empty list.
   log "waiting for every instance to gain the plugin sidecar"
+  want=$(kubectl -n payments get cluster orders -o jsonpath='{.spec.instances}')
   i=0
   while :; do
-    missing=0
-    for pod in $(kubectl -n payments get pods -l cnpg.io/cluster=orders \
-      -o jsonpath='{range .items[*]}{.metadata.name} {end}' 2>/dev/null); do
-      kubectl -n payments get pod "$pod" \
-        -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null |
-        grep -q plugin-barman-cloud || missing=1
-    done
-    [ "$missing" -eq 0 ] && break
+    have=$(kubectl -n payments get pods -l cnpg.io/podRole=instance \
+      --field-selector=status.phase=Running \
+      -o jsonpath='{range .items[*]}{.spec.initContainers[*].name}{"\n"}{end}' 2>/dev/null |
+      grep -c plugin-barman-cloud || true)
+    [ "${have:-0}" -eq "$want" ] && break
     i=$((i + 1))
-    [ "$i" -le 120 ] || { log "the plugin sidecar never appeared on the instances"; exit 1; }
+    [ "$i" -le 120 ] || { log "the plugin sidecar never appeared on the instances ($have/$want)"; exit 1; }
     sleep 5
   done
   log "backup wiring ready — WAL archives to s3://pgbackups/orders"
