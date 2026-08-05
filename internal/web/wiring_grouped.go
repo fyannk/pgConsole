@@ -53,6 +53,12 @@ const (
 	// grpColGap separates columns inside the cluster frame; the read
 	// bus runs down the middle of the services-to-primary gap.
 	grpColGap = 48
+	// grpReplGap is the wider primary-to-replicas corridor. Replication
+	// runs down it rather than round the far side of the replicas, so
+	// the wire sits between the two things it relates; the extra width
+	// over grpColGap is what lets its label stand upright in the lane
+	// without touching either column.
+	grpReplGap = 76
 	// grpAlley separates two frames; the replication and archive buses
 	// run in the cluster-to-storage alley.
 	grpAlley = 60
@@ -285,7 +291,7 @@ func buildGroupedWiring(p *Page) *TopologyView {
 	svcX := x
 	x += wireWSvc + grpColGap
 	primX := x
-	x += wireWSrv + grpColGap
+	x += wireWSrv + grpReplGap
 	replX := x
 	x += wireWSrv + grpPad
 	clusterRight := x
@@ -496,31 +502,43 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		}
 	}
 
-	// Replication leaves the primary once: one trunk to the bus in the
-	// storage alley, then a branch left into each replica's right edge.
-	// The two object-store flows get their own lanes in the alley so a
-	// cluster that ships WAL and takes base backups from the same
-	// instance still reads as two wires rather than one thick smear.
-	walBus := clusterRight + grpAlley*0.24
-	baseBus := clusterRight + grpAlley*0.44
-	replBus := clusterRight + grpAlley*0.68
+	// With replication out of the alley, the two object-store flows take
+	// the whole width of it, far enough apart that a cluster shipping
+	// WAL and taking base backups from the same instance still reads as
+	// two wires rather than one thick smear.
+	walBus := clusterRight + grpAlley*0.3
+	baseBus := clusterRight + grpAlley*0.7
+
+	// Replication runs down the corridor between the primary and its
+	// replicas rather than round their far side: the wire then sits
+	// between the two things it relates, and the reader follows it in
+	// the direction the data moves. Each branch enters a replica's left
+	// edge below the read wire's port, so the two arrivals stay two
+	// arrows.
+	replBus := float64(primX+wireWSrv) + grpReplGap/2
 	if primary != nil && len(replicas) > 0 {
 		out := cy(primary) + grpPortOff
+		firstIn := out
 		for i, r := range replicas {
 			in := cy(r) + grpPortOff
 			wire("replicate", primary, r, []topoPoint{
-				{right(primary), out}, {replBus, out}, {replBus, in}, {right(r), in},
+				{right(primary), out}, {replBus, out}, {replBus, in}, {left(r), in},
 			})
 			if i < len(replicas)-1 {
 				dot("replicate", replBus, in)
 			}
+			if i == 0 {
+				firstIn = in
+			}
 		}
-		// The label rides the trunk itself, in the clear corridor right
-		// of the primary, not down the bus where the branches and the
-		// volume wires cross.
+		// The corridor is tall and narrow, so the label stands upright
+		// in it. It rides the stretch above the first branch — the part
+		// that is still one trunk — which is also the stretch no read
+		// wire crosses on its way into a replica's left edge.
 		edges[len(edges)-1].Label = "replication"
-		edges[len(edges)-1].LabelX = int((right(primary) + replBus) / 2)
-		edges[len(edges)-1].LabelY = int(out) - 7
+		edges[len(edges)-1].LabelX = int(replBus)
+		edges[len(edges)-1].LabelY = int((out + firstIn) / 2)
+		edges[len(edges)-1].LabelVertical = true
 	}
 
 	// Each instance onto its claims: one exit, a drop bus beside the
@@ -601,18 +619,20 @@ func buildGroupedWiring(p *Page) *TopologyView {
 			}
 			// The base wire's run out of its instance is too short to
 			// carry text — the alley is narrow and the instance may be
-			// the replica column, hard against it. Its label rides the
-			// climb instead, in the empty band between the cluster frame
-			// and the top band, naming the mechanism the operator
+			// the replica column, hard against it. The label stands
+			// upright on the climb instead, where the lane is as long as
+			// the drawing is tall, and names the mechanism the operator
 			// reported rather than one the drawing assumes.
 			if store != nil {
 				label := "base backup"
 				if p.Backups.BaseVia != "" {
 					label += " · " + p.Backups.BaseVia
 				}
-				edges[len(edges)-1].Label = label
-				edges[len(edges)-1].LabelX = int(baseBus)
-				edges[len(edges)-1].LabelY = int(clusterTop) - 7
+				last := &edges[len(edges)-1]
+				last.Label = label
+				last.LabelX = int(baseBus)
+				last.LabelY = int((cy(baseSrc) - grpPortOff + cy(store) + grpPortOff/2) / 2)
+				last.LabelVertical = true
 			}
 		}
 	}

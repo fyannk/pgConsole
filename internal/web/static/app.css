@@ -1396,7 +1396,11 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
    dashed. Each wire carries its own word, so there is no legend. */
 .topo-edge-owns { stroke: var(--ok); }
 .topo-edge-refs { stroke: var(--accent); stroke-dasharray: 5 4; }
-#topo-arrow path { fill: var(--border-strong); }
+/* The head belongs to its wire, so it takes the referencing path's own
+   stroke. The flat fallback comes first for anything that does not know
+   context-stroke, which then keeps the previous neutral head rather
+   than losing the arrow altogether. */
+#topo-arrow path { fill: var(--border-strong); fill: context-stroke; }
 
 /* The legend keys the line styles the router took off the wires; the
    swatches reuse the edge classes, so a style can never drift from the

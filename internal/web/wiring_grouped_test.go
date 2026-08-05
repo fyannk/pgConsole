@@ -237,6 +237,45 @@ func TestGroupedWiringTrunksItsFans(t *testing.T) {
 	if repl[0].Label != "replication" && repl[1].Label != "replication" {
 		t.Error("no replication branch carries the label")
 	}
+	// Replication runs down the corridor between the primary and its
+	// replicas, so every branch arrives on a replica's left edge. Round
+	// the far side it would have arrived on the right.
+	primRight, replLeft := 0, 1<<30
+	for _, n := range view.Nodes {
+		switch n.Kind {
+		case "primary":
+			primRight = n.X + n.W
+		case "replica":
+			replLeft = minI(replLeft, n.X)
+		}
+	}
+	if primRight >= replLeft {
+		t.Fatalf("primary right edge %d is not left of the replicas at %d", primRight, replLeft)
+	}
+	endX := func(path string) int {
+		var x, y int
+		if _, err := fmt.Sscanf(path[strings.LastIndex(path, "L")+1:], "%d %d", &x, &y); err != nil {
+			t.Fatalf("unreadable path tail %q: %v", path, err)
+		}
+		return x
+	}
+	for _, r := range repl {
+		if got := endX(r.Path); got != replLeft {
+			t.Errorf("a replication branch ends at x=%d, want the replica's left edge %d: %q",
+				got, replLeft, r.Path)
+		}
+	}
+	// The corridor is what carries the upright label, so it has to be
+	// wider than the ordinary column gap it replaced.
+	if got := replLeft - primRight; got <= grpColGap {
+		t.Errorf("primary-to-replica corridor is %d wide, want more than the %d column gap",
+			got, grpColGap)
+	}
+	for _, r := range repl {
+		if r.Label != "" && !r.LabelVertical {
+			t.Error("the replication label lies flat in a tall narrow corridor")
+		}
+	}
 
 	// The read fan shares its exit the same way.
 	reads := kinds["read"]

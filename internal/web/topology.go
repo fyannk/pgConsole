@@ -202,6 +202,9 @@ type TopoEdge struct {
 	Path string
 	// LabelX, LabelY place the label at the curve's midpoint.
 	LabelX, LabelY int
+	// LabelVertical turns the label a quarter turn to read upwards, for
+	// a wire whose room is a tall corridor rather than a wide one.
+	LabelVertical bool
 }
 
 // topoMaxSrv bounds the drawn servers; more become one "+N more" box.
