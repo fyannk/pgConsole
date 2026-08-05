@@ -37,6 +37,9 @@
     {{- end}}
     {{- with .Pods}}
     {{- if .Rows}}
+    {{- with $.ClusterOverview.Children}}
+    {{template "topology" .}}
+    {{- end}}
     <h2 class="section-title">Topology</h2>
     {{- with .Disagreement}}
     <div class="finding">
@@ -109,9 +112,6 @@
     {{- end}}
 
     {{- if .ClusterOverview}}
-    {{- with .ClusterOverview.Children}}
-    {{template "topology" .}}
-    {{- end}}
     {{- with .ClusterOverview}}
     {{- if .Placement}}
     <h2 class="section-title">Scheduling</h2>

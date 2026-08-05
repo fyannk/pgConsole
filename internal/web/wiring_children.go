@@ -310,9 +310,12 @@ func buildClusterChildren(p *Page) *TopologyView {
 	x := float64(grpMargin + grpPad)
 	var refFrames []TopoFrame
 	var refSuper *TopoFrame
+	refStart, refEnd := 0, 0
 	if len(refs) > 0 {
 		refsX := x + superPad
+		refStart = len(nodes)
 		frames, refW, refBottom := placeGroups(refs, chColsRefs, refsX, regionContent)
+		refEnd = len(nodes)
 		if len(frames) > 0 {
 			refFrames = frames
 			refSuper = &TopoFrame{
@@ -333,6 +336,22 @@ func buildClusterChildren(p *Page) *TopologyView {
 		Label: "Owned by the cluster", Kind: "cluster",
 		X: int(ownedX - superPad), Y: int(ownedTop),
 		W: int(ownedW + 2*superPad), H: int(ownedBottom + superPad - ownedTop),
+	}
+
+	// The two regions rarely hold the same number of kinds, and a short
+	// referencing frame hanging from the top line reads as though it
+	// were missing rows. Centre it against the taller region, so the
+	// wire into the cluster stays level and the drawing balances.
+	if refSuper != nil {
+		if dy := (ownedSuper.H - refSuper.H) / 2; dy > 0 {
+			refSuper.Y += dy
+			for i := range refFrames {
+				refFrames[i].Y += dy
+			}
+			for i := refStart; i < refEnd; i++ {
+				nodes[i].Y += dy
+			}
+		}
 	}
 
 	// The Cluster box faces the owned frame's centre, clamped below
@@ -411,12 +430,10 @@ func buildClusterChildren(p *Page) *TopologyView {
 	}
 	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
 
-	caption := "Every object attached to this cluster, grouped by kind: owned means the controller owner reference names the Cluster; referencing objects name it from outside. Secrets show their name, type and key count only — no key or value is read."
-	if p.Infrastructure != nil && len(p.Infrastructure.ChildrenUnobserved) > 0 {
-		caption += " Not granted, so not observed: " +
-			strings.Join(p.Infrastructure.ChildrenUnobserved, ", ") + "."
-	}
-	view.Caption = caption
+	// No caption: the two super-frames already name both relations, and
+	// the unobserved kinds are stated on the inventory screen, which is
+	// where a reader goes to ask what was not read.
+
 	return view
 }
 
