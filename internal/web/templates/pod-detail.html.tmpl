@@ -8,6 +8,11 @@
 */ -}}
 {{template "page-head" "pod detail"}}
 {{template "shell-open" .Shell}}
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="/cluster/pods">Instance pods</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">{{.Name}}</span>
+  </nav>
   <header>
     <div class="header-bar">
       <h1>{{.Name}}</h1>

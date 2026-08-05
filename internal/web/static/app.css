@@ -200,6 +200,21 @@ body {
 .history-point text,
 .history-visual-label { fill: var(--text-muted); font-size: 11px; }
 .manifest { max-height: 34rem; overflow: auto; }
+
+/* A pod detail is reached from the roster and has no other entry point,
+   so it says where it sits and offers the way back. The separator is
+   decorative and hidden from the accessibility tree; the trail's last
+   step is the current page and is not a link to itself. */
+.breadcrumb {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+.breadcrumb a { color: var(--accent); font-weight: 600; }
+.breadcrumb [aria-current] { color: var(--text); }
 /* Manifest syntax colours, assigned by role rather than by taste: keys
    carry the structure so they take the accent, values are the payload
    and stay in the reading colour, and the three literals share the one

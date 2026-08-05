@@ -8,35 +8,10 @@
 */ -}}
 {{template "page-head" "pods"}}
 {{template "shell-open" .Shell}}
-    {{- if .PodHistory}}
-    <section class="panel sectioned">
-      <div class="panel-head">
-        <h2>Recent pod history</h2>
-      </div>
-      <div class="panel-body">
-      <ol class="timeline">
-        {{- range .PodHistory}}
-        <li data-kind="{{.Kind}}">
-          <div class="when"><b>{{.Age}} ago</b><time>{{.Stamp}}</time></div>
-          <div class="rail"></div>
-          <div class="entry">
-            <div class="head"><span class="title">{{.Title}}</span><span class="tag" data-kind="{{.Kind}}">{{.Tag}}</span><span class="object">{{.Object}}</span></div>
-            {{- if .Body}}
-            <p>{{.Body}}</p>
-            {{- end}}
-          </div>
-        </li>
-        {{- end}}
-      </ol>
-      <p class="origin">source: Kubernetes-observed events and retained object definitions; times are when this pgConsole process observed them</p>
-      </div>
-    </section>
-    {{- end}}
     {{- with .Pods}}
     <section class="panel sectioned" data-panel="pods">
       <div class="panel-head">
         <h2>Instance pods</h2>
-        <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
       </div>
       <div class="panel-body">
       {{- with .Disagreement}}
@@ -69,7 +44,7 @@
       {{- if .Truncated}}
       <p class="state">truncated: more members matched than the display bound</p>
       {{- end}}
-      <p class="origin">source: {{.Origin.Label}}</p>
+      <p class="origin">source: {{.Origin.Label}} — <span data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
       </div>
     </section>
     {{- else}}
@@ -77,6 +52,30 @@
       <h2>Instance pods</h2>
       <div class="empty"><strong>No pods snapshot yet</strong>The Kubernetes API has not been observed for this cluster's instance pods.</div>
       <p class="origin">source: kubernetes-observed</p>
+    </section>
+    {{- end}}
+    {{- if .PodHistory}}
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Recent pod history</h2>
+      </div>
+      <div class="panel-body">
+      <ol class="timeline">
+        {{- range .PodHistory}}
+        <li data-kind="{{.Kind}}">
+          <div class="when"><b>{{.Age}} ago</b><time>{{.Stamp}}</time></div>
+          <div class="rail"></div>
+          <div class="entry">
+            <div class="head"><span class="title">{{.Title}}</span><span class="tag" data-kind="{{.Kind}}">{{.Tag}}</span><span class="object">{{.Object}}</span></div>
+            {{- if .Body}}
+            <p>{{.Body}}</p>
+            {{- end}}
+          </div>
+        </li>
+        {{- end}}
+      </ol>
+      <p class="origin">source: Kubernetes-observed events and retained object definitions; times are when this pgConsole process observed them</p>
+      </div>
     </section>
     {{- end}}
 {{template "shell-close"}}
