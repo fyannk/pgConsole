@@ -169,14 +169,66 @@ function activeWindow() {
         drag: { x: true, y: false, setScale: true },
         focus: { prox: 1e6 }
       },
-      focus: { alpha: 1 }
+      focus: { alpha: 1 },
+      hooks: { setScale: [function () { syncRangeInputs(); }] }
     };
 
+    /* Revealed before construction: a hidden element reports
+       clientWidth 0, so measuring it here handed uPlot the 320px floor
+       and every chart drew a fifth of its container wide, forever —
+       nothing re-measures until a window resize. */
     container.hidden = false;
+    container.removeAttribute('aria-hidden');
+    opts.width = Math.max(container.clientWidth, 320);
     var chart = new uPlot(opts, toData(payload), container);
     var entry = { chart: chart, container: container, key: container.dataset.metricKey };
     charts.push(entry);
     container.dataset.metricReady = 'true';
+    chart.hooks = chart.hooks || {};
+    syncRangeInputs();
+  }
+
+  /* Grafana's bargain: a drag zooms, and the same range is also
+     typeable. Both act on the data already fetched — the selector above
+     decides how much is fetched, these decide how much of it is shown,
+     which is why applying a range never waits on the network. */
+  function rangeInputs() {
+    return {
+      from: document.querySelector('[data-metrics-from]'),
+      to: document.querySelector('[data-metrics-to]')
+    };
+  }
+  function toLocalInput(sec) {
+    var d = new Date(sec * 1000);
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function applyRange() {
+    var io = rangeInputs();
+    if (!io.from || !io.to) return;
+    var min = Date.parse(io.from.value) / 1000;
+    var max = Date.parse(io.to.value) / 1000;
+    if (!isFinite(min) || !isFinite(max) || min >= max) return;
+    charts.forEach(function (entry) { entry.chart.setScale('x', { min: min, max: max }); });
+  }
+  function resetRange() {
+    charts.forEach(function (entry) {
+      var t = entry.chart.data[0];
+      if (!t || !t.length) return;
+      entry.chart.setScale('x', { min: t[0], max: t[t.length - 1] });
+    });
+    syncRangeInputs();
+  }
+  /* The boxes show the window actually plotted, so a drag-zoom writes
+     itself back into them rather than leaving them stale. */
+  function syncRangeInputs() {
+    var io = rangeInputs();
+    if (!io.from || !io.to || !charts.length) return;
+    var sc = charts[0].chart.scales.x;
+    if (sc.min == null || sc.max == null) return;
+    io.from.value = toLocalInput(sc.min);
+    io.to.value = toLocalInput(sc.max);
   }
 
   function poll() {
@@ -222,6 +274,10 @@ function activeWindow() {
     box.removeAttribute('aria-hidden');
     var sel = windowSelect();
     if (sel) sel.addEventListener('change', refresh);
+    var apply = document.querySelector('[data-metrics-apply]');
+    var reset = document.querySelector('[data-metrics-reset]');
+    if (apply) apply.addEventListener('click', applyRange);
+    if (reset) reset.addEventListener('click', resetRange);
   }
 
   function rebuild() {

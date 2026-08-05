@@ -28,7 +28,15 @@
       <option value="raw">Live — the scrape window</option>
       <option value="retention">Full retention</option>
     </select>
-    <span class="metrics-hint">drag across a chart to zoom, double-click to reset</span>
+    <span class="metrics-range">
+      <label for="metrics-from">Zoom</label>
+      <input type="datetime-local" id="metrics-from" data-metrics-from aria-label="Zoom from">
+      <span aria-hidden="true">→</span>
+      <input type="datetime-local" id="metrics-to" data-metrics-to aria-label="Zoom to">
+      <button type="button" data-metrics-apply>Apply</button>
+      <button type="button" data-metrics-reset>Reset zoom</button>
+    </span>
+    <span class="metrics-hint">or drag across a chart</span>
   </div>
   {{- end}}
   {{- range .Series}}
