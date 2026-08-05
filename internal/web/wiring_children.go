@@ -296,36 +296,43 @@ func buildClusterChildren(p *Page) *TopologyView {
 		return frames, width, maxY
 	}
 
-	// The Cluster column, then the owned region, then the referencing
-	// region, each region wrapped in its own labelled super-frame. A
-	// corridor above the frames carries the references wire back to
-	// the cluster; without a referencing side there is no corridor.
+	// The referencing region, the Cluster column, then the owned region,
+	// each region wrapped in its own labelled super-frame. The order is
+	// the direction the two relations point: objects that name the
+	// cluster, the Cluster itself, then what it owns. Reading left to
+	// right is then reading the arrows, and neither wire has to climb a
+	// corridor over the drawing to reach its end — which is what the
+	// references wire used to do to get back from the far right.
 	superPad := float64(grpPad)
-	corridor := 0.0
+	regionTop := float64(grpMargin)
+	regionContent := regionTop + grpLabelBand + superPad
+
+	x := float64(grpMargin + grpPad)
+	var refFrames []TopoFrame
+	var refSuper *TopoFrame
 	if len(refs) > 0 {
-		corridor = 26
+		refsX := x + superPad
+		frames, refW, refBottom := placeGroups(refs, chColsRefs, refsX, regionContent)
+		if len(frames) > 0 {
+			refFrames = frames
+			refSuper = &TopoFrame{
+				Label: "References the cluster", Kind: "backup",
+				X: int(refsX - superPad), Y: int(regionTop),
+				W: int(refW + 2*superPad), H: int(refBottom + superPad - regionTop),
+			}
+			x = refsX + refW + superPad + grpAlley
+		}
 	}
-	clusterX := float64(grpMargin + grpPad)
+	clusterX := x
 	ownedX := clusterX + chWBox + grpAlley + superPad
-	ownedTop := float64(grpMargin) + corridor
-	ownedContent := ownedTop + grpLabelBand + superPad
+	ownedTop := regionTop
+	ownedContent := regionContent
 
 	ownedFrames, ownedW, ownedBottom := placeGroups(owned, chColsOwned, ownedX, ownedContent)
 	ownedSuper := TopoFrame{
 		Label: "Owned by the cluster", Kind: "cluster",
 		X: int(ownedX - superPad), Y: int(ownedTop),
 		W: int(ownedW + 2*superPad), H: int(ownedBottom + superPad - ownedTop),
-	}
-
-	refsX := ownedX + ownedW + superPad + grpAlley + superPad
-	refFrames, refW, refBottom := placeGroups(refs, chColsRefs, refsX, ownedContent)
-	var refSuper *TopoFrame
-	if len(refFrames) > 0 {
-		refSuper = &TopoFrame{
-			Label: "References the cluster", Kind: "backup",
-			X: int(refsX - superPad), Y: int(ownedTop),
-			W: int(refW + 2*superPad), H: int(refBottom + superPad - ownedTop),
-		}
 	}
 
 	// The Cluster box faces the owned frame's centre, clamped below
@@ -358,22 +365,20 @@ func buildClusterChildren(p *Page) *TopologyView {
 		links = append(links, TopoGraphLink{Source: "cluster", Target: "owned", Kind: "owns"})
 	}
 	if refSuper != nil {
-		// The referencing objects point at the cluster: out of their
-		// frame's top, along the corridor, into the cluster's top edge.
-		overY := float64(grpMargin) + corridor/2
-		cx := float64(cluster.X) + float64(cluster.W)/2
-		mid := float64(refSuper.X) + float64(refSuper.W)/2
+		// The referencing objects point at the cluster, and now they sit
+		// beside it: one straight run out of their frame's right edge
+		// into the cluster's left. With the owned wire leaving the same
+		// box at the same height, the three regions read as one line.
+		right := float64(refSuper.X + refSuper.W)
 		view.Edges = append(view.Edges, TopoEdge{
 			Kind: "refs",
 			Path: roundedRoute(corners([]topoPoint{
-				{mid, float64(refSuper.Y)},
-				{mid, overY},
-				{cx, overY},
-				{cx, float64(cluster.Y)},
+				{right, cy},
+				{float64(cluster.X), cy},
 			})),
 			Label:  "references",
-			LabelX: int((mid + cx) / 2),
-			LabelY: int(overY) - 4,
+			LabelX: int((right + float64(cluster.X)) / 2),
+			LabelY: int(cy) - 7,
 		})
 		links = append(links, TopoGraphLink{Source: "refs", Target: "cluster", Kind: "refs"})
 	}
