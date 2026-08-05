@@ -1373,13 +1373,21 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
    line is still legible. */
 .topo-edge { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .topo-elabel { paint-order: stroke; stroke: var(--surface); stroke-linejoin: round; stroke-width: 3px; }
+/* A wire's word takes its wire's colour, so a label can never be read
+   against the wrong line. */
+.topo-elabel-replicate, .topo-elabel-wal { fill: var(--ok); }
+.topo-elabel-archive { fill: var(--accent); }
 .topo-edge-write { stroke: var(--accent); }
 .topo-edge-read { stroke: var(--text-muted); }
 .topo-edge-replicate { stroke: var(--ok); stroke-dasharray: 5 4; }
 /* The two object-store flows, told apart by the dash telling the truth
    about cadence: WAL shipping is continuous, so its wire is unbroken;
-   base backups arrive in periodic bursts, so theirs stays dotted. */
-.topo-edge-wal { stroke: var(--accent); }
+   base backups arrive in periodic bursts, so theirs stays dotted.
+   WAL takes the cluster's own colour rather than the backup blue: it is
+   the same write-ahead log the replicas consume, shipped to a second
+   consumer, so it belongs with replication and not with the schedules.
+   That leaves blue meaning one thing on this drawing — backup. */
+.topo-edge-wal { stroke: var(--ok); }
 .topo-edge-archive { stroke: var(--accent); stroke-dasharray: 2 4; }
 /* The volume wire ties an instance to the claim it writes; dotted so a
    mount never reads as a data flow. */

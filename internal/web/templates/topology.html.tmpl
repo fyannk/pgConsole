@@ -28,7 +28,7 @@
     {{- range .Edges}}
     <path class="topo-edge topo-edge-{{.Kind}}" d="{{.Path}}" marker-end="url(#topo-arrow)"></path>
     {{- if .Label}}
-    <text class="topo-elabel" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle">{{.Label}}</text>
+    <text class="topo-elabel topo-elabel-{{.Kind}}" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle">{{.Label}}</text>
     {{- end}}
     {{- end}}
     {{- range .Dots}}

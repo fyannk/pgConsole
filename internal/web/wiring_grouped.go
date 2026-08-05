@@ -470,15 +470,25 @@ func buildGroupedWiring(p *Page) *TopologyView {
 		}
 	}
 
-	// Each schedule drops out of the Backups frame into the primary's
-	// top edge: a collector bus in the band-to-cluster gap, one drop.
-	// With a single schedule the whole route collapses to a straight
-	// vertical line, exactly the sketch this drawing derives from.
+	// Each schedule drops out of the Backups frame onto the cluster
+	// frame's top line: a collector bus in the band-to-cluster gap, one
+	// drop. With a single schedule the whole route collapses to a
+	// straight vertical line, exactly the sketch this drawing derives
+	// from.
+	//
+	// It stops at the frame rather than reaching into the primary's box
+	// because a ScheduledBackup names the Cluster, not an instance —
+	// the operator picks the instance per run, and it is routinely a
+	// standby, which is why the base wire leaves one. An arrow into the
+	// primary would answer a question the resource does not ask. The
+	// graph link still names a node because the model has no vertex for
+	// a frame; only the drawing, which is the artifact of record, can
+	// point at the cluster as such.
 	if primary != nil && len(schedules) > 0 {
 		busY := clusterTop - float64(grpRowGap)/2
 		for _, s := range schedules {
 			wire("archive", s, primary, []topoPoint{
-				{cx(s), bottom(s)}, {cx(s), busY}, {primCx, busY}, {primCx, float64(primary.Y)},
+				{cx(s), bottom(s)}, {cx(s), busY}, {primCx, busY}, {primCx, clusterTop},
 			})
 			if len(schedules) > 1 && cx(s) != primCx {
 				dot("archive", cx(s), busY)
@@ -561,8 +571,16 @@ func buildGroupedWiring(p *Page) *TopologyView {
 			}
 		}
 	}
+	// Both wires carry their word, because the two flows end in the same
+	// box and a reader should not have to cross-reference the legend to
+	// learn which is which. The WAL label rides its own trunk in the
+	// clear corridor right of the primary, the way the replication
+	// label does.
 	if primary != nil && store != nil {
 		archTrunk("wal", primary, walBus, -grpPortOff/2, []*TopoNode{store})
+		edges[len(edges)-1].Label = "WAL streaming"
+		edges[len(edges)-1].LabelX = int((right(primary) + walBus) / 2)
+		edges[len(edges)-1].LabelY = int(cy(primary)-grpPortOff) - 7
 	}
 	// A volume snapshot is a base backup taken by another method, so it
 	// leaves the same attributed instance rather than the primary.
@@ -580,6 +598,21 @@ func buildGroupedWiring(p *Page) *TopologyView {
 			// port: mark the split the way every other fan marks it.
 			if baseSrc == primary && store != nil {
 				dot("archive", right(baseSrc), cy(baseSrc)-grpPortOff)
+			}
+			// The base wire's run out of its instance is too short to
+			// carry text — the alley is narrow and the instance may be
+			// the replica column, hard against it. Its label rides the
+			// climb instead, in the empty band between the cluster frame
+			// and the top band, naming the mechanism the operator
+			// reported rather than one the drawing assumes.
+			if store != nil {
+				label := "base backup"
+				if p.Backups.BaseVia != "" {
+					label += " · " + p.Backups.BaseVia
+				}
+				edges[len(edges)-1].Label = label
+				edges[len(edges)-1].LabelX = int(baseBus)
+				edges[len(edges)-1].LabelY = int(clusterTop) - 7
 			}
 		}
 	}

@@ -284,6 +284,10 @@ type BackupsView struct {
 	// is empty no base wire is drawn, because the console then has no
 	// word on where that flow began.
 	BaseSourceInstance string
+	// BaseVia is the short plugin name that same Backup reported, empty
+	// when it named none. It is what lets the drawing say which
+	// mechanism took the backup instead of asserting one.
+	BaseVia string
 }
 
 // ObjectStoreView separates the operator-reported reference from the
@@ -1728,6 +1732,9 @@ func buildBackupsView(snap observe.BackupsSnapshot, now time.Time, evidenceURL s
 				t := when
 				latestAttributed = &t
 				view.BaseSourceInstance = backup.SourceInstance
+				// The plugin reports itself as a DNS-style name; the
+				// drawing has room for the leading label alone.
+				view.BaseVia, _, _ = strings.Cut(backup.PluginName, ".")
 			}
 		}
 	}

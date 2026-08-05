@@ -16,6 +16,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func groupedPage(t *testing.T) Page {
 			// not redraw as if it had left the primary.
 			Backups: []observe.BackupFacts{{
 				Name: "orders-first", UID: "b1", Phase: "completed", Method: "plugin",
-				SourceInstance: "orders-2",
+				PluginName: "barman-cloud.cloudnative-pg.io", SourceInstance: "orders-2",
 			}},
 			ScheduledBackups: []observe.ScheduledBackupFacts{
 				{Name: "daily", UID: "sb1", Method: "plugin", Schedule: "0 0 2 * * *", Suspended: boolp(false)},
@@ -303,6 +304,53 @@ func TestGroupedWiringTrunksItsFans(t *testing.T) {
 	if !strings.HasPrefix(labels[source["archive"]], "orders-2") {
 		t.Errorf("the base-backup wire leaves %q, want the attributed instance orders-2",
 			labels[source["archive"]])
+	}
+
+	// Both object-store wires carry their word, and the base one names
+	// the mechanism the Backup reported rather than one it assumed.
+	wireLabel := func(kind string) string {
+		for _, e := range view.Edges {
+			if e.Kind == kind && e.Label != "" {
+				return e.Label
+			}
+		}
+		return ""
+	}
+	if got := wireLabel("wal"); got != "WAL streaming" {
+		t.Errorf("WAL wire label = %q, want %q", got, "WAL streaming")
+	}
+	if got := wireLabel("archive"); got != "base backup · barman-cloud" {
+		t.Errorf("base wire label = %q, want the reported plugin named", got)
+	}
+
+	// The schedule drops onto the cluster frame's top line, not into the
+	// primary's box: a ScheduledBackup names the Cluster, and the
+	// operator picks the instance per run.
+	var clusterTop, primaryTop int
+	for _, f := range view.Frames {
+		if f.Label == "Cluster" {
+			clusterTop = f.Y
+		}
+	}
+	for _, n := range view.Nodes {
+		if n.Kind == "primary" {
+			primaryTop = n.Y
+		}
+	}
+	drop := ""
+	for _, a := range archives {
+		if !strings.Contains(a.Path, "Q") {
+			drop = a.Path
+		}
+	}
+	if want := fmt.Sprintf(" %d", clusterTop); !strings.HasSuffix(drop, want) {
+		t.Errorf("the schedule drop ends %q, want it to stop on the cluster frame at y=%d", drop, clusterTop)
+	}
+	if clusterTop >= primaryTop {
+		t.Fatalf("cluster frame top %d is not above the primary box %d", clusterTop, primaryTop)
+	}
+	if strings.HasSuffix(drop, fmt.Sprintf(" %d", primaryTop)) {
+		t.Error("the schedule drop still reaches into the primary's box")
 	}
 
 	// Tees carry dots in the styles of the flows that split.
