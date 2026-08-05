@@ -116,7 +116,15 @@ document.addEventListener('click', (event) => {
   const open = target.closest('[data-dialog]');
   if (open) {
     const dialog = document.getElementById(open.dataset.dialog);
-    if (dialog && dialog.showModal) dialog.showModal();
+    if (dialog && dialog.showModal) {
+      /* A dialog opener may also be a real link, so that a reader
+         without scripting still reaches the same content by navigating.
+         Once the dialog can open, that navigation is the wrong outcome:
+         suppress it here rather than dropping the href, which is what
+         keeps the no-script path honest. */
+      event.preventDefault();
+      dialog.showModal();
+    }
     return;
   }
 

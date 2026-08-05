@@ -791,7 +791,17 @@ section.panel h2 {
 .objects-kind .table-scroll { background: var(--surface); }
 .objects-kind > p.state { font-size: var(--text-sm); }
 .objects-kind > p.origin:last-child { margin-bottom: 0; }
-.objects-raw-col { text-align: right; white-space: nowrap; width: 1%; }
+/* The inventory's table hugs its content instead of filling the card.
+   Stretched to full width it gave the detail column seven hundred
+   pixels it had no use for, which stranded each row's definition link
+   an inch from the row it belongs to and squeezed longer names into two
+   lines. Cells stay on one line and the card scrolls when a detail is
+   genuinely long — the same bargain every other table here makes. */
+.objects-kind table.objects { min-width: 0; width: auto; }
+.objects-kind table.objects th,
+.objects-kind table.objects td { white-space: nowrap; }
+.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); }
+.objects-raw-col { text-align: left; }
 .objects-raw { color: var(--accent); font-weight: 600; }
 
 /* ------------------------------------------------------ Text primitives */
