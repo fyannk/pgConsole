@@ -830,9 +830,9 @@ section.panel h2 {
   white-space: nowrap;
 }
 .objects-kind table.objects th:nth-child(1),
-.objects-kind table.objects td:nth-child(1) { width: 40ch; }
+.objects-kind table.objects td:nth-child(1) { width: 60ch; }
 .objects-kind table.objects th:nth-child(2),
-.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); width: 58ch; }
+.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); width: 70ch; }
 .objects-raw-col { text-align: left; width: 13ch; }
 /* The state dot is an inline-block ::before, and inside a tr the browser
    wraps it in an anonymous cell — which shifted every column one place
