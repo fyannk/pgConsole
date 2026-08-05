@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"sort"
 	"time"
@@ -62,7 +63,7 @@ type PodDetailView struct {
 	CanInspect bool
 	// Raw is the pretty-printed retained definition; empty when none is
 	// retained or the viewer is below the gate.
-	Raw string
+	Raw template.HTML
 	// RawSeq is the revision the raw definition came from.
 	RawSeq uint64
 	// CanTailLogs gates the logs tab, same tier as the log routes.
@@ -226,7 +227,7 @@ func (h *Handler) podLogs(r *http.Request, pod string) *PodLogsView {
 
 // retainedDefinition resolves the newest retained, scrubbed definition
 // of the pod from the history store, pretty-printed.
-func (h *Handler) retainedDefinition(pod string) (string, uint64) {
+func (h *Handler) retainedDefinition(pod string) (template.HTML, uint64) {
 	if h.sources.History == nil {
 		return "", 0
 	}
@@ -244,9 +245,9 @@ func (h *Handler) retainedDefinition(pod string) (string, uint64) {
 		}
 		var pretty bytes.Buffer
 		if err := json.Indent(&pretty, rev.Manifest, "", "  "); err != nil {
-			return string(rev.Manifest), entry.Seq
+			return highlightJSON(string(rev.Manifest)), entry.Seq
 		}
-		return pretty.String(), entry.Seq
+		return highlightJSON(pretty.String()), entry.Seq
 	}
 	return "", 0
 }

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strconv"
 	"time"
@@ -100,8 +101,9 @@ type HistoryRevisionView struct {
 	Manager string
 	// Operation is the reported managed-fields operation.
 	Operation string
-	// Manifest is the scrubbed, bounded JSON definition.
-	Manifest string
+	// Manifest is the scrubbed, bounded JSON definition, already
+	// highlighted; every segment was escaped as it was wrapped.
+	Manifest template.HTML
 	// ManifestTruncated reports that the display byte ceiling cut the JSON.
 	ManifestTruncated bool
 	// DiffAvailable reports that the revision remained retained long enough to
@@ -238,7 +240,7 @@ func buildHistoryRevisionView(rev history.Revision) HistoryRevisionView {
 	return HistoryRevisionView{
 		Seq: rev.Seq, Object: rev.Kind + "/" + rev.Name, Change: string(rev.Change),
 		ObservedAt: rev.ObservedAt.UTC().Format(time.RFC3339), Manager: manager,
-		Operation: rev.Actor.Operation, Manifest: manifest, ManifestTruncated: truncated,
+		Operation: rev.Actor.Operation, Manifest: highlightJSON(manifest), ManifestTruncated: truncated,
 	}
 }
 

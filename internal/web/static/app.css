@@ -200,6 +200,18 @@ body {
 .history-point text,
 .history-visual-label { fill: var(--text-muted); font-size: 11px; }
 .manifest { max-height: 34rem; overflow: auto; }
+/* Manifest syntax colours, assigned by role rather than by taste: keys
+   carry the structure so they take the accent, values are the payload
+   and stay in the reading colour, and the three literals share the one
+   hue that means "not a string" — so a null is never mistaken for the
+   word null in quotes. Every hue is a variable the theme already
+   defines, so the highlighting follows light and dark without a second
+   palette to keep in step. */
+.manifest .j-key { color: var(--accent); font-weight: 600; }
+.manifest .j-str { color: var(--text); }
+.manifest .j-num,
+.manifest .j-bool,
+.manifest .j-null { color: var(--storage); font-weight: 600; }
 
 .metric-chart { margin: var(--space-3) 0 var(--space-2); overflow-x: auto; }
 .metric-chart .u-legend { color: var(--text-muted); font-size: var(--text-xs); }
@@ -796,12 +808,31 @@ section.panel h2 {
    pixels it had no use for, which stranded each row's definition link
    an inch from the row it belongs to and squeezed longer names into two
    lines. Cells stay on one line and the card scrolls when a detail is
-   genuinely long — the same bargain every other table here makes. */
-.objects-kind table.objects { min-width: 0; width: auto; }
+   genuinely long — the same bargain every other table here makes.
+
+   Every kind's table is laid out identically, so the columns line up
+   down the whole screen instead of each card finding its own widths.
+   The measures are in ch, which ties them to the text they hold rather
+   than to a guess in pixels. Content longer than its column ends in an
+   ellipsis and carries the full text as a tooltip, which is the price
+   of the alignment — and cheaper than a ragged edge on nineteen
+   tables. */
+.objects-kind table.objects {
+  min-width: 0;
+  table-layout: fixed;
+  width: 92ch;
+}
 .objects-kind table.objects th,
-.objects-kind table.objects td { white-space: nowrap; }
-.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); }
-.objects-raw-col { text-align: left; }
+.objects-kind table.objects td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.objects-kind table.objects th:nth-child(1),
+.objects-kind table.objects td:nth-child(1) { width: 36ch; }
+.objects-kind table.objects th:nth-child(2),
+.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); width: 46ch; }
+.objects-raw-col { text-align: left; width: 10ch; }
 .objects-raw { color: var(--accent); font-weight: 600; }
 
 /* ------------------------------------------------------ Text primitives */

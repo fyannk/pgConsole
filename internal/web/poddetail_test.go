@@ -135,7 +135,11 @@ func TestPodDetailAboveTheGateCarriesLogsAndRawDefinition(t *testing.T) {
 	for _, want := range []string{
 		`data-tab="pod-logs"`, "LOG: ready to accept connections",
 		`data-log-src="/logs/orders-1?raw=1"`,
-		"Raw definition", "&#34;kind&#34;: &#34;Pod&#34;", "retained revision 3",
+		"Raw definition", "retained revision 3",
+		// The manifest arrives highlighted, and every segment is still
+		// escaped inside its span — the colouring must not become a way
+		// for a value to emit markup.
+		`<span class="j-key">&#34;kind&#34;</span>: <span class="j-str">&#34;Pod&#34;</span>`,
 		`href="/history/revisions/3"`,
 	} {
 		if !strings.Contains(body, want) {

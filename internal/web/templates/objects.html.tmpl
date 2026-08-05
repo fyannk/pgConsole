@@ -27,7 +27,7 @@
           <thead><tr><th>Name</th><th>Detail</th><th class="objects-raw-col">Definition</th></tr></thead>
           <tbody>
             {{- range .Rows}}
-            <tr{{if .State}} data-state="{{stateToken .State}}"{{end}}><td>{{.Name}}</td><td>{{.Detail}}</td><td class="objects-raw-col">
+            <tr{{if .State}} data-state="{{stateToken .State}}"{{end}}><td title="{{.Name}}">{{.Name}}</td><td title="{{.Detail}}">{{.Detail}}</td><td class="objects-raw-col">
               {{- if .RawSeq}}<a class="objects-raw" href="/history/revisions/{{.RawSeq}}"
                  hx-get="/history/revisions/{{.RawSeq}}" hx-select=".manifest" hx-target="#object-raw-body" hx-swap="innerHTML"
                  data-dialog="object-raw">raw</a>{{end}}
