@@ -65,6 +65,13 @@ type BackupFacts struct {
 	// method, empty otherwise. Correlation eligibility requires the
 	// accepted Barman Cloud plugin.
 	PluginName string
+	// SourceInstance is the pod the operator reports the backup was
+	// taken from (status.instanceID.podName), empty when it reported
+	// none. It is the only word on where a base backup came from, and
+	// it is not the primary by default: CloudNativePG's backup target
+	// prefers a standby, so a base backup and the WAL stream routinely
+	// leave the cluster from different instances.
+	SourceInstance string
 	// CreatedAt is the resource creation time.
 	CreatedAt time.Time
 	// StartedAt is the reported backup-tool start time.

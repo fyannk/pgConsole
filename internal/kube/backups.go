@@ -217,6 +217,9 @@ func (c *Client) convertBackup(content map[string]any) (observe.BackupFacts, boo
 	if backup.Spec.PluginConfiguration != nil {
 		facts.PluginName = backup.Spec.PluginConfiguration.Name
 	}
+	if backup.Status.InstanceID != nil {
+		facts.SourceInstance = backup.Status.InstanceID.PodName
+	}
 	return facts, backup.Namespace == c.opts.Namespace && backup.Spec.Cluster.Name == c.opts.ClusterName, nil
 }
 

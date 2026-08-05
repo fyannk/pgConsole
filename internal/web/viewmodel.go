@@ -238,6 +238,9 @@ type BackupRowView struct {
 	Age string
 	// SnapshotState is explicitly unknown for volume snapshots.
 	SnapshotState string
+	// SourceInstance is the operator-reported instance the backup was
+	// taken from, or unknown when it reported none.
+	SourceInstance string
 }
 
 // ScheduledBackupRowView is one operator-reported ScheduledBackup.
@@ -274,6 +277,13 @@ type BackupsView struct {
 	SchedulesTruncated bool
 	// EvidenceLink is the optional ObjectStoreViewer link.
 	EvidenceLink *Link
+	// BaseSourceInstance is the instance named by the most recent
+	// Backup that reported one, empty when none did. The wiring
+	// drawings use it to leave the base-backup wire from the instance
+	// that actually served it rather than assuming the primary; when it
+	// is empty no base wire is drawn, because the console then has no
+	// word on where that flow began.
+	BaseSourceInstance string
 }
 
 // ObjectStoreView separates the operator-reported reference from the
@@ -1704,6 +1714,23 @@ func buildBackupsView(snap observe.BackupsSnapshot, now time.Time, evidenceURL s
 		view.EvidenceLink = &Link{Label: "Inspect repository structure in ObjectStoreViewer", URL: evidenceURL}
 	}
 	var latestCompleted *time.Time
+	// The newest attribution wins, on the same recency the rows use:
+	// the reported stop time, falling back to creation for a backup the
+	// operator has not finished reporting on.
+	var latestAttributed *time.Time
+	for _, backup := range snap.Backups {
+		if backup.SourceInstance != "" {
+			when := backup.CreatedAt
+			if backup.StoppedAt != nil {
+				when = *backup.StoppedAt
+			}
+			if latestAttributed == nil || when.After(*latestAttributed) {
+				t := when
+				latestAttributed = &t
+				view.BaseSourceInstance = backup.SourceInstance
+			}
+		}
+	}
 	for _, backup := range snap.Backups {
 		phase := orUnknown(backup.Phase)
 		if backup.Phase == "completed" {
@@ -1721,6 +1748,7 @@ func buildBackupsView(snap observe.BackupsSnapshot, now time.Time, evidenceURL s
 			Name: orUnknown(backup.Name), Phase: phase, Method: orUnknown(backup.Method),
 			Started: formatTime(backup.StartedAt), Stopped: formatTime(backup.StoppedAt),
 			Age: formatTimeAge(backup.StoppedAt, backup.CreatedAt, now), SnapshotState: snapshotState,
+			SourceInstance: orUnknown(backup.SourceInstance),
 		})
 	}
 	if latestCompleted != nil {
