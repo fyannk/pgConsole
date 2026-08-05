@@ -425,9 +425,62 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 // handleObjects renders the inventory: every observed object grouped by
 // the resource it belongs to, each kind carrying its own freshness.
+//
+// The raw-definition affordance is attached here rather than in the view
+// builder because it depends on the request's level, and the builder
+// takes no request. It is the same gate the revision routes enforce, so
+// the link never appears where following it would refuse.
 func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
-	h.renderPage(w, "objects", "objects.html.tmpl", h.assemble(r, "objects"))
+	page := h.assemble(r, "objects")
+	if access := h.requestAccess(r); access.hasIdentity && access.level >= authz.TierPowerUser {
+		h.attachRetainedRevisions(page.Objects)
+	}
+	h.renderPage(w, "objects", "objects.html.tmpl", page)
 }
+
+// attachRetainedRevisions resolves each listed object against the
+// history journal, so a row can offer the definition the console already
+// holds. It never reads the API server: the journal is fed by the
+// watches the console already runs, and its manifests were scrubbed at
+// that capture boundary. A kind the journal does not record — every
+// supporting object, by design — resolves to nothing and offers no link.
+func (h *Handler) attachRetainedRevisions(objects *ObjectsView) {
+	if objects == nil || h.sources.History == nil {
+		return
+	}
+	snap, ok := h.sources.History.Snapshot()
+	if !ok {
+		return
+	}
+	// Newest first, so the first match for a name is the current
+	// definition and later revisions of the same object are skipped.
+	type key struct{ kind, name string }
+	seq := map[key]uint64{}
+	for _, entry := range snap.Entries {
+		if !entry.HasManifest {
+			continue
+		}
+		k := key{entry.Kind, entry.Name}
+		if _, seen := seq[k]; !seen {
+			seq[k] = entry.Seq
+		}
+	}
+	for gi := range objects.Groups {
+		for ki := range objects.Groups[gi].Kinds {
+			kind := &objects.Groups[gi].Kinds[ki]
+			if kind.APIKind == "" {
+				continue
+			}
+			for ri := range kind.Rows {
+				kind.Rows[ri].RawSeq = seq[key{kind.APIKind, kind.Rows[ri].Name}]
+			}
+		}
+	}
+}
+
+// handleClusterOverview renders the power-user wiring: the observed
+// shape with placement and replication facts, and the configured backup
+// path.
 
 // handleClusterOverview renders the power-user wiring: the observed
 // shape with placement and replication facts, and the configured backup

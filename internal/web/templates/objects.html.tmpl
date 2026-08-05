@@ -20,21 +20,18 @@
       <p class="state">{{.Detail}}</p>
       {{- range .Kinds}}
       <section class="objects-kind">
-        <div class="objects-kind-head">
-          <h3>{{.Kind}}</h3>
-          {{- if .Observed}}
-          <p class="meta" data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</p>
-          {{- else}}
-          <p class="meta" data-state="unknown">not observed</p>
-          {{- end}}
-        </div>
+        <h3>{{.Kind}}{{if .Rows}} <span class="objects-count">{{len .Rows}}</span>{{end}}</h3>
         {{- if .Rows}}
         <div class="table-scroll">
         <table class="objects">
-          <thead><tr><th>Name</th><th>Detail</th></tr></thead>
+          <thead><tr><th>Name</th><th>Detail</th><th class="objects-raw-col">Definition</th></tr></thead>
           <tbody>
             {{- range .Rows}}
-            <tr{{if .State}} data-state="{{stateToken .State}}"{{end}}><td>{{.Name}}</td><td>{{.Detail}}</td></tr>
+            <tr{{if .State}} data-state="{{stateToken .State}}"{{end}}><td>{{.Name}}</td><td>{{.Detail}}</td><td class="objects-raw-col">
+              {{- if .RawSeq}}<a class="objects-raw" href="/history/revisions/{{.RawSeq}}"
+                 hx-get="/history/revisions/{{.RawSeq}}" hx-select=".manifest" hx-target="#object-raw-body" hx-swap="innerHTML"
+                 data-dialog="object-raw">raw</a>{{end}}
+            </td></tr>
             {{- end}}
           </tbody>
         </table>
@@ -46,7 +43,9 @@
         {{- if .Truncated}}
         <p class="state">truncated: more objects matched than the display bound</p>
         {{- end}}
-        <p class="origin">source: {{.Origin.Label}}</p>
+        <p class="origin">source: {{.Origin.Label}} —
+          {{- if .Observed}} <span data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span>
+          {{- else}} <span data-state="unknown">not observed</span>{{end}}</p>
       </section>
       {{- end}}
       </div>
@@ -66,4 +65,19 @@
       <p class="origin">source: kubernetes-observed</p>
     </section>
     {{- end}}
+
+  {{- /* One dialog serves every row: the enhancement layer swaps the
+         chosen revision's manifest into it. Without scripting the same
+         link is an ordinary navigation to the full revision page, so no
+         definition is reachable only by running a script. */ -}}
+  <dialog class="raw" id="object-raw" aria-label="Raw object definition">
+    <div class="panel-head">
+      <h2>Raw definition</h2>
+      <button type="button" class="dialog-close" data-dialog-close aria-label="Close"><svg aria-hidden="true"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="panel-body">
+      <div id="object-raw-body"></div>
+      <p class="origin">source: a retained revision, scrubbed at the capture boundary — never re-read from the API server</p>
+    </div>
+  </dialog>
 {{template "shell-close"}}

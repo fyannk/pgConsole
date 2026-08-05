@@ -60,6 +60,12 @@ type ObjectGroupView struct {
 type ObjectKindView struct {
 	// Kind names the objects listed.
 	Kind string
+	// APIKind is the Kubernetes kind behind the display name, used to
+	// resolve a row against the retained revisions. Empty for a kind
+	// the journal never sees, which is most of the supporting objects —
+	// the journal deliberately does not record them, so no amount of
+	// looking would find one.
+	APIKind string
 	// Origin attributes the claim.
 	Origin Origin
 	// Meta is this kind's own freshness, from its own source.
@@ -87,6 +93,12 @@ type ObjectRowView struct {
 	// Detail is the one line that distinguishes this object from its
 	// neighbours of the same kind.
 	Detail string
+	// RawSeq is the retained revision holding this object's scrubbed
+	// definition, zero when the journal has none or the reader is below
+	// the gate. It is the only definition the console holds: captured
+	// from the watch it already runs, scrubbed at that boundary, never
+	// re-read from the API server on a viewer's behalf.
+	RawSeq uint64
 }
 
 // buildObjectsView assembles the inventory from the views the page has
@@ -124,14 +136,14 @@ func objectsClusterGroup(p *Page) ObjectGroupView {
 	// two are read side by side.
 	if p.SnapshotState != "" {
 		g.Kinds = append(g.Kinds, ObjectKindView{
-			Kind: "Cluster", Origin: OriginOperator, Observed: true,
+			Kind: "Cluster", APIKind: "Cluster", Origin: OriginOperator, Observed: true,
 			Meta: SectionMeta{State: p.SnapshotState, Age: p.SnapshotAge, Generation: p.Generation},
 			Rows: []ObjectRowView{{Name: p.ClusterName, Detail: objectsClusterDetail(p)}},
 		})
 	}
 
 	if p.Pods != nil {
-		k := ObjectKindView{Kind: "Instance pods", Origin: p.Pods.Origin, Meta: p.Pods.Meta,
+		k := ObjectKindView{Kind: "Instance pods", APIKind: "Pod", Origin: p.Pods.Origin, Meta: p.Pods.Meta,
 			Observed: true, Truncated: p.Pods.Truncated}
 		for _, pod := range p.Pods.Rows {
 			k.Rows = append(k.Rows, ObjectRowView{
@@ -144,7 +156,7 @@ func objectsClusterGroup(p *Page) ObjectGroupView {
 	}
 
 	if infra := p.Infrastructure; infra != nil {
-		services := ObjectKindView{Kind: "Services", Origin: infra.Origin, Meta: infra.Meta,
+		services := ObjectKindView{Kind: "Services", APIKind: "Service", Origin: infra.Origin, Meta: infra.Meta,
 			Observed: true, Truncated: infra.Truncated}
 		for _, s := range infra.Services {
 			detail := s.Type
@@ -163,7 +175,7 @@ func objectsClusterGroup(p *Page) ObjectGroupView {
 		services.Note = objectsEmptyNote(len(services.Rows), "no services were observed for this cluster")
 		g.Kinds = append(g.Kinds, services)
 
-		claims := ObjectKindView{Kind: "Volume claims", Origin: infra.Origin, Meta: infra.Meta,
+		claims := ObjectKindView{Kind: "Volume claims", APIKind: "PersistentVolumeClaim", Origin: infra.Origin, Meta: infra.Meta,
 			Observed: true, Truncated: infra.Truncated}
 		for _, v := range infra.Volumes {
 			detail := v.Purpose
@@ -183,7 +195,7 @@ func objectsClusterGroup(p *Page) ObjectGroupView {
 
 		// Volume snapshots degrade on their own: the CRD may not be
 		// installed at all, which is a different claim from none taken.
-		snaps := ObjectKindView{Kind: "Volume snapshots", Origin: infra.Origin, Meta: infra.Meta,
+		snaps := ObjectKindView{Kind: "Volume snapshots", APIKind: "VolumeSnapshot", Origin: infra.Origin, Meta: infra.Meta,
 			Observed: infra.SnapshotsObservable}
 		if infra.SnapshotsObservable {
 			for _, s := range infra.Snapshots {
@@ -257,7 +269,7 @@ func objectsBackupGroup(p *Page) ObjectGroupView {
 	}
 	b := p.Backups
 
-	schedules := ObjectKindView{Kind: "ScheduledBackups", Origin: b.Origin, Meta: b.Meta,
+	schedules := ObjectKindView{Kind: "ScheduledBackups", APIKind: "ScheduledBackup", Origin: b.Origin, Meta: b.Meta,
 		Observed: true, Truncated: b.SchedulesTruncated}
 	for _, s := range b.ScheduledRows {
 		schedules.Rows = append(schedules.Rows, ObjectRowView{
@@ -267,7 +279,7 @@ func objectsBackupGroup(p *Page) ObjectGroupView {
 	schedules.Note = objectsEmptyNote(len(schedules.Rows), "no backup schedule references this cluster")
 	g.Kinds = append(g.Kinds, schedules)
 
-	backups := ObjectKindView{Kind: "Backups", Origin: b.Origin, Meta: b.Meta,
+	backups := ObjectKindView{Kind: "Backups", APIKind: "Backup", Origin: b.Origin, Meta: b.Meta,
 		Observed: true, Truncated: b.BackupsTruncated}
 	for _, r := range b.Rows {
 		detail := r.Method + " · " + r.Phase
@@ -304,7 +316,7 @@ func objectsPoolerGroup(p *Page) ObjectGroupView {
 		Detail: "The Poolers that reference this cluster, and the PgBouncer pods they run. The pods come from a separate watch, so their freshness stands on its own.",
 	}
 	if p.Poolers != nil {
-		k := ObjectKindView{Kind: "Poolers", Origin: p.Poolers.Origin, Meta: p.Poolers.Meta,
+		k := ObjectKindView{Kind: "Poolers", APIKind: "Pooler", Origin: p.Poolers.Origin, Meta: p.Poolers.Meta,
 			Observed: true, Truncated: p.Poolers.Truncated}
 		for _, pl := range p.Poolers.Poolers {
 			k.Rows = append(k.Rows, ObjectRowView{
@@ -316,7 +328,7 @@ func objectsPoolerGroup(p *Page) ObjectGroupView {
 		g.Kinds = append(g.Kinds, k)
 	}
 	if p.PoolerPods != nil {
-		k := ObjectKindView{Kind: "Pooler pods", Origin: p.PoolerPods.Origin, Meta: p.PoolerPods.Meta,
+		k := ObjectKindView{Kind: "Pooler pods", APIKind: "Pod", Origin: p.PoolerPods.Origin, Meta: p.PoolerPods.Meta,
 			Observed: true, Truncated: p.PoolerPods.Truncated}
 		for _, pod := range p.PoolerPods.Rows {
 			k.Rows = append(k.Rows, ObjectRowView{
@@ -342,8 +354,8 @@ func objectsDatabaseGroup(p *Page) ObjectGroupView {
 	if d == nil {
 		return g
 	}
-	add := func(kind string, rows []ObjectRowView, empty string) {
-		k := ObjectKindView{Kind: kind, Origin: d.Origin, Meta: d.Meta,
+	add := func(kind, apiKind string, rows []ObjectRowView, empty string) {
+		k := ObjectKindView{Kind: kind, APIKind: apiKind, Origin: d.Origin, Meta: d.Meta,
 			Observed: true, Truncated: d.Truncated, Rows: rows}
 		k.Note = objectsEmptyNote(len(rows), empty)
 		g.Kinds = append(g.Kinds, k)
@@ -355,7 +367,7 @@ func objectsDatabaseGroup(p *Page) ObjectGroupView {
 			Name: r.Name, Detail: strings.TrimSpace(r.Database + " · owner " + r.Owner + " · " + r.Ensure),
 		})
 	}
-	add("Databases", databases, "no Database object targets this cluster")
+	add("Databases", "Database", databases, "no Database object targets this cluster")
 
 	var roles []ObjectRowView
 	for _, r := range d.Roles {
@@ -363,7 +375,7 @@ func objectsDatabaseGroup(p *Page) ObjectGroupView {
 			Name: r.Name, Detail: strings.TrimSpace(r.Role + " · " + r.Attributes),
 		})
 	}
-	add("Roles", roles, "no declared roles were observed")
+	add("Roles", "", roles, "no declared roles were observed")
 
 	var pubs []ObjectRowView
 	for _, r := range d.Publications {
@@ -371,7 +383,7 @@ func objectsDatabaseGroup(p *Page) ObjectGroupView {
 			Name: r.Name, Detail: strings.TrimSpace(r.Publication + " · in " + r.Database),
 		})
 	}
-	add("Publications", pubs, "no Publication object targets this cluster")
+	add("Publications", "Publication", pubs, "no Publication object targets this cluster")
 
 	var subs []ObjectRowView
 	for _, r := range d.Subscriptions {
@@ -379,7 +391,7 @@ func objectsDatabaseGroup(p *Page) ObjectGroupView {
 			Name: r.Name, Detail: strings.TrimSpace(r.Subscription + " · in " + r.Database + " · from " + r.Publication),
 		})
 	}
-	add("Subscriptions", subs, "no Subscription object targets this cluster")
+	add("Subscriptions", "Subscription", subs, "no Subscription object targets this cluster")
 	return g
 }
 

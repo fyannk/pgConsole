@@ -16,10 +16,12 @@ package web
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/kube"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
@@ -154,6 +156,29 @@ func TestObjectsSeparatesUnreadableFromEmpty(t *testing.T) {
 	}
 	if len(pubs.Rows) != 0 || pubs.Note == "" {
 		t.Error("an observed empty kind does not state its emptiness")
+	}
+}
+
+// The raw-definition affordance sits behind the same gate the revision
+// route enforces, so the link never appears where following it would
+// refuse. Below the gate the inventory still renders in full: the
+// definition is the only thing withheld.
+func TestObjectsRawDefinitionIsGated(t *testing.T) {
+	t.Parallel()
+	src := staticSnapshots{
+		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
+		ok:     true,
+		pods:   podsSnapshot(false, memberPod("orders-1", "primary")),
+		podsOK: true,
+	}
+	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
+
+	baseline := get(t, h, http.MethodGet, "/objects").Body.String()
+	if strings.Contains(baseline, `data-dialog="object-raw"`) {
+		t.Error("an unidentified reader is offered a raw definition link")
+	}
+	if !strings.Contains(baseline, "orders-1") {
+		t.Error("the gate withheld the inventory itself, not just the definition")
 	}
 }
 
