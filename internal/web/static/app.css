@@ -1736,6 +1736,15 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-publication rect { fill: color-mix(in oklab, var(--accent) 11%, var(--surface)); }
 .topo-subscription rect { fill: color-mix(in oklab, var(--storage) 11%, var(--surface)); }
 .topo-role rect { fill: color-mix(in oklab, var(--warn) 11%, var(--surface)); }
+/* The client path gives its two bands the same treatment: the pooler
+   and the pods that run it are different things, and the drawing now
+   places them in different columns. */
+.topo-pooler rect { fill: color-mix(in oklab, var(--accent) 11%, var(--surface)); }
+.topo-poolerpod rect { fill: color-mix(in oklab, var(--storage) 10%, var(--surface)); }
+.topo-frame-pooler rect { stroke: var(--accent); }
+.topo-frame-pooler .topo-frame-label { fill: var(--accent); }
+.topo-frame-poolerpod rect { stroke: var(--storage); }
+.topo-frame-poolerpod .topo-frame-label { fill: var(--storage); }
 /* Health by border colour; the state word rides in the diagram's labels
    and on the Cluster status screen, so colour is reinforcement. */
 .topo-node[data-state="current"] rect { stroke: var(--ok); }

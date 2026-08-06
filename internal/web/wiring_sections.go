@@ -17,6 +17,7 @@ package web
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -576,23 +577,34 @@ func buildPoolersWiring(p *Page) *TopologyView {
 				boxRows = append(boxRows, TopoGraphText{C: "disk", T: "node " + pod.Node})
 			}
 			pods = append(pods, secPod{
-				node: add(fmt.Sprintf("ppod-%d", i), "pooler", podState(pod), secWPod, boxRows),
+				node: add(fmt.Sprintf("ppod-%d", i), "poolerpod", podState(pod), secWPod, boxRows),
 				of:   pod.Role,
 			})
 		}
 		if extra > 0 {
-			pods = append(pods, secPod{node: add("ppod-more", "pooler", "", secWPod, []TopoGraphText{
+			pods = append(pods, secPod{node: add("ppod-more", "poolerpod", "", secWPod, []TopoGraphText{
 				{C: "label", T: fmt.Sprintf("+%d more", extra)},
 				{C: "sub", T: "pooler pods"},
 			})})
 		}
 	}
 
-	// --- Placement: pooler column, services column, instances. ---
+	// --- Placement: three bands, poolers then the pods that run them
+	// then the cluster they reach.
+	//
+	// The pods used to hang under the poolers in the same column, which
+	// put the thing that actually carries the connection off the path
+	// it carries it along. A client reaches a pooler, the pooler is run
+	// by its pods, and those pods are what talks to the cluster — so
+	// that is the order left to right.
 
 	x := float64(grpMargin) + grpPad
 	poolX := x
-	x += wireWPool + grpPad + grpAlley + grpPad
+	x += wireWPool + grpAlley
+	podX := x
+	if len(pods) > 0 {
+		x += secWPod + grpAlley
+	}
 	svcX := x
 	x += wireWSvc + grpColGap
 	primX := x
@@ -631,24 +643,57 @@ func buildPoolersWiring(p *Page) *TopologyView {
 			rwPool = append(rwPool, pl.node)
 		}
 	}
+	// The read-write poolers sit level with the write service, the
+	// read-only ones with the read service; the frame is measured from
+	// where they land rather than from a running total.
 	poolBottom := stackAround(rwPool, poolX, cy(rw), content)
-	poolBottom = stackAround(roPool, poolX, cy(ro), poolBottom+grpRowGap)
+	stackAround(roPool, poolX, cy(ro), poolBottom+grpRowGap)
 
-	// The pods frame under the poolers.
+	// Each pod level with the pooler that runs it, so that wire is a
+	// straight line; a second pod of the same pooler falls in beneath
+	// the first, and a pod whose owner was not observed lands after
+	// everything rather than on top of it.
+	byName := map[string]*TopoNode{}
+	poolerOrder := map[string]int{}
+	for i, pl := range poolers {
+		byName[pl.name] = pl.node
+		poolerOrder[pl.name] = i
+	}
+	// In their poolers' order, or the column reads in one order while
+	// the column beside it reads in another and every wire between them
+	// has to cross to say so.
+	sort.SliceStable(pods, func(a, b int) bool {
+		oa, oka := poolerOrder[pods[a].of]
+		ob, okb := poolerOrder[pods[b].of]
+		if oka != okb {
+			return oka // an unowned pod sorts last
+		}
+		return oa < ob
+	})
 	var frames []TopoFrame
-	poolFrameBottom := poolBottom + grpPad
+	podNext := content
+	for _, pod := range pods {
+		pod.node.X = int(podX)
+		y := podNext
+		if owner := byName[pod.of]; owner != nil {
+			y = cy(owner) - float64(pod.node.H)/2
+			if y < podNext {
+				y = podNext
+			}
+		}
+		pod.node.Y = int(y)
+		podNext = y + float64(pod.node.H) + chBoxGap
+	}
 	if len(pods) > 0 {
-		podTop := poolFrameBottom + grpRowGap + 14
-		y := podTop + grpLabelBand + grpPad
+		podTop, podBottom := math.Inf(1), math.Inf(-1)
 		for _, pod := range pods {
-			pod.node.X = int(poolX)
-			pod.node.Y = int(y)
-			y += float64(pod.node.H) + chBoxGap
+			podTop = math.Min(podTop, float64(pod.node.Y))
+			podBottom = math.Max(podBottom, float64(pod.node.Y+pod.node.H))
 		}
 		frames = append(frames, TopoFrame{
-			Label: "Pooler pods", Kind: "pool",
-			X: int(poolX) - grpPad, Y: int(podTop),
-			W: secWPod + 2*grpPad, H: int(y - chBoxGap + grpPad - podTop),
+			Label: "Pooler pods", Kind: "poolerpod",
+			X: int(podX) - grpPad, Y: int(podTop) - grpLabelBand - grpPad,
+			W: secWPod + 2*grpPad, H: int(podBottom+grpPad) - (int(podTop) - grpLabelBand - grpPad),
 		})
 	}
 
@@ -666,7 +711,33 @@ func buildPoolersWiring(p *Page) *TopologyView {
 		view.Dots = append(view.Dots, TopoDot{Kind: kind, X: int(x), Y: int(y)})
 	}
 
-	bus := poolX + wireWPool + grpPad + grpAlley/2
+	// A pooler to the pods that run it: the ownership the roster already
+	// proved, not a claim about traffic.
+	podsOf := map[string][]*TopoNode{}
+	for _, pod := range pods {
+		if pod.of == "" {
+			continue
+		}
+		podsOf[pod.of] = append(podsOf[pod.of], pod.node)
+	}
+	ownBus := podX - grpAlley*0.5
+	for _, pl := range poolers {
+		for _, pod := range podsOf[pl.name] {
+			wire("owns", pl.node, pod, []topoPoint{
+				{right(pl.node), cy(pl.node)}, {ownBus, cy(pl.node)},
+				{ownBus, cy(pod)}, {left(pod), cy(pod)},
+			})
+			if len(podsOf[pl.name]) > 1 && cy(pod) != cy(pl.node) {
+				dot("owns", ownBus, cy(pod))
+			}
+		}
+	}
+
+	// Onward to the service. The pods carry the connection when the
+	// console observed any; a pooler whose pods it did not observe is
+	// wired straight through, because the path exists either way and
+	// leaving it out would read as a pooler that reaches nothing.
+	bus := svcX - grpAlley*0.5
 	fanIn := func(kind string, from []*TopoNode, to *TopoNode) {
 		for _, f := range from {
 			wire(kind, f, to, []topoPoint{
@@ -681,8 +752,21 @@ func buildPoolersWiring(p *Page) *TopologyView {
 			}
 		}
 	}
-	fanIn("write", rwPool, rw)
-	fanIn("read", roPool, ro)
+	var rwOut, roOut []*TopoNode
+	for _, pl := range poolers {
+		owned := podsOf[pl.name]
+		out := owned
+		if len(owned) == 0 {
+			out = []*TopoNode{pl.node}
+		}
+		if pl.ro {
+			roOut = append(roOut, out...)
+		} else {
+			rwOut = append(rwOut, out...)
+		}
+	}
+	fanIn("write", rwOut, rw)
+	fanIn("read", roOut, ro)
 	if primary != nil {
 		wire("write", rw, primary, []topoPoint{
 			{right(rw), cy(rw)}, {left(primary), cy(primary)},
@@ -697,35 +781,19 @@ func buildPoolersWiring(p *Page) *TopologyView {
 			dot("read", readBus, cy(r))
 		}
 	}
-	// Each pod up into the pooler it runs, on a bus right of the column.
-	podBus := poolX + wireWPool + grpPad + grpAlley*0.2
-	byName := map[string]*TopoNode{}
-	for _, pl := range poolers {
-		byName[pl.name] = pl.node
-	}
-	for _, pod := range pods {
-		owner := byName[pod.of]
-		if owner == nil {
-			continue
-		}
-		in := float64(owner.Y+owner.H) - 8
-		wire("owns", pod.node, owner, []topoPoint{
-			{right(pod.node), cy(pod.node)}, {podBus, cy(pod.node)}, {podBus, in}, {right(owner), in},
-		})
-	}
 
 	view.Edges = edges
 	view.Graph.Links = links
 	view.Legend = topoLegend(links)
 
-	// Frames: poolers and the cluster, plus the pods frame placed above.
+	// Frames: the poolers, the pods placed above, and the cluster.
 	var poolMembers []*TopoNode
 	for _, pl := range poolers {
 		poolMembers = append(poolMembers, pl.node)
 	}
 	minX, _, maxX, maxY := secBounds(poolMembers)
 	frames = append(frames, TopoFrame{
-		Label: "Poolers", Kind: "pool",
+		Label: "Poolers", Kind: "pooler",
 		X: minX - grpPad, Y: int(top),
 		W: maxX - minX + 2*grpPad, H: maxY + grpPad - int(top),
 	})
@@ -753,7 +821,7 @@ func buildPoolersWiring(p *Page) *TopologyView {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
-	view.Caption = "The path a client takes: poolers front the services, the services reach the instances. The pods frame shows what actually runs each pooler, wired by the same ownership proof the roster uses. Every value is operator-reported or Kubernetes-observed; the console never connects to PgBouncer."
+	view.Caption = "The path a client takes, left to right: a pooler, the pods that run it, the service they reach, and the instances behind it. Pooler-to-pod is the ownership the roster proved; the hops onward are the standard wiring of these resources, not observed traffic. A pooler whose pods were not observed is wired straight through. Every value is operator-reported or Kubernetes-observed; the console never connects to PgBouncer."
 	return view
 }
 
