@@ -39,6 +39,20 @@ import (
 type MetricsView struct {
 	// Shell is the shared chrome.
 	Shell ShellView
+	// Title heads the screen, and SeriesURL is the endpoint its charts
+	// fetch from. Both differ per window so one screen cannot draw the
+	// other's numbers.
+	Title     string
+	SeriesURL string
+	// PageTitle suffixes the document title. AllTabLabel names the tab
+	// holding every pod together, and Origin is the footer's one
+	// attribution — all three name the roster, because the screen is
+	// the same and the things it reports on are not.
+	PageTitle   string
+	AllTabLabel string
+	Origin      string
+	// Producer is what the warning calls the things being scraped.
+	Producer string
 	// Interval and Retention state the window's shape in words.
 	Interval  string
 	Retention string
@@ -176,15 +190,69 @@ type instanceColumn struct {
 	Values []*float64 `json:"values"`
 }
 
-// handleClusterMetrics renders the charts screen.
+// metricsScreen is one metrics window and the screen that renders it.
+// The instances and the poolers get the same screen over different
+// windows: same tabs, same tiles, same disclosures — a reader who has
+// learnt one has learnt both — but never the same numbers, because the
+// two run different software and their catalogs share no key.
+type metricsScreen struct {
+	source  MetricsSource
+	current string
+	title   string
+	// seriesURL is the endpoint the charts fetch from, which differs
+	// per screen so a chart can never be served the other window.
+	seriesURL string
+	// scopeAll and scopeOne word the tabs for whichever roster this is.
+	scopeAll string
+	scopeOne string
+	pageTitle,
+	allTab,
+	origin,
+	producer string
+}
+
+func (h *Handler) clusterMetricsScreen() metricsScreen {
+	return metricsScreen{
+		source: h.sources.Metrics, current: "cluster-metrics", title: "Metrics",
+		seriesURL: "/cluster/metrics/series",
+		pageTitle: "cluster metrics", allTab: "All instances",
+		producer: "this cluster's instances",
+		origin:   "source: instance-reported metrics — every number on this screen is a claim the instance's own metrics endpoint made, recorded verbatim; times are when this pgConsole process scraped them, not when the instance computed them. A sweep that failed is a gap in the line, never a value interpolated across it.",
+		scopeAll: "Every instance the console has scraped, drawn together. Lines that should track each other and do not are the reason this tab exists.",
+		scopeOne: "Only what %s reported. A panel that is empty here is a metric this instance does not serve — the primary-only ones say so.",
+	}
+}
+
+func (h *Handler) poolerMetricsScreen() metricsScreen {
+	return metricsScreen{
+		source: h.sources.PoolerMetrics, current: "poolers-metrics", title: "Pooler metrics",
+		seriesURL: "/poolers/metrics/series",
+		pageTitle: "pooler metrics", allTab: "All pooler pods",
+		producer: "this cluster's pooler pods",
+		origin:   "source: pooler-reported metrics — every number on this screen is a claim the PgBouncer exporter running beside each pooler pod made, recorded verbatim; the console never connects to PgBouncer itself. Times are when this pgConsole process scraped them, and a sweep that failed is a gap in the line, never a value interpolated across it.",
+		scopeAll: "Every pooler pod the console has scraped, drawn together. A pooler runs more than one pod, and a queue forming on one of them and not the others is the reason this tab exists.",
+		scopeOne: "Only what %s reported. Each pod pools independently, so its queue and its server connections are its own.",
+	}
+}
+
+// handleClusterMetrics renders the instance charts screen.
 func (h *Handler) handleClusterMetrics(w http.ResponseWriter, r *http.Request) {
-	view, err := h.buildMetricsView()
+	h.renderMetrics(w, r, h.clusterMetricsScreen())
+}
+
+// handlePoolerMetrics renders the same screen over the pooler window.
+func (h *Handler) handlePoolerMetrics(w http.ResponseWriter, r *http.Request) {
+	h.renderMetrics(w, r, h.poolerMetricsScreen())
+}
+
+func (h *Handler) renderMetrics(w http.ResponseWriter, r *http.Request, screen metricsScreen) {
+	view, err := h.buildMetricsView(screen)
 	if err != nil {
 		h.renderDenied(w, r, http.StatusInternalServerError, "metrics assembly failed")
 		return
 	}
-	view.Shell = h.shell(r, "cluster-metrics")
-	h.renderPage(w, "cluster-metrics", "cluster-metrics.html.tmpl", view)
+	view.Shell = h.shell(r, screen.current)
+	h.renderPage(w, screen.current, "cluster-metrics.html.tmpl", view)
 }
 
 // handleMetricsSeries serves one series as JSON for the chart. It
@@ -200,7 +268,21 @@ func (h *Handler) handleClusterMetrics(w http.ResponseWriter, r *http.Request) {
 // was: the window summary is stated in text beside every chart, on
 // every tab, before any script runs.
 func (h *Handler) handleMetricsSeries(w http.ResponseWriter, r *http.Request) {
-	def, ok := metrics.SeriesByKey(r.URL.Query().Get("key"))
+	h.serveMetricsSeries(w, r, h.sources.Metrics)
+}
+
+// handlePoolerMetricsSeries serves the pooler window on its own route,
+// so neither screen can be handed the other's numbers.
+func (h *Handler) handlePoolerMetricsSeries(w http.ResponseWriter, r *http.Request) {
+	h.serveMetricsSeries(w, r, h.sources.PoolerMetrics)
+}
+
+func (h *Handler) serveMetricsSeries(w http.ResponseWriter, r *http.Request, src MetricsSource) {
+	if src == nil {
+		http.NotFound(w, r)
+		return
+	}
+	def, ok := src.Catalog().SeriesByKey(r.URL.Query().Get("key"))
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -215,11 +297,11 @@ func (h *Handler) handleMetricsSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	instance := r.URL.Query().Get("instance")
-	if instance != "" && !h.metricsTracks(instance) {
+	if instance != "" && !metricsTracks(src, instance) {
 		http.NotFound(w, r)
 		return
 	}
-	payload := h.seriesPayload(def, tier, instance)
+	payload := seriesPayload2(src, def, tier, instance)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
@@ -229,8 +311,8 @@ func (h *Handler) handleMetricsSeries(w http.ResponseWriter, r *http.Request) {
 
 // metricsTracks reports whether the store has ever observed the named
 // instance, which is the only instance name the series endpoint serves.
-func (h *Handler) metricsTracks(instance string) bool {
-	for _, name := range h.sources.Metrics.Instances() {
+func metricsTracks(src MetricsSource, instance string) bool {
+	for _, name := range src.Instances() {
 		if name == instance {
 			return true
 		}
@@ -240,8 +322,8 @@ func (h *Handler) metricsTracks(instance string) bool {
 
 // seriesPayload reads one series from the store into the wire shape,
 // optionally narrowed to one instance.
-func (h *Handler) seriesPayload(def metrics.SeriesDef, tier metrics.Tier, instance string) seriesPayload {
-	times, byInstance := h.sources.Metrics.Range(def.Key, tier)
+func seriesPayload2(src MetricsSource, def metrics.SeriesDef, tier metrics.Tier, instance string) seriesPayload {
+	times, byInstance := src.Range(def.Key, tier)
 	payload := seriesPayload{Unit: def.Unit, Times: times}
 	names := make([]string, 0, len(byInstance))
 	for name := range byInstance {
@@ -286,20 +368,30 @@ func scopeNote(scope metrics.Scope) string {
 
 // buildMetricsView assembles the screen from the store: one cluster tab
 // plus one tab per tracked instance, each carrying the whole catalog.
-func (h *Handler) buildMetricsView() (MetricsView, error) {
-	src := h.sources.Metrics
+func (h *Handler) buildMetricsView(screen metricsScreen) (MetricsView, error) {
+	src := screen.source
+	if src == nil {
+		return MetricsView{}, nil
+	}
 	view := MetricsView{
-		Interval:  formatSpan(src.Interval()),
-		Retention: formatSpan(src.Retention()),
-		RawWindow: formatSpan(metrics.DefaultRawWindow),
+		Title:       screen.title,
+		SeriesURL:   screen.seriesURL,
+		PageTitle:   screen.pageTitle,
+		AllTabLabel: screen.allTab,
+		Origin:      screen.origin,
+		Producer:    screen.producer,
+		Interval:    formatSpan(src.Interval()),
+		Retention:   formatSpan(src.Retention()),
+		RawWindow:   formatSpan(metrics.DefaultRawWindow),
 	}
 
 	instances := src.Instances()
 	// Read the store once per screen rather than once per tab: stats and
 	// instants are both whole-store reads, and re-reading them per tab
 	// would let two tabs of one page disagree about the same sweep.
-	stats := make(map[string]map[string]metrics.Stats, len(metrics.Catalog))
-	for _, def := range metrics.Catalog {
+	catalog := src.Catalog()
+	stats := make(map[string]map[string]metrics.Stats, len(catalog.Series))
+	for _, def := range catalog.Series {
 		byInstance := src.SeriesStats(def.Key)
 		if len(byInstance) > 0 {
 			view.HasSamples = true
@@ -312,9 +404,9 @@ func (h *Handler) buildMetricsView() (MetricsView, error) {
 	}
 	now := h.now()
 
-	view.Tabs = append(view.Tabs, h.buildMetricsTab("", instances, stats, readings, now))
+	view.Tabs = append(view.Tabs, h.buildMetricsTab("", instances, stats, readings, catalog, screen, now))
 	for _, name := range instances {
-		view.Tabs = append(view.Tabs, h.buildMetricsTab(name, []string{name}, stats, readings, now))
+		view.Tabs = append(view.Tabs, h.buildMetricsTab(name, []string{name}, stats, readings, catalog, screen, now))
 	}
 	if len(view.Tabs) > 0 {
 		view.Tabs[0].Selected = true
@@ -329,14 +421,17 @@ func (h *Handler) buildMetricsTab(
 	scope []string,
 	stats map[string]map[string]metrics.Stats,
 	readings map[string]map[string]metrics.Instant,
+	catalog metrics.Catalog,
+	screen metricsScreen,
 	now time.Time,
 ) MetricsTabView {
 	tab := MetricsTabView{Instance: instance}
 	if instance == "" {
-		tab.ID, tab.Label = "metrics-cluster", "All instances"
+		tab.ID, tab.Label = "metrics-cluster", screen.allTab
+		_ = screen.scopeAll // the all-pods tab leads with the data, not a blurb
 	} else {
 		tab.ID, tab.Label = "metrics-pod-"+metricsTabID(instance), instance
-		tab.Blurb = "Only what " + instance + " reported. A panel that is empty here is a metric this instance does not serve — the primary-only ones say so."
+		tab.Blurb = fmt.Sprintf(screen.scopeOne, instance)
 	}
 
 	inScope := make(map[string]bool, len(scope))
@@ -344,10 +439,10 @@ func (h *Handler) buildMetricsTab(
 		inScope[name] = true
 	}
 
-	for _, group := range metrics.Groups {
+	for _, group := range catalog.Groups {
 		view := MetricGroupView{Key: group.Key, Title: group.Title, Blurb: group.Blurb}
 
-		for _, def := range metrics.Instants {
+		for _, def := range catalog.Instants {
 			if def.Group != group.Key {
 				continue
 			}
@@ -390,7 +485,7 @@ func (h *Handler) buildMetricsTab(
 			view.Tiles = append(view.Tiles, tile)
 		}
 
-		for _, def := range metrics.Catalog {
+		for _, def := range catalog.Series {
 			if def.Group != group.Key {
 				continue
 			}

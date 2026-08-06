@@ -105,7 +105,7 @@ func uiHistorySource() *history.Store {
 // for three instances, with a visible outage gap and a replica whose
 // lag moves, so the charts and summaries have a real shape.
 func uiMetricsSource() *metrics.Store {
-	store := metrics.NewStore(metrics.Limits{Interval: 10 * time.Second})
+	store := metrics.NewStore(metrics.Instance, metrics.Limits{Interval: 10 * time.Second})
 	base := testNow.Add(-time.Hour)
 	for i := 0; i < 360; i++ {
 		if i >= 200 && i < 230 {

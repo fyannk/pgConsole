@@ -135,7 +135,11 @@
       <div class="sidebar-sub">
         <a class="sidebar-link" href="/poolers"{{if eq .Current "poolers-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
         <a class="sidebar-link" href="/poolers/pods"{{if eq .Current "poolers-pods"}} aria-current="page"{{end}} title="Pods"><svg><use href="#i-pods"></use></svg><span class="sidebar-label">Pods</span></a>
-        <a class="sidebar-link" href="/poolers/logs"{{if eq .Current "poolers-logs"}} aria-current="page"{{end}} title="Logs"><svg><use href="#i-logs"></use></svg><span class="sidebar-label">Logs</span></a>
+        {{- if .PoolerMetricsAvailable}}
+        <a class="sidebar-link" href="/poolers/metrics"{{if eq .Current "poolers-metrics"}} aria-current="page"{{end}} title="Pooler metrics"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Pooler metrics — disabled in this deployment"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></span>
+        {{- end}}
       </div>
     </div>
 

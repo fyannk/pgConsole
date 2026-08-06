@@ -110,6 +110,11 @@ type Deps struct {
 	// route exists. The scraper needs the pod roster, so it only runs
 	// when PodSource is also wired.
 	Metrics *metrics.Store
+	// PoolerMetrics is the same window over the PgBouncer exporter's
+	// surface, filled from the pooler pods. Nil means no pooler metrics
+	// screen; it needs PoolerPodSource for the same reason Metrics
+	// needs PodSource.
+	PoolerMetrics *metrics.Store
 	// MetricsRunner is the metrics snapshot loop, owning the snapshot
 	// file's cadence and final flush. Nil means the window is in-memory
 	// or disabled and no loop runs.
@@ -164,7 +169,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		runners = append(runners, observe.NewPodCollector(deps.PodSource, podStore, deps.Clock, logger).Run)
 		if deps.Metrics != nil {
 			sources.Metrics = deps.Metrics
-			runners = append(runners, scrape.New(podStore, deps.Metrics,
+			runners = append(runners, scrape.New(podStore, deps.Metrics, scrape.InstancePort,
 				deps.Metrics.Interval(), deps.Clock, logger).Run)
 		}
 	}
@@ -187,6 +192,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		poolerPodStore := observe.NewPoolerPodStore()
 		sources.PoolerPods = poolerPodStore
 		runners = append(runners, observe.NewPoolerPodCollector(deps.PoolerPodSource, poolerPodStore, deps.Clock, logger).Run)
+		if deps.PoolerMetrics != nil {
+			sources.PoolerMetrics = deps.PoolerMetrics
+			runners = append(runners, scrape.New(poolerPodStore, deps.PoolerMetrics, scrape.PoolerPort,
+				deps.PoolerMetrics.Interval(), deps.Clock, logger).Run)
+		}
 	}
 	if deps.FailoverQuorumSource != nil {
 		quorumStore := observe.NewFailoverQuorumStore()

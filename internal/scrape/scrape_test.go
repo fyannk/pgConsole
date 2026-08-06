@@ -189,9 +189,9 @@ func TestCollectorSweepsRunningPodsAndLogsOncePerStateChange(t *testing.T) {
 		{Name: "orders-2", IP: "203.0.113.1"}, // unreachable, TEST-NET
 		{Name: "orders-3"},                    // no IP yet: skipped silently
 	}}}
-	store := metrics.NewStore(metrics.Limits{Interval: 10 * time.Second})
+	store := metrics.NewStore(metrics.Instance, metrics.Limits{Interval: 10 * time.Second})
 	logger, logs := testLogger()
-	c := New(source, store, 10*time.Second, &sweepClock{sweeps: 2, now: time.Unix(1700000000, 0)}, logger)
+	c := New(source, store, InstancePort, 10*time.Second, &sweepClock{sweeps: 2, now: time.Unix(1700000000, 0)}, logger)
 	c.port = port
 	c.client.Timeout = 500 * time.Millisecond
 

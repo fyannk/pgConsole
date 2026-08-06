@@ -111,10 +111,10 @@ type GroupDef struct {
 	Blurb string
 }
 
-// Groups are the screen's sections, in render order. Every catalog
-// entry names one; an entry whose group is not listed here would never
-// be rendered, which the catalog test holds against.
-var Groups = []GroupDef{
+// instanceGroups are the instance screen's sections, in render order.
+// Every catalog entry names one; an entry whose group is not listed
+// here would never be rendered, which the catalog test holds against.
+var instanceGroups = []GroupDef{
 	{Key: "instance", Title: "Instance state",
 		Blurb: "What the instance says it currently is: version, role, uptime, and the flags the operator sets on it."},
 	{Key: "sessions", Title: "Sessions and contention",
@@ -166,9 +166,36 @@ type SeriesDef struct {
 	Names []string
 }
 
-// Catalog is the fixed time-series allowlist, chosen from the metrics
-// the CloudNativePG instance exporter serves by default.
-var Catalog = []SeriesDef{
+// Catalog bundles one exporter's whole curated surface: the sections,
+// the time series, and the point-in-time tiles. There is one per kind
+// of thing scraped — the instances and the poolers run different
+// software and answer different questions — and a Store carries the one
+// it was built for, so neither can render the other's keys.
+type Catalog struct {
+	// Groups are the screen's sections, in render order.
+	Groups []GroupDef
+	// Series are the charted metrics.
+	Series []SeriesDef
+	// Instants are the point-in-time tiles.
+	Instants []InstantDef
+}
+
+// SeriesByKey resolves a charted metric; ok is false for unknown keys.
+func (c Catalog) SeriesByKey(key string) (SeriesDef, bool) {
+	for _, def := range c.Series {
+		if def.Key == key {
+			return def, true
+		}
+	}
+	return SeriesDef{}, false
+}
+
+// Instance is the CloudNativePG instance exporter's surface.
+var Instance = Catalog{Groups: instanceGroups, Series: instanceCharts, Instants: instanceInstants}
+
+// instanceSeries is the fixed time-series allowlist, chosen from the
+// metrics the CloudNativePG instance exporter serves by default.
+var instanceCharts = []SeriesDef{
 	// --------------------------------------------------- sessions
 	{Key: "connections", Title: "Connections", Unit: "connections", Group: "sessions",
 		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_backends_total"},
@@ -528,16 +555,6 @@ var Catalog = []SeriesDef{
 		}},
 }
 
-// SeriesByKey resolves a catalog entry; ok is false for unknown keys.
-func SeriesByKey(key string) (SeriesDef, bool) {
-	for _, def := range Catalog {
-		if def.Key == key {
-			return def, true
-		}
-	}
-	return SeriesDef{}, false
-}
-
 // Render says how an instant's number becomes text. The store keeps
 // float64s; the rendering decision belongs with the definition, because
 // a unix timestamp and a page count are the same float and must never
@@ -592,8 +609,8 @@ type InstantDef struct {
 	Names []string
 }
 
-// Instants is the fixed point-in-time allowlist.
-var Instants = []InstantDef{
+// instanceInstants is the instance exporter's point-in-time surface.
+var instanceInstants = []InstantDef{
 	// -------------------------------------------------- instance
 	{Key: "postgres-version", Title: "PostgreSQL version", Group: "instance",
 		Render: RenderVersion, Aggregate: Max, Names: []string{"cnpg_collector_postgres_version"},
@@ -869,16 +886,6 @@ var Instants = []InstantDef{
 		}},
 }
 
-// InstantByKey resolves an instant entry; ok is false for unknown keys.
-func InstantByKey(key string) (InstantDef, bool) {
-	for _, def := range Instants {
-		if def.Key == key {
-			return def, true
-		}
-	}
-	return InstantDef{}, false
-}
-
 // Limits bound the store. Zero values take the defaults.
 type Limits struct {
 	// Interval is the scrape cadence; it sizes the raw tier.
@@ -948,4 +955,217 @@ type Instant struct {
 	At int64
 	// Value is what the exporter claimed.
 	Value float64
+}
+
+// Pooler is the CloudNativePG PgBouncer exporter's surface, served on
+// each pooler pod beside the instance exporter's own port.
+//
+// It answers a different question from the instance catalog, and the
+// difference is the whole reason poolers exist: an instance reports on
+// the work it is doing, a pooler reports on the queue in front of that
+// work. Almost everything worth watching here is a queue depth or a
+// wait — how many clients hold a server connection, how many are still
+// asking for one, and how long the one at the front has waited.
+//
+// The console never connects to PgBouncer. Every number is a claim by
+// the exporter running beside it, exactly as with the instances.
+var Pooler = Catalog{Groups: poolerGroups, Series: poolerCharts, Instants: poolerInstants}
+
+var poolerGroups = []GroupDef{
+	{Key: "queue", Title: "Clients and the queue",
+		Blurb: "Who is connected to the pooler, and who is still waiting for a server connection to work on."},
+	{Key: "servers", Title: "Server connections",
+		Blurb: "The connections the pooler holds open to PostgreSQL, and what each of them is doing."},
+	{Key: "throughput", Title: "Throughput and latency",
+		Blurb: "What the pooler is carrying, and how long the two halves of a round trip are taking."},
+	{Key: "capacity", Title: "Pooler capacity",
+		Blurb: "The slots PgBouncer allocated for clients, servers and pools, and how much of each is spoken for."},
+}
+
+var poolerCharts = []SeriesDef{
+	// ----------------------------------------------------- queue
+	{Key: "cl-active", Title: "Clients holding a server", Unit: "clients", Group: "queue",
+		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_pools_cl_active"},
+		Summary: "Client connections linked to a server connection, able to run queries.",
+		Note: Note{
+			Means: "Clients that have been handed a server connection and can send work down it. Summed across every pool the pooler serves.",
+			Why:   "This is the pooler doing its job: the number of clients actually able to make progress at this instant.",
+			Watch: "Read it against the waiting line beside it. Active high and waiting at zero is a pool comfortably sized for its load. Active pinned at pool_size with a queue behind it is the pool at its ceiling — every extra client is waiting, not working.",
+		}},
+	{Key: "cl-waiting", Title: "Clients waiting for a server", Unit: "clients", Group: "queue",
+		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_pools_cl_waiting"},
+		Summary: "Client connections that have sent a query and have no server connection yet.",
+		Note: Note{
+			Means: "Clients queued: they have work to send and are waiting for the pooler to free a server connection for them.",
+			Why:   "It is the clearest saturation signal a pooler has. A connection pool exists to make this number small; when it is not small, the pool is the bottleneck rather than the database.",
+			Watch: "Anything durably above zero means clients are queueing. The cause is either a pool_size too small for the concurrency, or servers held too long by slow queries — the maximum wait and the average query time tell you which. Adding application replicas makes a queue like this worse, not better.",
+		}},
+	{Key: "maxwait", Title: "Longest client wait", Unit: "s", Group: "queue",
+		Kind: Gauge, Aggregate: Max, Names: []string{"cnpg_pgbouncer_pools_maxwait"},
+		Summary: "How long the oldest client in the queue has been waiting.",
+		Note: Note{
+			Means: "The wait of the first client in the queue — the one that has been there longest. The console keeps the worst pool's figure.",
+			Why:   "PgBouncer's own documentation names this the number to watch: if it starts rising, the pool of servers is not handling requests quickly enough.",
+			Watch: "It should be zero nearly always, with brief spikes under bursts. A rising floor means either an overloaded PostgreSQL or a pool_size set too small. Sustained seconds here are seconds added to every query the application makes, and they will be blamed on the database rather than on the queue in front of it.",
+		}},
+	{Key: "cl-cancel-req", Title: "Cancellations queued", Unit: "requests", Group: "queue",
+		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_pools_cl_cancel_req"},
+		Summary: "Query cancellations the pooler has not yet forwarded.",
+		Note: Note{
+			Means: "Cancel requests from clients that PgBouncer has accepted and not yet passed to a server.",
+			Why:   "Cancellations queue behind the same shortage of server connections that queries do, so this rises for the same reason — and a cancellation that arrives late has usually stopped being useful.",
+			Watch: "Normally zero. A build-up means clients are giving up on queries in numbers, which is a symptom of the wait above rather than a problem of its own.",
+		}},
+
+	// --------------------------------------------------- servers
+	{Key: "sv-active", Title: "Server connections in use", Unit: "connections", Group: "servers",
+		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_pools_sv_active"},
+		Summary: "Connections to PostgreSQL currently linked to a client.",
+		Note: Note{
+			Means: "Server connections carrying a client's work right now. Against pool_size, this is the pool's utilisation.",
+			Why:   "It is the load the pooler is actually placing on PostgreSQL, which is the number the instance's own connection count should agree with.",
+			Watch: "Sitting at pool_size with clients waiting is a pool at its ceiling. Well below pool_size with clients still waiting is stranger and worth chasing: it usually means the waits are in login or in server_check_query rather than in query execution.",
+		}},
+	{Key: "sv-idle", Title: "Server connections idle", Unit: "connections", Group: "servers",
+		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_pools_sv_idle"},
+		Summary: "Connections open to PostgreSQL and immediately usable.",
+		Note: Note{
+			Means: "Server connections the pooler holds open, unused, and ready to hand to the next client without a login round trip.",
+			Why:   "Idle connections are the pool's headroom. They are what makes a pooler faster than connecting directly, and they cost a backend slot on PostgreSQL for as long as they are held.",
+			Watch: "Idle at zero while clients wait is the definition of an undersized pool. A large idle count that never falls is the opposite: connection slots reserved on the database for load that is not arriving.",
+		}},
+	{Key: "sv-used", Title: "Server connections needing a check", Unit: "connections", Group: "servers",
+		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_pools_sv_used"},
+		Summary: "Connections idle longer than server_check_delay, awaiting their check query.",
+		Note: Note{
+			Means: "Connections that have been idle long enough that PgBouncer will run server_check_query on them before reusing them.",
+			Why:   "They are usable, but not free: the next client to take one pays for the check first.",
+			Watch: "A steady population here is normal on a quiet pool. It matters only when the check itself is slow, which turns every hand-out into a round trip and shows up as wait time with no queries to blame.",
+		}},
+	{Key: "sv-login", Title: "Server connections logging in", Unit: "connections", Group: "servers",
+		Kind: Gauge, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_pools_sv_login"},
+		Summary: "Connections to PostgreSQL part-way through authenticating.",
+		Note: Note{
+			Means: "Server connections currently opening: TCP established, login not finished.",
+			Why:   "Logins are the expensive part of a connection, and the whole reason to pool. Seeing many at once means the pool is being rebuilt rather than reused.",
+			Watch: "Brief spikes after a failover or a pooler restart are expected. A sustained population means connections are being churned — server_lifetime too short, PostgreSQL closing them, or the pool repeatedly emptying and refilling.",
+		}},
+
+	// ------------------------------------------------ throughput
+	{Key: "queries", Title: "Queries pooled", Unit: "queries/s", Group: "throughput",
+		Kind: Counter, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_stats_total_query_count"},
+		Summary: "Rate of SQL queries the pooler forwarded.",
+		Note: Note{
+			Means: "Queries PgBouncer carried, as a rate. Counted per database and summed here.",
+			Why:   "It is the throughput the pooler is delivering, and the number to compare against the instance's own commit rate when deciding whether the two agree about how much work is arriving.",
+			Watch: "A drop with clients still connected means work stopped arriving, not that the pooler failed. A drop with the waiting line rising means the opposite — work is arriving and not getting through.",
+		}},
+	{Key: "transactions", Title: "Transactions pooled", Unit: "tx/s", Group: "throughput",
+		Kind: Counter, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_stats_total_xact_count"},
+		Summary: "Rate of SQL transactions the pooler forwarded.",
+		Note: Note{
+			Means: "Transactions carried, as a rate. In transaction pooling mode this is also the rate at which server connections are handed back to the pool.",
+			Why:   "Queries divided by transactions gives the average statements per transaction, which is what decides how long each client holds a server connection in transaction mode.",
+			Watch: "Long transactions are the enemy of transaction pooling: each one holds its server connection to the end. A falling transaction rate with a steady query rate means transactions are getting longer, and the pool will start queueing before any single query looks slow.",
+		}},
+	{Key: "query-time", Title: "Time spent in queries", Unit: "µs/s", Group: "throughput",
+		Kind: Counter, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_stats_total_query_time"},
+		Summary: "Microseconds per second spent actively executing on PostgreSQL.",
+		Note: Note{
+			Means: "Time server connections spent running queries, in microseconds per second of real time. Divided by the query rate it is the average query duration.",
+			Why:   "It is the database's half of the round trip, measured at the pooler — so it can be compared with the wait time beside it, which is the queue's half.",
+			Watch: "Query time rising while wait time stays flat is PostgreSQL getting slower. Both rising together is the usual cascade: slower queries hold server connections longer, which lengthens the queue, which lengthens every client's wait.",
+		}},
+	{Key: "wait-time", Title: "Time spent waiting for a server", Unit: "µs/s", Group: "throughput",
+		Kind: Counter, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_stats_total_wait_time"},
+		Summary: "Microseconds per second clients spent queued for a server connection.",
+		Note: Note{
+			Means: "Total time clients spent waiting, in microseconds per second. This is time added by the pool, before PostgreSQL sees the query at all.",
+			Why:   "It separates the two halves of a slow request. An application timing its own queries sees this and the query time added together, and will blame the database for both.",
+			Watch: "It should be a small fraction of the query time. When it is comparable or larger, the pool is the bottleneck and tuning PostgreSQL will not help — pool_size, or the transactions holding connections, is where the fix is.",
+		}},
+	{Key: "bytes-received", Title: "Traffic from clients", Unit: "bytes/s", Group: "throughput",
+		Kind: Counter, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_stats_total_received"},
+		Summary: "Bytes per second the pooler read from clients.",
+		Note: Note{
+			Means: "Network volume arriving from the application side.",
+			Why:   "Large query text, large parameter arrays and COPY traffic all show here and nowhere else on this screen.",
+			Watch: "A rise with no rise in the query rate means the statements themselves got bigger — often an ORM sending a large IN list, or a switch to bulk COPY.",
+		}},
+	{Key: "bytes-sent", Title: "Traffic to clients", Unit: "bytes/s", Group: "throughput",
+		Kind: Counter, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_stats_total_sent"},
+		Summary: "Bytes per second the pooler wrote to clients.",
+		Note: Note{
+			Means: "Network volume returning to the application side: result sets.",
+			Why:   "It is the closest thing to a result-size measure the pooler has.",
+			Watch: "Sent climbing far faster than the query rate means queries are returning more rows than they used to — a missing LIMIT, or a query whose selectivity changed with the data.",
+		}},
+}
+
+var poolerInstants = []InstantDef{
+	{Key: "pools", Title: "Pools", Unit: "pools", Group: "capacity",
+		Render: RenderNumber, Aggregate: Max, Names: []string{"cnpg_pgbouncer_lists_pools"},
+		Summary: "Distinct database-and-user pools this pooler maintains.",
+		Note: Note{
+			Means: "PgBouncer keeps one pool per (database, user) pair. This counts them.",
+			Why:   "Every pool has its own pool_size, so the total connections a pooler may open to PostgreSQL is this multiplied by that — not pool_size alone.",
+			Watch: "A count that grows with the number of application users is the usual way a pooler ends up opening far more backends than anyone intended.",
+		}},
+	{Key: "databases", Title: "Databases", Unit: "databases", Group: "capacity",
+		Render: RenderNumber, Aggregate: Max, Names: []string{"cnpg_pgbouncer_lists_databases"},
+		Summary: "Databases configured on this pooler.",
+		Note: Note{
+			Means: "Entries in PgBouncer's database list, including its own admin database.",
+			Why:   "It says what this pooler is willing to route to, which is a configuration fact rather than a load one.",
+			Watch: "Mostly static. A change here means the pooler's configuration changed.",
+		}},
+	{Key: "users", Title: "Users", Unit: "users", Group: "capacity",
+		Render: RenderNumber, Aggregate: Max, Names: []string{"cnpg_pgbouncer_lists_users"},
+		Summary: "Users known to this pooler.",
+		Note: Note{
+			Means: "Entries in PgBouncer's user list.",
+			Why:   "With the database count it bounds how many pools can exist.",
+			Watch: "Static unless the pooler's authentication configuration changes.",
+		}},
+	{Key: "used-clients", Title: "Client slots in use", Unit: "slots", Group: "capacity",
+		Render: RenderNumber, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_lists_used_clients"},
+		Summary: "Client connection slots currently occupied.",
+		Note: Note{
+			Means: "Slots PgBouncer allocated for client connections that are in use, counted across the whole process rather than per pool.",
+			Why:   "Read against the free slots beside it, it is how close the pooler is to max_client_conn — the ceiling at which it stops accepting clients at all.",
+			Watch: "Reaching the ceiling is a hard failure for the application: new connections are refused by the pooler, before PostgreSQL is involved. The free count is the headroom left.",
+		}},
+	{Key: "free-clients", Title: "Client slots free", Unit: "slots", Group: "capacity",
+		Render: RenderNumber, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_lists_free_clients"},
+		Summary: "Client connection slots still available.",
+		Note: Note{
+			Means: "Allocated client slots not currently in use.",
+			Why:   "It is the headroom under max_client_conn, in the units the pooler itself counts.",
+			Watch: "Falling towards zero means the pooler is about to start refusing connections. That failure looks to an application exactly like the database being down, and it is not.",
+		}},
+	{Key: "used-servers", Title: "Server slots in use", Unit: "slots", Group: "capacity",
+		Render: RenderNumber, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_lists_used_servers"},
+		Summary: "Server connection slots currently occupied.",
+		Note: Note{
+			Means: "Slots allocated for connections to PostgreSQL that are in use.",
+			Why:   "It is the pooler's side of the count the instance reports as its own connections; the two should broadly agree.",
+			Watch: "A pooler holding far more server connections than the instance reports backends, or the reverse, means one of the two is not seeing what the other is.",
+		}},
+	{Key: "login-clients", Title: "Clients logging in", Unit: "clients", Group: "capacity",
+		Render: RenderNumber, Aggregate: Sum, Names: []string{"cnpg_pgbouncer_lists_login_clients"},
+		Summary: "Client connections part-way through authenticating.",
+		Note: Note{
+			Means: "Clients that have connected to the pooler and not finished logging in.",
+			Why:   "A population here is clients arriving faster than the pooler can admit them.",
+			Watch: "Normally zero or brief. A standing count points at authentication being slow — an auth_query against a loaded database is the usual cause, and it delays every new connection.",
+		}},
+	{Key: "collection-error", Title: "Last collection", Group: "capacity",
+		Render: RenderWords, Words: [2]string{"succeeded", "failed"}, Aggregate: Max,
+		Names:   []string{"cnpg_pgbouncer_last_collection_error"},
+		Summary: "Whether the exporter's last read of PgBouncer worked.",
+		Note: Note{
+			Means: "The exporter's own report of its last attempt to query PgBouncer's admin console.",
+			Why:   "It separates 'the pooler is idle' from 'the numbers are stale'. If this failed, everything else on this screen is the last thing the exporter managed to read.",
+			Watch: "A failure while the pod is Running means PgBouncer is not answering its admin interface. Treat every other reading here as suspect until it clears.",
+		}},
 }

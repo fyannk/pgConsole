@@ -154,7 +154,7 @@ func (s *Store) Import(state PersistedState) {
 		if !keep[p.Instance] {
 			continue
 		}
-		if _, ok := SeriesByKey(p.Series); !ok {
+		if _, ok := s.catalog.SeriesByKey(p.Series); !ok {
 			continue
 		}
 		inst := s.instances[p.Instance]

@@ -216,7 +216,12 @@ function activeWindow() {
   }
 
   function seriesURL(container) {
-    var url = '/cluster/metrics/series?key=' + encodeURIComponent(container.dataset.metricKey) +
+    /* The endpoint comes off the tab, because two screens draw with
+       this module over two different windows and neither may be handed
+       the other's numbers. */
+    var tab = container.closest('.metrics-tab');
+    var base = (tab && tab.dataset.metricsSeries) || '/cluster/metrics/series';
+    var url = base + '?key=' + encodeURIComponent(container.dataset.metricKey) +
       '&window=' + encodeURIComponent(activeWindow());
     if (container.dataset.metricInstance) {
       url += '&instance=' + encodeURIComponent(container.dataset.metricInstance);

@@ -106,11 +106,17 @@ func run() error {
 	// rewritten periodically. An unusable snapshot path fails before
 	// listen; an unreadable snapshot merely starts the window empty.
 	if cfg.MetricsEnabled {
-		store := metrics.NewStore(metrics.Limits{
+		limits := metrics.Limits{
 			Interval:  cfg.MetricsInterval,
 			Retention: cfg.MetricsRetention,
-		})
+		}
+		store := metrics.NewStore(metrics.Instance, limits)
 		deps.Metrics = store
+		// The poolers run PgBouncer, not PostgreSQL, and their exporter
+		// answers on a different port with a different surface. A second
+		// window over the pooler catalog keeps the two from sharing
+		// keys, a store, or a screen.
+		deps.PoolerMetrics = metrics.NewStore(metrics.Pooler, limits)
 		if cfg.MetricsPath != "" {
 			persister, err := metrics.OpenPersister(cfg.MetricsPath, store, observe.RealClock{}, logger)
 			if err != nil {

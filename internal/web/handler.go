@@ -167,6 +167,9 @@ type Sources struct {
 	// Metrics supplies the bounded instance-metrics window. Nil means
 	// metrics are disabled and no metrics route is registered.
 	Metrics MetricsSource
+	// PoolerMetrics supplies the same for the poolers' own exporter.
+	// Nil means no pooler-metrics route.
+	PoolerMetrics MetricsSource
 }
 
 // MetricsSource supplies the bounded instance-metrics window the
@@ -181,6 +184,10 @@ type MetricsSource interface {
 	// InstantReadings returns every instance's latest point-in-time
 	// claims, keyed by instance then by Instants key.
 	InstantReadings() map[string]map[string]metrics.Instant
+	// Catalog is the surface this window holds. The instances and the
+	// poolers run different software, so the screen renders whichever
+	// catalog its source was built for rather than one fixed set.
+	Catalog() metrics.Catalog
 	// Interval is the scrape cadence, for the pages to state.
 	Interval() time.Duration
 	// Retention is the rollup window, for the pages to state.
@@ -297,7 +304,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /poolers", h.handlePoolers("poolers-overview"))
 	mux.HandleFunc("GET /poolers/pods", h.handlePoolers("poolers-pods"))
 	mux.HandleFunc("GET /poolers/pods/{pod}", h.handlePoolerPodDetail)
-	mux.HandleFunc("GET /poolers/logs", h.handlePoolers("poolers-logs"))
+	if h.sources.PoolerMetrics != nil {
+		mux.HandleFunc("GET /poolers/metrics", h.handlePoolerMetrics)
+		mux.HandleFunc("GET /poolers/metrics/series", h.handlePoolerMetricsSeries)
+	}
 	// The timeline is manifest-free metadata and stays at the baseline;
 	// the revision detail is the object's definition verbatim minus the
 	// scrub — more revealing than any other screen — so it sits behind
@@ -570,18 +580,19 @@ func (h *Handler) handlePoolers(current string) http.HandlerFunc {
 func (h *Handler) shell(r *http.Request, current string) ShellView {
 	access := h.requestAccess(r)
 	return ShellView{
-		ClusterName:           h.cfg.ClusterName,
-		Namespace:             h.cfg.Namespace,
-		CurrentURL:            r.URL.RequestURI(),
-		Identity:              h.buildIdentityView(r),
-		Links:                 buildLinks(h.cfg.Links),
-		OperationsAvailable:   h.cfg.AllowOperations && h.executor != nil,
-		CanOperate:            access.canOperate(h),
-		AccessReviewAvailable: h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil,
-		CanReviewAccess:       access.canReviewAccess(h),
-		HistoryAvailable:      h.sources.History != nil,
-		MetricsAvailable:      h.sources.Metrics != nil,
-		Current:               current,
+		ClusterName:            h.cfg.ClusterName,
+		Namespace:              h.cfg.Namespace,
+		CurrentURL:             r.URL.RequestURI(),
+		Identity:               h.buildIdentityView(r),
+		Links:                  buildLinks(h.cfg.Links),
+		OperationsAvailable:    h.cfg.AllowOperations && h.executor != nil,
+		CanOperate:             access.canOperate(h),
+		AccessReviewAvailable:  h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil,
+		CanReviewAccess:        access.canReviewAccess(h),
+		HistoryAvailable:       h.sources.History != nil,
+		MetricsAvailable:       h.sources.Metrics != nil,
+		PoolerMetricsAvailable: h.sources.PoolerMetrics != nil,
+		Current:                current,
 	}
 }
 
@@ -768,59 +779,18 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 // pgbouncer container, on the same terms as the instance tail: the same
 // level gate, the same bounds, and membership re-verified live before
 // the fetch.
+// handlePoolerLogs serves the bounded tail for one pooler pod. The
+// standalone screen it used to render is gone — the pod's own detail
+// screen carries a Logs tab, which is where a reader looking at a pod
+// expects its logs — so this answers only the raw form the follow poll
+// asks for.
 func (h *Handler) handlePoolerLogs(w http.ResponseWriter, r *http.Request) {
 	pod := r.PathValue("pod")
 	if !podNamePattern.MatchString(pod) {
 		http.NotFound(w, r)
 		return
 	}
-	// The follow poll asks for the tail alone. Without this the poller
-	// was handed the whole HTML page and wrote it into the log pane —
-	// the screen looked right until its first refresh, then filled with
-	// its own markup.
-	if r.URL.Query().Get("raw") == "1" {
-		h.serveRawTail(w, r, pod, h.tailer.TailPoolerLogs)
-		return
-	}
-	view := LogsView{
-		Shell:       h.shell(r, "poolers-logs"),
-		ClusterName: h.cfg.ClusterName,
-		Pod:         pod,
-		Origin:      OriginKubernetes,
-	}
-	status := http.StatusOK
-	if h.tailer == nil {
-		status = http.StatusServiceUnavailable
-		view.State = "unavailable: no Kubernetes access"
-	} else {
-		tail, err := h.tailer.TailPoolerLogs(r.Context(), pod)
-		switch {
-		case err == nil:
-			view.Bounds = fmt.Sprintf("last %d lines, at most %d bytes", tail.LineLimit, tail.ByteLimit)
-			view.Content = tail.Content
-			view.Truncated = tail.TruncatedByBytes
-		case redact.Categorize(err) == redact.CategoryNotFound:
-			status = http.StatusNotFound
-			view.State = "no such pooler pod"
-		case redact.Categorize(err) == redact.CategoryForbidden:
-			status = http.StatusServiceUnavailable
-			view.State = "not granted: pods/log"
-		default:
-			status = http.StatusServiceUnavailable
-			view.State = "unavailable: " + redact.Safe(err)
-		}
-		h.logger.Info("log tail",
-			slog.String("route", "logs"),
-			slog.String("pod", pod),
-			slog.String("category", redact.Safe(err)))
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	if err := h.tpl.ExecuteTemplate(w, "logs.html.tmpl", view); err != nil {
-		h.logger.Error("render failed",
-			slog.String("route", "logs"),
-			slog.String("category", redact.Safe(err)))
-	}
+	h.serveRawTail(w, r, pod, h.tailer.TailPoolerLogs)
 }
 
 // handleHealthz proves process liveness and nothing else.

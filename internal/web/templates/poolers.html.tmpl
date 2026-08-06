@@ -80,30 +80,6 @@
     </section>
     {{- end}}
 
-    {{- else if eq .Shell.Current "poolers-logs"}}
-    <section class="panel">
-      <h2>Pooler logs</h2>
-      {{- with .PoolerPods}}
-      {{- if not .LogsEnabled}}
-      <div class="empty"><strong>Log access is not available</strong>The bounded log tail is switched off in this deployment, or your authorization level does not reach it.</div>
-      {{- else if .Rows}}
-      <p class="state">Choose a pooler pod to tail its <code>pgbouncer</code> container. Each fetch is bounded, made on demand, and never stored.</p>
-      <ul>
-        {{- range .Rows}}
-        {{- if .LogsURL}}
-        <li><a href="{{.LogsURL}}">{{.Name}}</a> — {{.Role}}, {{.Phase}}</li>
-        {{- end}}
-        {{- end}}
-      </ul>
-      {{- else}}
-      <div class="empty"><strong>No pooler pods to tail</strong>No pod owned by one of this cluster&#39;s poolers was observed.</div>
-      {{- end}}
-      {{- else}}
-      <div class="empty"><strong>No pooler pod snapshot yet</strong>Nothing has been observed about the pods behind this cluster&#39;s poolers, so there is nothing to tail.</div>
-      {{- end}}
-      <p class="origin">source: kubernetes-observed</p>
-    </section>
-
     {{- else}}
     {{- with .PoolersDrawing}}
     {{template "topology" .}}

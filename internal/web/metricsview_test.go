@@ -49,7 +49,7 @@ func newMetricsHandler(t *testing.T, source MetricsSource) *Handler {
 }
 
 func sampledMetrics() *metrics.Store {
-	store := metrics.NewStore(metrics.Limits{Interval: 10 * time.Second})
+	store := metrics.NewStore(metrics.Instance, metrics.Limits{Interval: 10 * time.Second})
 	base := testNow.Add(-time.Minute)
 	for i := 0; i < 3; i++ {
 		at := base.Add(time.Duration(i) * 10 * time.Second)
@@ -115,12 +115,12 @@ func TestMetricsScreenStatesFactsBeforeAnyScript(t *testing.T) {
 	// Every explanation the catalog carries must reach the page: a
 	// dashboard that shows a line it cannot explain is the thing this
 	// screen exists not to be.
-	for _, def := range metrics.Catalog {
+	for _, def := range metrics.Instance.Series {
 		if !strings.Contains(body, template.HTMLEscapeString(def.Note.Watch)) {
 			t.Errorf("series %q reaches the screen without its explanation", def.Key)
 		}
 	}
-	for _, def := range metrics.Instants {
+	for _, def := range metrics.Instance.Instants {
 		if !strings.Contains(body, template.HTMLEscapeString(def.Note.Watch)) {
 			t.Errorf("tile %q reaches the screen without its explanation", def.Key)
 		}
@@ -128,7 +128,7 @@ func TestMetricsScreenStatesFactsBeforeAnyScript(t *testing.T) {
 	// Every claim on this screen has one origin, so it is stated once
 	// for the screen. Repeating it under each of seventy-odd panels made
 	// it furniture; stating it nowhere would break rule 8.
-	if got := strings.Count(body, "source: instance-reported metrics"); got != 1 {
+	if got := strings.Count(body, "source: instance-reported metrics —"); got != 1 {
 		t.Errorf("the screen attributes its claims %d times, want exactly once", got)
 	}
 	if !strings.Contains(body, `<footer class="metrics-origin">`) {
@@ -252,5 +252,57 @@ func TestMetricsSeriesEndpointScopesToATrackedInstance(t *testing.T) {
 
 	if got := get(t, h, http.MethodGet, "/cluster/metrics/series?key=connections&instance=orders-9").Code; got != http.StatusNotFound {
 		t.Fatalf("untracked instance status = %d, want 404", got)
+	}
+}
+
+// The two windows are separate stores over separate catalogs, and the
+// screen renders whichever its source holds. Neither may answer for the
+// other's keys — a pooler key on the instance route would be a number
+// from PgBouncer presented as PostgreSQL's.
+func TestMetricsWindowsDoNotShareKeys(t *testing.T) {
+	t.Parallel()
+	instance := map[string]bool{}
+	for _, def := range metrics.Instance.Series {
+		instance[def.Key] = true
+	}
+	for _, def := range metrics.Instance.Instants {
+		instance[def.Key] = true
+	}
+	for _, def := range metrics.Pooler.Series {
+		if instance[def.Key] {
+			t.Errorf("series key %q is in both catalogs", def.Key)
+		}
+	}
+	for _, def := range metrics.Pooler.Instants {
+		if instance[def.Key] {
+			t.Errorf("instant key %q is in both catalogs", def.Key)
+		}
+	}
+	// Every pooler entry names a section the pooler screen renders, or
+	// it is defined and never drawn.
+	groups := map[string]bool{}
+	for _, g := range metrics.Pooler.Groups {
+		groups[g.Key] = true
+	}
+	for _, def := range metrics.Pooler.Series {
+		if !groups[def.Group] {
+			t.Errorf("series %q names group %q, which the screen has no section for", def.Key, def.Group)
+		}
+	}
+	for _, def := range metrics.Pooler.Instants {
+		if !groups[def.Group] {
+			t.Errorf("instant %q names group %q, which the screen has no section for", def.Key, def.Group)
+		}
+	}
+	// And every one of them is explained, same as the instance catalog.
+	for _, def := range metrics.Pooler.Series {
+		if def.Note.Means == "" || def.Note.Why == "" || def.Note.Watch == "" {
+			t.Errorf("pooler series %q is drawn without an explanation", def.Key)
+		}
+	}
+	for _, def := range metrics.Pooler.Instants {
+		if def.Note.Means == "" || def.Note.Why == "" || def.Note.Watch == "" {
+			t.Errorf("pooler instant %q is drawn without an explanation", def.Key)
+		}
 	}
 }

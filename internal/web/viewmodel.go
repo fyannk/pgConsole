@@ -704,6 +704,9 @@ type ShellView struct {
 	// HistoryAvailable reports that the in-memory history read side is
 	// constructed and its route is registered.
 	HistoryAvailable bool
+	// PoolerMetricsAvailable reports the same for the poolers' own
+	// window, which is a separate store over a separate exporter.
+	PoolerMetricsAvailable bool
 	// MetricsAvailable reports that the metrics window is constructed
 	// and its routes are registered.
 	MetricsAvailable bool

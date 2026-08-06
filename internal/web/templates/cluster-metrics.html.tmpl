@@ -51,11 +51,11 @@
 </div>
 {{- end -}}
 
-{{template "page-head" "cluster metrics"}}
+{{template "page-head" .PageTitle}}
 {{template "shell-open" .Shell}}
   <header>
     <div class="header-bar">
-      <h1>Metrics</h1>
+      <h1>{{.Title}}</h1>
       <dl class="target"><dt>Scraped every</dt><dd>{{.Interval}}</dd><dt>Raw window</dt><dd>{{.RawWindow}}</dd><dt>Rollups kept</dt><dd>{{.Retention}}</dd></dl>
     </div>
   </header>
@@ -65,13 +65,13 @@
          nothing here is watching on their behalf. */}}
   <aside class="callout callout-bad" role="note">
     <p class="callout-lead">This is not a monitoring system.</p>
-    <p>These panels are here to give you insight into what this cluster&#39;s instances are reporting right now and over a short retained window — nothing more. Nothing on this screen watches anything on your behalf: there is no alerting, no notification, no escalation, no query language, no long-term history, and no evaluation of any threshold. The console never looks at these numbers; it only records and draws what the exporters claimed.</p>
+    <p>These panels are here to give you insight into what {{.Producer}} are reporting right now and over a short retained window — nothing more. Nothing on this screen watches anything on your behalf: there is no alerting, no notification, no escalation, no query language, no long-term history, and no evaluation of any threshold. The console never looks at these numbers; it only records and draws what the exporters claimed.</p>
     <p>It <strong>cannot and must not</strong> replace real monitoring, alerting, supervision or observability. If a problem here would matter at three in the morning, something other than this page has to be the thing that notices it. Use the monitoring link-out in the sidebar for the tool that actually does that job.</p>
   </aside>
   {{- if not .HasSamples}}
   <section class="panel">
-    <h2>Metrics</h2>
-    <div class="empty"><strong>No samples yet</strong>No instance metrics endpoint has answered a sweep so far. The first samples appear within one scrape interval of an instance becoming reachable; if none ever do, check that the network policy allows this console to reach the pods&#39; metrics port.</div>
+    <h2>{{.Title}}</h2>
+    <div class="empty"><strong>No samples yet</strong>No metrics endpoint has answered a sweep so far. The first samples appear within one scrape interval of an instance becoming reachable; if none ever do, check that the network policy allows this console to reach the pods&#39; metrics port.</div>
     <p class="origin">source: instance-reported metrics</p>
   </section>
   {{- end}}
@@ -108,7 +108,7 @@
   {{- end}}
 
   {{- range .Tabs}}
-  <div class="metrics-tab" id="{{.ID}}" role="tabpanel" aria-label="{{.Label}}" data-metrics-instance="{{.Instance}}">
+  <div class="metrics-tab" id="{{.ID}}" role="tabpanel" aria-label="{{.Label}}" data-metrics-instance="{{.Instance}}" data-metrics-series="{{$.SeriesURL}}">
     {{- if .Blurb}}
     <p class="metrics-scope">{{.Blurb}}</p>
     {{- end}}
@@ -187,7 +187,7 @@
 
   {{- if .HasSamples}}
   <footer class="metrics-origin">
-    <p class="origin">source: instance-reported metrics — every number on this screen is a claim the instance&#39;s own metrics endpoint made, recorded verbatim; times are when this pgConsole process scraped them, not when the instance computed them. A sweep that failed is a gap in the line, never a value interpolated across it.</p>
+    <p class="origin">{{.Origin}}</p>
   </footer>
   {{- end}}
 {{template "shell-close"}}

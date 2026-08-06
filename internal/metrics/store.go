@@ -117,16 +117,24 @@ type instanceSeries struct {
 // Store is the bounded in-memory metrics window. It is safe for one
 // writer (the scraper) and many readers.
 type Store struct {
-	mu     sync.Mutex
-	limits Limits
+	mu sync.Mutex
+	// catalog is the surface this store holds. It is fixed at
+	// construction: a store built for the instance exporter can neither
+	// record nor answer for a pooler key, which is what keeps two
+	// windows of two different things from blurring into one.
+	catalog Catalog
+	limits  Limits
 	// instances maps instance name to its instruments.
 	instances map[string]*instanceSeries
 }
 
-// NewStore builds a store with the given bounds.
-func NewStore(limits Limits) *Store {
-	return &Store{limits: limits.withDefaults(), instances: map[string]*instanceSeries{}}
+// NewStore builds a store over one catalog with the given bounds.
+func NewStore(catalog Catalog, limits Limits) *Store {
+	return &Store{catalog: catalog, limits: limits.withDefaults(), instances: map[string]*instanceSeries{}}
 }
+
+// Catalog is the surface this store holds, for the read side to render.
+func (s *Store) Catalog() Catalog { return s.catalog }
 
 // Interval is the configured scrape cadence, for the read side to state.
 func (s *Store) Interval() time.Duration { return s.limits.Interval }
@@ -161,7 +169,7 @@ func (s *Store) Observe(instance string, at time.Time, values map[string]float64
 		inst.instant = map[string]Instant{}
 	}
 
-	for _, def := range Instants {
+	for _, def := range s.catalog.Instants {
 		value, ok := instants[def.Key]
 		if !ok {
 			continue
@@ -169,7 +177,7 @@ func (s *Store) Observe(instance string, at time.Time, values map[string]float64
 		inst.instant[def.Key] = Instant{At: ts, Value: value}
 	}
 
-	for _, def := range Catalog {
+	for _, def := range s.catalog.Series {
 		value, ok := values[def.Key]
 		if !ok {
 			continue

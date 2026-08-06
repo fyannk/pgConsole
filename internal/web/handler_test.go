@@ -1433,13 +1433,18 @@ func TestPoolerScreensShowTheirOwnContent(t *testing.T) {
 		t.Error("the pods screen also shows the pooler roster")
 	}
 
-	logs := getWithHeaders(t, h, "/poolers/logs", powerUser).Body.String()
-	if !strings.Contains(logs, "/poolers/logs/orders-rw-pooler-abc-1") {
-		t.Error("the pooler logs screen offers no per-pod tail")
+	// The standalone logs screen is gone: a pod's logs live on the pod,
+	// in its own detail screen's Logs tab.
+	if got := getWithHeaders(t, h, "/poolers/logs", powerUser).Code; got != http.StatusNotFound {
+		t.Errorf("the retired pooler logs screen still answers: status %d", got)
 	}
+	detail := getWithHeaders(t, h, "/poolers/pods/orders-rw-pooler-abc-1", powerUser).Body.String()
 	// The pooler tail is a different route to a different container,
 	// verified against a different ownership chain.
-	if strings.Contains(logs, `href="/logs/orders-rw-pooler`) {
+	if !strings.Contains(detail, "/poolers/logs/orders-rw-pooler-abc-1") {
+		t.Error("the pooler pod detail offers no tail")
+	}
+	if strings.Contains(detail, `"/logs/orders-rw-pooler`) {
 		t.Error("a pooler pod links to the instance log route")
 	}
 }

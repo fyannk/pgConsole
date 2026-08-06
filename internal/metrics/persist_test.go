@@ -161,14 +161,14 @@ func TestImportClampsToTheConfiguredBounds(t *testing.T) {
 	// four instances into a cap of three, more raw samples than the
 	// window holds. The most recently observed instances win and the
 	// rings keep only what their capacity allows.
-	big := NewStore(Limits{Interval: 10 * time.Second, RawWindow: time.Hour,
+	big := NewStore(Instance, Limits{Interval: 10 * time.Second, RawWindow: time.Hour,
 		Retention: 24 * time.Hour, RollupEvery: time.Minute, MaxInstances: 8})
 	for i := 0; i < 100; i++ {
 		for n, name := range []string{"a-1", "a-2", "a-3", "a-4"} {
 			big.Observe(name, tick(i+n), map[string]float64{"connections": float64(i)}, nil)
 		}
 	}
-	small := NewStore(Limits{Interval: 10 * time.Second, RawWindow: time.Minute,
+	small := NewStore(Instance, Limits{Interval: 10 * time.Second, RawWindow: time.Minute,
 		Retention: time.Hour, RollupEvery: time.Minute, MaxInstances: 3})
 	small.Import(big.Export(tick(200)))
 	if got := small.Instances(); len(got) != 3 || got[0] != "a-2" {

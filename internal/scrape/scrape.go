@@ -44,8 +44,10 @@ import (
 )
 
 const (
-	// metricsPort is the CloudNativePG instance metrics port.
-	metricsPort = "9187"
+	// InstancePort is the CloudNativePG instance exporter's port.
+	InstancePort = "9187"
+	// PoolerPort is the PgBouncer exporter's port on a pooler pod.
+	PoolerPort = "9127"
 	// maxBody bounds one scrape response; the default exporter payload
 	// is well under this, and anything larger is cut, not buffered.
 	maxBody = 2 << 20
@@ -58,10 +60,11 @@ type PodsSource interface {
 	CurrentPods() (observe.PodsSnapshot, bool)
 }
 
-// Collector sweeps the instance metrics endpoints on a fixed cadence.
+// Collector sweeps one roster's metrics endpoints on a fixed cadence.
 type Collector struct {
 	source   PodsSource
 	store    *metrics.Store
+	catalog  metrics.Catalog
 	clock    observe.Clock
 	logger   *slog.Logger
 	interval time.Duration
@@ -75,15 +78,22 @@ type Collector struct {
 }
 
 // New builds a collector polling at the given interval.
-func New(source PodsSource, store *metrics.Store, interval time.Duration, clock observe.Clock, logger *slog.Logger) *Collector {
+// New builds a collector for one roster: its pods, its store, and the
+// port its exporter answers on. The catalog comes from the store, so a
+// collector can only ever record keys that store can hold.
+func New(source PodsSource, store *metrics.Store, port string, interval time.Duration, clock observe.Clock, logger *slog.Logger) *Collector {
+	if port == "" {
+		port = InstancePort
+	}
 	return &Collector{
 		source:   source,
 		store:    store,
+		catalog:  store.Catalog(),
 		clock:    clock,
 		logger:   logger,
 		interval: interval,
 		client:   &http.Client{Timeout: requestTimeout},
-		port:     metricsPort,
+		port:     port,
 		failing:  map[string]bool{},
 	}
 }
@@ -145,7 +155,7 @@ func (c *Collector) scrapeOne(ctx context.Context, ip string) (series, instants 
 		return nil, nil, redact.NewError("metrics scrape", redact.CategoryUnavailable,
 			fmt.Errorf("status %d", resp.StatusCode))
 	}
-	return Parse(io.LimitReader(resp.Body, maxBody))
+	return ParseCatalog(c.catalog, io.LimitReader(resp.Body, maxBody))
 }
 
 // target is one catalog entry's claim on a metric name. Several entries
@@ -168,7 +178,7 @@ type target struct {
 // targets indexes both catalogs by metric name. needsLabels marks the
 // names for which at least one target has a label restriction, which is
 // the only case where a line's labels are parsed at all.
-func targets() (byName map[string][]target, needsLabels map[string]bool) {
+func targets(catalog metrics.Catalog) (byName map[string][]target, needsLabels map[string]bool) {
 	byName = map[string][]target{}
 	needsLabels = map[string]bool{}
 	add := func(name string, t target) {
@@ -177,12 +187,12 @@ func targets() (byName map[string][]target, needsLabels map[string]bool) {
 			needsLabels[name] = true
 		}
 	}
-	for _, def := range Catalog() {
+	for _, def := range catalog.Series {
 		for _, name := range def.Names {
 			add(name, target{key: def.Key, aggregate: def.Aggregate, match: def.Match})
 		}
 	}
-	for _, def := range InstantCatalog() {
+	for _, def := range catalog.Instants {
 		for _, name := range def.Names {
 			add(name, target{key: def.Key, aggregate: def.Aggregate, match: def.Match, instant: true})
 		}
@@ -199,6 +209,11 @@ func targets() (byName map[string][]target, needsLabels map[string]bool) {
 // on pg_wal{value="volume_size"} without a volume — is never recorded
 // as a reading.
 func Parse(r io.Reader) (series, instants map[string]float64, err error) {
+	return ParseCatalog(metrics.Instance, r)
+}
+
+// ParseCatalog is Parse against one named surface.
+func ParseCatalog(catalog metrics.Catalog, r io.Reader) (series, instants map[string]float64, err error) {
 	type agg struct {
 		value float64
 		seen  bool
@@ -207,7 +222,7 @@ func Parse(r io.Reader) (series, instants map[string]float64, err error) {
 	// the "first candidate name wins" resolution below still has each
 	// candidate's own total to choose between.
 	folded := map[string]map[string]*agg{}
-	byName, needsLabels := targets()
+	byName, needsLabels := targets(catalog)
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
@@ -271,26 +286,19 @@ func Parse(r io.Reader) (series, instants map[string]float64, err error) {
 	}
 
 	series = map[string]float64{}
-	for _, def := range Catalog() {
+	for _, def := range catalog.Series {
 		if v, ok := resolve(def.Key, def.Names); ok {
 			series[def.Key] = v
 		}
 	}
 	instants = map[string]float64{}
-	for _, def := range InstantCatalog() {
+	for _, def := range catalog.Instants {
 		if v, ok := resolve(def.Key, def.Names); ok {
 			instants[def.Key] = v
 		}
 	}
 	return series, instants, nil
 }
-
-// Catalog exposes the time-series catalog to the parser tests without a
-// second import path for callers.
-func Catalog() []metrics.SeriesDef { return metrics.Catalog }
-
-// InstantCatalog exposes the point-in-time catalog on the same terms.
-func InstantCatalog() []metrics.InstantDef { return metrics.Instants }
 
 // labelsMatch reports whether every wanted label is present in the
 // line's label block with the wanted value. An empty match accepts

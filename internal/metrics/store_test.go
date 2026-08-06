@@ -24,7 +24,7 @@ var t0 = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 func tick(n int) time.Time { return t0.Add(time.Duration(n) * 10 * time.Second) }
 
 func testStore() *Store {
-	return NewStore(Limits{Interval: 10 * time.Second, RawWindow: time.Hour,
+	return NewStore(Instance, Limits{Interval: 10 * time.Second, RawWindow: time.Hour,
 		Retention: 24 * time.Hour, RollupEvery: time.Minute, MaxInstances: 3})
 }
 
@@ -135,7 +135,7 @@ func TestInstanceCapEvictsTheLeastRecentlyObserved(t *testing.T) {
 
 func TestRawRingStaysBounded(t *testing.T) {
 	t.Parallel()
-	s := NewStore(Limits{Interval: 10 * time.Second, RawWindow: time.Minute,
+	s := NewStore(Instance, Limits{Interval: 10 * time.Second, RawWindow: time.Minute,
 		Retention: time.Hour, RollupEvery: time.Minute, MaxInstances: 2})
 	for i := 0; i < 100; i++ {
 		s.Observe("orders-1", tick(i), map[string]float64{"connections": float64(i)}, nil)
@@ -148,7 +148,7 @@ func TestRawRingStaysBounded(t *testing.T) {
 
 func TestUnknownSeriesKeyIsRefused(t *testing.T) {
 	t.Parallel()
-	if _, ok := SeriesByKey("nope"); ok {
+	if _, ok := Instance.SeriesByKey("nope"); ok {
 		t.Fatal("unknown key resolved")
 	}
 	s := testStore()
