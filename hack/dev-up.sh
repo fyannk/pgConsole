@@ -33,8 +33,8 @@
 #
 # Environment overrides: CLUSTER, KIND_NODE_IMAGE, CNPG_MANIFEST,
 # CERT_MANAGER_MANIFEST, BARMAN_MANIFEST, IMAGE, VIEWER_IMAGE,
-# MINIO_ENDPOINT, EVIDENCE_REGION, SKIP_BUILD=true, SKIP_BACKUP=true,
-# SKIP_EVIDENCE=true, RECREATE=true, NO_FORWARD=true.
+# VIEWER_PORT, MINIO_ENDPOINT, EVIDENCE_REGION, SKIP_BUILD=true,
+# SKIP_BACKUP=true, SKIP_EVIDENCE=true, RECREATE=true, NO_FORWARD=true.
 #
 # Behind a mandatory HTTP proxy, export HTTP_PROXY/HTTPS_PROXY/NO_PROXY
 # before running: kubectl reads them to fetch the manifests above, kind
@@ -68,6 +68,10 @@ VIEWER_IMAGE="${VIEWER_IMAGE:-ghcr.io/fyannk/pgobjectstoreviewer:latest}"
 # on the region exactly: it is one of the fingerprint inputs.
 MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://minio.minio.svc:9000}"
 EVIDENCE_REGION="${EVIDENCE_REGION:-us-east-1}"
+# The local port the browsable ObjectStoreViewer is forwarded to. The
+# console's link-out names it, because a link-out is followed by the
+# browser rather than by the console.
+VIEWER_PORT="${VIEWER_PORT:-3004}"
 
 log() { echo "[dev-up] $*"; }
 need() { command -v "$1" > /dev/null 2>&1 || { echo "dev-up needs '$1' on PATH" >&2; exit 1; }; }
@@ -264,6 +268,125 @@ enable_evidence() {
     REPOSITORY_EXPECTED_FINGERPRINT="$fingerprint" \
     REPOSITORY_BARMAN_SERVER=orders > /dev/null
   kubectl -n payments rollout status deployment/pgconsole-orders --timeout=240s > /dev/null
+}
+
+# enable_viewer_ui stands the same ObjectStoreViewer image up a second
+# time, in its standalone HTTP mode, so the sidebar's ObjectStoreViewer
+# entry opens something real.
+#
+# It has to be a second instance. The sidecar beside the console runs
+# RUNTIME_MODE=pgconsole-sidecar, which serves the evidence API on a
+# pod-private socket and rejects LISTEN_ADDR outright — it has no UI to
+# link to, by design. The two read the same bucket with the same
+# credentials and answer different questions: the sidecar answers the
+# console's, this one answers a person's.
+#
+# Nothing about the console changes because of it. This is a link-out to
+# a sibling tool, which is all the console ever knows about the viewer.
+enable_viewer_ui() {
+  if [ "${SKIP_EVIDENCE:-false}" = "true" ]; then
+    return 0
+  fi
+  log "deploying the browsable ObjectStoreViewer"
+  cat <<YAML | kubectl apply -f - > /dev/null
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: objectstoreviewer
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: objectstoreviewer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: objectstoreviewer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: objectstoreviewer
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+        # The credential files are mounted 0440 and the image runs as
+        # 65532; without an fsGroup they stay group-root and the viewer
+        # exits with "file cannot be opened" before it listens.
+        fsGroup: 65532
+      containers:
+        - name: viewer
+          image: $VIEWER_IMAGE
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: REPOSITORY_FORMAT
+              value: barman-cloud
+            - name: PROVIDER
+              value: s3
+            - name: DESTINATION_PATH
+              value: s3://pgbackups/orders
+            - name: ENDPOINT_URL
+              value: $MINIO_ENDPOINT
+            - name: BARMAN_SERVER_NAMES
+              value: orders
+            - name: AWS_ACCESS_KEY_ID_FILE
+              value: /var/run/secrets/objectstoreviewer-store/aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY_FILE
+              value: /var/run/secrets/objectstoreviewer-store/aws-secret-access-key
+            - name: AWS_REGION
+              value: $EVIDENCE_REGION
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: store
+              mountPath: /var/run/secrets/objectstoreviewer-store
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: store
+          secret:
+            secretName: pgconsole-evidence-store
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: objectstoreviewer
+  namespace: payments
+spec:
+  selector:
+    app.kubernetes.io/name: objectstoreviewer
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+YAML
+  kubectl -n payments rollout status deployment/objectstoreviewer --timeout=180s > /dev/null
+
+  # The link-out is followed by the browser, not by the console, so it
+  # names the port-forward on this machine rather than a Service. http
+  # on loopback needs the lab-only opt-in; a real deployment gets an
+  # https Route from pgtoolbox and never sets this.
+  log "pointing the sidebar's ObjectStoreViewer entry at it"
+  kubectl -n payments set env deployment/pgconsole-orders \
+    OBJECTSTOREVIEWER_URL="http://localhost:$VIEWER_PORT" \
+    ALLOW_INSECURE_LINKS=true > /dev/null
+  kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
 }
 
 # setup_backup gives the dev cluster a real object store: cert-manager,
@@ -468,6 +591,7 @@ fi
 # patch is a no-op once applied, so the reuse path stays fast.
 enable_persistence
 enable_evidence
+enable_viewer_ui
 
 if [ "${NO_FORWARD:-false}" = "true" ]; then
   log "NO_FORWARD set — start the tunnel yourself:"
@@ -532,6 +656,12 @@ log "port-forwarding the console to 127.0.0.1:3000"
 kubectl -n payments port-forward deploy/pgconsole-orders 3000:3000 > /dev/null 2>&1 &
 PIDS="$PIDS $!"
 
+if [ "${SKIP_EVIDENCE:-false}" != "true" ]; then
+  log "port-forwarding ObjectStoreViewer to 127.0.0.1:$VIEWER_PORT"
+  kubectl -n payments port-forward svc/objectstoreviewer "$VIEWER_PORT":3000 > /dev/null 2>&1 &
+  PIDS="$PIDS $!"
+fi
+
 # Wait until the raw console answers before the proxies start pointing at it.
 # --noproxy keeps this off any http_proxy the machine mandates: the console
 # is on loopback, and a proxy asked to reach it would answer for itself.
@@ -560,8 +690,12 @@ cat <<EOF
   The review panel (:3003 -> Access requests) is seeded with one pending
   request from 'alice', role picker reader / operator.
 
-  Ctrl-C stops the forward and proxies; the kind cluster stays up, so
-  re-running this script relaunches the four ports fast.
+  The sidebar's ObjectStoreViewer entry opens http://localhost:$VIEWER_PORT,
+  the same viewer the console reads evidence from over its socket —
+  browsable this time, because that is a separate standalone instance.
+
+  Ctrl-C stops the forwards and proxies; the kind cluster stays up, so
+  re-running this script relaunches the ports fast.
   Full teardown:  kind delete cluster --name $CLUSTER
 
 EOF
