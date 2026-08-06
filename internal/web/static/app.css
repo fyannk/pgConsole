@@ -406,6 +406,14 @@ body {
   .metric-note dl.facts dd { border-top: 0; padding-top: 0; }
 }
 
+/* --- The denial page. It is the whole screen for a reader with no
+   level, so it carries the ladder rather than a bare refusal. */
+.panel.denied { max-width: 60rem; }
+.denied-reason { font-size: var(--text-lg); margin: 0 0 var(--space-3); }
+.denied-level { color: var(--text-muted); margin: 0 0 var(--space-4); }
+.denied dl.facts dd { font-family: var(--font-ui); max-width: 80ch; }
+.denied .origin { margin-top: var(--space-4); }
+
 /* ---------------------------------------------------------- Callouts
 
    A standing statement about the screen itself, not about the cluster —

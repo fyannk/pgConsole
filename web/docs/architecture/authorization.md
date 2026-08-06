@@ -31,20 +31,29 @@ speaks to the identity provider.
 
 The level is parsed once per request against a closed set and mapped onto
 an ordered ladder. Parsing is total: a missing, empty, malformed, or
-unrecognized value is `none`, so nothing above the read-only baseline is
-reached by an unrecognized value.
+unrecognized value is `none`, and `none` reaches nothing.
 
 | Level | Reaches |
 |---|---|
-| *baseline* (any authenticated request) | the read-only status console: status, conditions, pods, events, backups, and object-definition history when enabled |
-| `view` | the read-only baseline, explicitly |
-| `poweruser` | additionally the bounded log tail, and the day-2 operations when `ALLOW_OPERATIONS=true` |
-| `dba` | additionally the access-request review panel |
+| *none* | nothing but the denial page, `/healthz`, `/readyz` and the embedded assets |
+| `view` | the overviews — global, cluster, backups, databases and poolers — and the two metrics screens |
+| `poweruser` | additionally every other read screen: object inventories, the pod rosters and their detail, object history, repository evidence, and the bounded log tails |
+| `dba` | additionally the four day-2 operations when `ALLOW_OPERATIONS=true`, the access-request review panel when `ALLOW_ACCESS_REVIEW=true`, and the pgAdmin link-out |
 
-The read-only status baseline is **ungated** — reaching the console means
-the proxy already authenticated the request, so status renders for everyone
-admitted. Only routes *above* the baseline — the log tail, operations, and
-the review panel — require an explicit level.
+**There is no ungated baseline.** Reaching the console is not
+authorization. The proxy authenticates; the level it forwards decides
+which screens the request may reach, and a request carrying none is
+refused with a page that states the ladder so the reader knows what to
+ask for.
+
+pgAdmin is the one link-out the level decides. It is a SQL console onto
+the database, so it reaches past everything this console will show anyone
+below `dba`; offering the door to a reader who may not open it would be
+the console advertising a way round its own ladder.
+
+Setting `TRUSTED_LEVEL_HEADER` empty does **not** open the console — it
+closes it. With no level to read, nothing is admitted, and the denial
+page names the deployment rather than the reader as the reason.
 
 The server derives navigation affordances from the same identity and level
 inputs as the route gates. A level without a usable forwarded identity does

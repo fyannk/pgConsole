@@ -75,12 +75,17 @@ func start(t *testing.T, logs *bytes.Buffer) (string, func()) {
 
 // httpGet performs a context-carrying GET and returns the status and
 // body, closing the response.
+// httpGet requests as a dba. Every screen is decided by the forwarded
+// level, so an assembly test asking what a screen renders has to send
+// one; the admission ladder itself is tested in internal/web.
 func httpGet(t *testing.T, url string) (int, string, error) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
+	req.Header.Set("X-Forwarded-User", "alice")
+	req.Header.Set("X-PgToolBox-Level", "dba")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, "", err

@@ -231,8 +231,11 @@ type Config struct {
 	// TrustedUserHeader is the proxy identity header; empty disables
 	// identity display and audit attribution.
 	TrustedUserHeader string
-	// TrustedLevelHeader is the proxy authorization-level header; empty
-	// disables level gating, leaving only the read-only baseline.
+	// TrustedLevelHeader is the proxy authorization-level header. Every
+	// screen is decided by the level it carries, so setting it empty
+	// does not open the console — it closes it: with no level to read,
+	// no request is admitted to anything but the denial page and the
+	// readiness endpoints.
 	TrustedLevelHeader string
 	// AllowOperations enables the enumerated day-2 operation routes.
 	AllowOperations bool

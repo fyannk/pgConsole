@@ -100,9 +100,24 @@ Consequences that constrain every design decision here:
    ServiceAccount can do. The console performs **no capability probing of
    its own**: there is no SubjectAccessReview and nothing cached — the
    level is trustworthy only because the deployment confines the console's
-   ingress to that proxy. A missing, empty, or unrecognized level reaches
-   only the baseline; `ALLOW_OPERATIONS=false` removes the write surface
-   regardless of any asserted level. Two audiences needing different
+   ingress to that proxy.
+
+   **There is no ungated baseline.** Reaching the console is not
+   authorization: every screen is admitted by the forwarded level, and a
+   missing, empty, or unrecognized one reaches nothing but the denial
+   page, the readiness endpoints and the embedded assets. The ladder is:
+   `view` sees the overviews and the two metrics screens; `poweruser`
+   adds every other read screen — inventories, rosters, pod detail,
+   history, evidence and the bounded log tails; `dba` adds the four
+   day-2 operations, the access-request review panel, and the pgAdmin
+   link-out, which is a SQL console onto the data and so reaches past
+   anything this console shows below that level. `ALLOW_OPERATIONS=false`
+   removes the write surface regardless of any asserted level.
+
+   A consequence worth stating: setting `TRUSTED_LEVEL_HEADER` empty does
+   not open the console, it closes it — with no level to read, nothing is
+   admitted, and the denial page says the deployment is at fault rather
+   than the reader. Two audiences needing different
    Role-level authority means two deployments with different Roles.
 
    The Role is namespaced in every mode but one, and that exception is

@@ -481,6 +481,11 @@ type DeniedView struct {
 	// Message is the constant denial text; it carries no identity and
 	// no probe detail.
 	Message string
+	// Level is the level the proxy asserted, empty when it forwarded
+	// none. It is display only, and it is already in the top bar — it
+	// is repeated here because a refusal that does not say what you
+	// have leaves you guessing at what to ask for.
+	Level string
 }
 
 // OperationsView lists the enumerated operations.
@@ -704,6 +709,14 @@ type ShellView struct {
 	// HistoryAvailable reports that the in-memory history read side is
 	// constructed and its route is registered.
 	HistoryAvailable bool
+	// CanRead, CanBrowse and CanAdminister are the reader's own level, decided
+	// once so the map can show what it cannot open. An entry above the
+	// level is shown disabled rather than dropped: the shape of the
+	// console is not a secret, and "not for you" and "not a thing" are
+	// different claims.
+	CanRead       bool
+	CanBrowse     bool
+	CanAdminister bool
 	// PoolerMetricsAvailable reports the same for the poolers' own
 	// window, which is a separate store over a separate exporter.
 	PoolerMetricsAvailable bool
@@ -857,7 +870,7 @@ func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, 
 		ClusterName:   clusterName,
 		Namespace:     namespace,
 		SnapshotState: "none",
-		Links:         buildLinks(links),
+		Links:         buildLinks(links, true),
 		ViewerLinked:  links.ObjectStoreViewer != "",
 	}
 	if s.evidenceEnabled {
@@ -2175,8 +2188,16 @@ func buildClusterView(facts observe.ClusterFacts) *ClusterView {
 	return view
 }
 
-// buildLinks keeps only configured link-outs.
-func buildLinks(links Links) []Link {
+// buildLinks keeps only configured link-outs the reader may follow.
+//
+// pgAdmin is the exception the level decides: it is a SQL console onto
+// the database, so it reaches past everything this console will show
+// anyone below dba. Offering the door to a reader who may not open it
+// would be the console advertising a way round its own ladder.
+func buildLinks(links Links, administer bool) []Link {
+	if !administer {
+		links.PgAdmin = ""
+	}
 	var out []Link
 	for _, l := range []Link{
 		// The product name alone. These are sidebar entries beside

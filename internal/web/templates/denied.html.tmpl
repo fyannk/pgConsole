@@ -9,8 +9,26 @@
       <h1>pgConsole</h1>
     </div>
   </header>
-    <section class="panel">
-      <h2>Access denied</h2>
-      <p class="state">{{.Message}}</p>
+    {{- /* The refusal states the reason, what the reader holds, and the
+           whole ladder — so someone who has been refused can tell what
+           to ask for instead of guessing. The level is display only and
+           is already in the top bar; nothing here is an identity. */}}
+    <section class="panel denied">
+      <h2>Not available at your level</h2>
+      <p class="denied-reason">{{.Message}}.</p>
+      {{- if .Level}}
+      <p class="denied-level">The proxy asserted the <strong>{{.Level}}</strong> level for this request.</p>
+      {{- else}}
+      <p class="denied-level">The proxy asserted <strong>no level</strong> for this request, so the console admits it to nothing. Reaching the console is not authorization: the level decides every screen.</p>
+      {{- end}}
+      <dl class="facts">
+        <dt>view</dt>
+        <dd>The overviews — cluster, backups, databases and poolers — and the two metrics screens.</dd>
+        <dt>poweruser</dt>
+        <dd>Everything the console reads: the object inventories, the pod rosters and their detail, the object history, the repository evidence, and the bounded log tails.</dd>
+        <dt>dba</dt>
+        <dd>Everything above, plus the four day-2 operations and the access-request review panel.</dd>
+      </dl>
+      <p class="origin">Levels are asserted by the proxy in front of this console, not decided here. Ask whoever operates that proxy; the console has no way to grant one.</p>
     </section>
 {{template "shell-close"}}

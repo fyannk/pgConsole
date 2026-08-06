@@ -195,6 +195,9 @@ func TestHistoryRevisionRequiresPowerUserWithIdentity(t *testing.T) {
 	}
 }
 
+// The history screen is poweruser-only, so a reader who reaches it may
+// always open a revision. The gate below it stays as defence, and the
+// levels that cannot reach the screen are what exercise it now.
 func TestHistoryTimelineLinksOnlyAboveTheGate(t *testing.T) {
 	t.Parallel()
 	source := fakeHistorySource{snap: history.Snapshot{Entries: []history.Entry{{
@@ -203,12 +206,11 @@ func TestHistoryTimelineLinksOnlyAboveTheGate(t *testing.T) {
 	}}}, ok: true}
 	h := newHistoryHandler(t, source)
 
-	baseline := get(t, h, http.MethodGet, "/history").Body.String()
-	if strings.Contains(baseline, `href="/history/revisions/`) {
-		t.Fatal("baseline timeline links a revision the route would refuse")
-	}
-	if !strings.Contains(baseline, "details require the poweruser or dba level") {
-		t.Fatal("baseline timeline does not state why the detail is absent")
+	for _, level := range []string{"view", "bogus"} {
+		headers := map[string]string{"X-Forwarded-User": "alice", "X-PgToolBox-Level": level}
+		if got := getWithHeaders(t, h, "/history", headers).Code; got != http.StatusForbidden {
+			t.Fatalf("history at level %q = %d, want 403", level, got)
+		}
 	}
 
 	elevated := getWithHeaders(t, h, "/history", powerUserHeaders()).Body.String()

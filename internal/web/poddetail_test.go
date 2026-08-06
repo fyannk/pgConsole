@@ -121,19 +121,22 @@ func TestPodDetailStatesFactsAndMergedTimeline(t *testing.T) {
 			t.Errorf("pod detail misses %q", want)
 		}
 	}
-	// The baseline sees the revision stated but not linked, no logs tab,
-	// and no raw definition anywhere in the served markup.
-	if strings.Contains(body, `href="/history/revisions/3"`) {
-		t.Error("baseline links a revision the route would refuse")
+	// This screen is itself poweruser-only, so everyone who reaches it
+	// may also open a revision: the link is always there. The gate
+	// inside stays as defence — it is what would hold if the screen's
+	// own tier ever moved — and is exercised through the view level
+	// below, which cannot reach the screen at all.
+	if !strings.Contains(body, `href="/history/revisions/3"`) {
+		t.Error("a reader who reached this screen cannot open its revision")
 	}
-	if !strings.Contains(body, "details require the poweruser or dba level") {
-		t.Error("baseline does not state why the revision detail is absent")
-	}
-	if strings.Contains(body, `data-tab="pod-logs"`) || !strings.Contains(body, "log access requires the poweruser or dba level") {
-		t.Error("logs gate is not stated at the baseline")
-	}
-	if strings.Contains(body, `"metadata":{"name":"orders-1"}`) || strings.Contains(body, "pod-raw") {
-		t.Error("the raw definition rendered below the gate")
+	for _, level := range []string{"view", "bogus", ""} {
+		headers := map[string]string{"X-Forwarded-User": "alice"}
+		if level != "" {
+			headers["X-PgToolBox-Level"] = level
+		}
+		if got := getWithHeaders(t, h, "/cluster/pods/orders-1", headers).Code; got != http.StatusForbidden {
+			t.Errorf("pod detail at level %q = %d, want 403", level, got)
+		}
 	}
 }
 
@@ -191,8 +194,14 @@ func TestPodDetailAboveTheGateCarriesLogsAndRawDefinition(t *testing.T) {
 func TestRawTailIsGatedPlainText(t *testing.T) {
 	t.Parallel()
 	h := newPodDetailHandler(t, podDetailSources(), nil)
-	if got := get(t, h, http.MethodGet, "/logs/orders-1?raw=1").Code; got != http.StatusForbidden {
-		t.Fatalf("ungated raw tail status = %d, want 403", got)
+	for _, headers := range []map[string]string{
+		{},
+		{"X-Forwarded-User": "alice"},
+		{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "view"},
+	} {
+		if got := getWithHeaders(t, h, "/logs/orders-1?raw=1", headers).Code; got != http.StatusForbidden {
+			t.Fatalf("raw tail for %v = %d, want 403", headers, got)
+		}
 	}
 	rec := getWithHeaders(t, h, "/logs/orders-1?raw=1", powerUser)
 	if rec.Code != http.StatusOK {

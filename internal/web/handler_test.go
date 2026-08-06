@@ -132,9 +132,16 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 // configured, so the proxy-asserted level drives display and gating.
 func newLeveledHandler(t *testing.T, snapshots allSources) (*Handler, *bytes.Buffer) {
 	t.Helper()
+	return newLeveledHandlerWithLinks(t, snapshots, Links{})
+}
+
+// newLeveledHandlerWithLinks is the same with sibling link-outs wired,
+// for the tests about which of them a level may follow.
+func newLeveledHandlerWithLinks(t *testing.T, snapshots allSources, links Links) (*Handler, *bytes.Buffer) {
+	t.Helper()
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
-	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level"},
+	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: links},
 		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
@@ -152,10 +159,18 @@ func newTestHandler(t *testing.T, snapshots allSources, prober ReadinessProber, 
 	return newTestHandlerFull(t, snapshots, prober, links, true, fakeTailer{})
 }
 
-// get performs a request against the full route set.
+// get performs a request against the full route set at the dba level.
+//
+// Every screen is gated, so a request with no level reaches only the
+// denial page — which is the subject of the admission tests and noise
+// everywhere else. Tests about what a screen says send the level that
+// can see it; tests about who may see it send their own with
+// getWithHeaders.
 func get(t *testing.T, h *Handler, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), method, path, nil)
+	req.Header.Set("X-Forwarded-User", "alice")
+	req.Header.Set("X-PgToolBox-Level", "dba")
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
 	return rec
@@ -877,20 +892,59 @@ func getWithHeaders(t *testing.T, h *Handler, path string, headers map[string]st
 // renders for every level the proxy asserts — and even with no level and
 // no identity at all — because reaching the console means the proxy
 // already authenticated the request.
-func TestHandlerBaselineOpenRegardlessOfLevel(t *testing.T) {
+// There is no ungated baseline. Reaching the console is not
+// authorization: the level the proxy forwards decides every screen, and
+// a request without a usable one is refused rather than shown a
+// read-only view of the cluster.
+func TestNoScreenIsReachableWithoutALevel(t *testing.T) {
 	t.Parallel()
 	h, _ := newLeveledHandler(t, staticSnapshots{})
-	cases := []map[string]string{
-		{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "view"},
-		{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "dba"},
+	refused := []map[string]string{
 		{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "bogus"},
 		{"X-Forwarded-User": "alice"},
+		{"X-PgToolBox-Level": "view"}, // a level nobody is attributed to
 		{},
 	}
-	for _, headers := range cases {
-		rec := getWithHeaders(t, h, "/", headers)
-		if rec.Code != http.StatusOK {
-			t.Errorf("baseline status = %d for headers %v, want 200", rec.Code, headers)
+	for _, path := range []string{"/", "/cluster/overview", "/objects", "/cluster/pods"} {
+		for _, headers := range refused {
+			if got := getWithHeaders(t, h, path, headers).Code; got != http.StatusForbidden {
+				t.Errorf("%s for %v = %d, want 403", path, headers, got)
+			}
+		}
+	}
+	// The readiness endpoints stay open: they answer Kubernetes, which
+	// forwards no level and never will.
+	for _, path := range []string{"/healthz", "/readyz"} {
+		if got := getWithHeaders(t, h, path, nil).Code; got == http.StatusForbidden {
+			t.Errorf("%s is gated, so the probes cannot reach it", path)
+		}
+	}
+}
+
+// The ladder, screen by screen.
+func TestLevelLadderAdmitsExactlyItsScreens(t *testing.T) {
+	t.Parallel()
+	h, _ := newLeveledHandler(t, staticSnapshots{})
+	view := map[string]string{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "view"}
+	power := map[string]string{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "poweruser"}
+
+	// view reaches the overviews and nothing else.
+	for _, path := range []string{"/", "/cluster/overview", "/backups", "/databases", "/poolers"} {
+		if got := getWithHeaders(t, h, path, view).Code; got != http.StatusOK {
+			t.Errorf("view %s = %d, want 200", path, got)
+		}
+	}
+	for _, path := range []string{"/objects", "/cluster/pods", "/backups/objects", "/backups/evidence",
+		"/databases/roles", "/poolers/pods"} {
+		if got := getWithHeaders(t, h, path, view).Code; got != http.StatusForbidden {
+			t.Errorf("view %s = %d, want 403", path, got)
+		}
+	}
+	// poweruser reaches every read screen.
+	for _, path := range []string{"/", "/objects", "/cluster/pods", "/backups/objects",
+		"/backups/evidence", "/databases/roles", "/poolers/pods"} {
+		if got := getWithHeaders(t, h, path, power).Code; got != http.StatusOK {
+			t.Errorf("poweruser %s = %d, want 200", path, got)
 		}
 	}
 }
@@ -1463,5 +1517,71 @@ func TestPoolerLogsRouteTailsThePoolerContainer(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "pgbouncer ready") {
 		t.Error("the pooler tail content did not reach the page")
+	}
+}
+
+// The map shows what it cannot open rather than hiding it: "not for you"
+// and "not a thing" are different claims, and a console whose shape
+// changes with the reader teaches nobody what it is. Every entry above
+// the level is present, disabled, and says which level it needs.
+func TestSidebarOffersNoLinkTheRouteWouldRefuse(t *testing.T) {
+	t.Parallel()
+	h, _ := newLeveledHandler(t, staticSnapshots{})
+	cases := []struct {
+		level  string
+		linked []string
+		barred []string
+	}{
+		{level: "", barred: []string{"/", "/cluster/overview", "/objects", "/cluster/pods"}},
+		{level: "view",
+			linked: []string{"/", "/cluster/overview", "/backups", "/databases", "/poolers"},
+			barred: []string{"/objects", "/cluster/pods", "/backups/evidence", "/poolers/pods"}},
+		{level: "poweruser",
+			linked: []string{"/", "/objects", "/cluster/pods", "/backups/evidence", "/poolers/pods"}},
+	}
+	for _, tc := range cases {
+		headers := map[string]string{"X-Forwarded-User": "alice"}
+		if tc.level != "" {
+			headers["X-PgToolBox-Level"] = tc.level
+		}
+		// "/" renders the map either way: the screen for a level that
+		// reaches it, the denial page for one that does not.
+		body := getWithHeaders(t, h, "/", headers).Body.String()
+		for _, path := range tc.linked {
+			if !strings.Contains(body, `href="`+path+`"`) {
+				t.Errorf("level %q: the map does not link %s", tc.level, path)
+			}
+		}
+		for _, path := range tc.barred {
+			if strings.Contains(body, `href="`+path+`"`) {
+				t.Errorf("level %q: the map links %s, which the route refuses", tc.level, path)
+			}
+		}
+	}
+}
+
+// pgAdmin is a SQL console onto the data, so it reaches past everything
+// this console shows below dba. The map must not offer the door to a
+// reader who may not open it.
+func TestPgAdminLinkIsTheDBALevels(t *testing.T) {
+	t.Parallel()
+	h, _ := newLeveledHandlerWithLinks(t, staticSnapshots{}, Links{
+		PgAdmin:    "https://pgadmin.example.com",
+		Monitoring: "https://grafana.example.com",
+	})
+	for _, tc := range []struct {
+		level string
+		want  bool
+	}{{"view", false}, {"poweruser", false}, {"dba", true}} {
+		body := getWithHeaders(t, h, "/", map[string]string{
+			"X-Forwarded-User": "alice", "X-PgToolBox-Level": tc.level,
+		}).Body.String()
+		if got := strings.Contains(body, "pgadmin.example.com"); got != tc.want {
+			t.Errorf("level %q offers pgAdmin = %v, want %v", tc.level, got, tc.want)
+		}
+		// The other link-outs are not level-decided.
+		if !strings.Contains(body, "grafana.example.com") {
+			t.Errorf("level %q lost the monitoring link-out", tc.level)
+		}
 	}
 }

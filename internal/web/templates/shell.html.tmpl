@@ -87,24 +87,34 @@
     <button type="button" class="sidebar-toggle" x-cloak aria-label="Collapse navigation"></button>
   </div>
   <nav class="sidebar-nav" hx-boost="true">
-    <a class="sidebar-link" href="/"{{if eq .Current "overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
-    <a class="sidebar-link" href="/objects"{{if eq .Current "objects"}} aria-current="page"{{end}} title="Objects"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></a>
+    {{- if .CanRead}}<a class="sidebar-link" href="/"{{if eq .Current "overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>{{- else}}<span class="sidebar-link" aria-disabled="true" title="Overview — needs a proxy-asserted level"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></span>{{- end}}
+    {{- if .CanBrowse}}
+        <a class="sidebar-link" href="/objects"{{if eq .Current "objects"}} aria-current="page"{{end}} title="Objects"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Objects — needs the poweruser or dba level"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></span>
+        {{- end}}
     {{- /* History spans every watched object, not the cluster alone, so
            it sits beside Objects rather than under Cluster: the two
            answer "what exists" and "what changed" about the same set. */}}
-    {{- if .HistoryAvailable}}
+    {{- if and .HistoryAvailable (not .CanBrowse)}}
+    <span class="sidebar-link" aria-disabled="true" title="Object history — needs the poweruser or dba level"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></span>
+    {{- else if .HistoryAvailable}}
     <a class="sidebar-link" href="/history"{{if eq .Current "history"}} aria-current="page"{{end}} title="Object history"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></a>
     {{- else}}
     <span class="sidebar-link" aria-disabled="true" title="Object history — disabled in this deployment"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></span>
     {{- end}}
 
     <div class="sidebar-group">
-      <a class="sidebar-link sidebar-group-label" href="/cluster/overview" title="Cluster"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></a>
+      {{- if .CanRead}}<a class="sidebar-link sidebar-group-label" href="/cluster/overview" title="Cluster"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></a>{{- else}}<span class="sidebar-link sidebar-group-label" aria-disabled="true" title="Cluster — needs a proxy-asserted level"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></span>{{- end}}
       <div class="sidebar-sub">
-        <a class="sidebar-link" href="/cluster/overview"{{if eq .Current "cluster-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
+        {{- if .CanRead}}<a class="sidebar-link" href="/cluster/overview"{{if eq .Current "cluster-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>{{- else}}<span class="sidebar-link" aria-disabled="true" title="Overview — needs a proxy-asserted level"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></span>{{- end}}
+        {{- if .CanBrowse}}
         <a class="sidebar-link" href="/cluster/pods"{{if eq .Current "cluster-pods"}} aria-current="page"{{end}} title="Pods"><svg><use href="#i-pods"></use></svg><span class="sidebar-label">Pods</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Pods — needs the poweruser or dba level"><svg><use href="#i-pods"></use></svg><span class="sidebar-label">Pods</span></span>
+        {{- end}}
 		{{- if .MetricsAvailable}}
-		<a class="sidebar-link" href="/cluster/metrics"{{if eq .Current "cluster-metrics"}} aria-current="page"{{end}} title="Instance metrics"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></a>
+		{{- if .CanRead}}<a class="sidebar-link" href="/cluster/metrics"{{if eq .Current "cluster-metrics"}} aria-current="page"{{end}} title="Instance metrics"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></a>{{- else}}<span class="sidebar-link" aria-disabled="true" title="Instance metrics — needs a proxy-asserted level"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></span>{{- end}}
 		{{- else}}
 		<span class="sidebar-link" aria-disabled="true" title="Instance metrics — disabled in this deployment"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></span>
 		{{- end}}
@@ -112,31 +122,55 @@
     </div>
 
     <div class="sidebar-group">
-      <a class="sidebar-link sidebar-group-label" href="/backups" title="Backups"><svg><use href="#i-backups"></use></svg><span>Backups</span></a>
+      {{- if .CanRead}}<a class="sidebar-link sidebar-group-label" href="/backups" title="Backups"><svg><use href="#i-backups"></use></svg><span>Backups</span></a>{{- else}}<span class="sidebar-link sidebar-group-label" aria-disabled="true" title="Backups — needs a proxy-asserted level"><svg><use href="#i-backups"></use></svg><span>Backups</span></span>{{- end}}
       <div class="sidebar-sub">
-        <a class="sidebar-link" href="/backups"{{if eq .Current "backups-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
+        {{- if .CanRead}}<a class="sidebar-link" href="/backups"{{if eq .Current "backups-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>{{- else}}<span class="sidebar-link" aria-disabled="true" title="Overview — needs a proxy-asserted level"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></span>{{- end}}
+        {{- if .CanBrowse}}
         <a class="sidebar-link" href="/backups/objects"{{if eq .Current "backups-objects"}} aria-current="page"{{end}} title="Objects"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Objects — needs the poweruser or dba level"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></span>
+        {{- end}}
+        {{- if .CanBrowse}}
         <a class="sidebar-link" href="/backups/evidence"{{if eq .Current "backups-evidence"}} aria-current="page"{{end}} title="Evidence"><svg><use href="#i-evidence"></use></svg><span class="sidebar-label">Evidence</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Evidence — needs the poweruser or dba level"><svg><use href="#i-evidence"></use></svg><span class="sidebar-label">Evidence</span></span>
+        {{- end}}
       </div>
     </div>
 
     <div class="sidebar-group">
-      <a class="sidebar-link sidebar-group-label" href="/databases" title="Databases"><svg><use href="#i-databases"></use></svg><span>Databases</span></a>
+      {{- if .CanRead}}<a class="sidebar-link sidebar-group-label" href="/databases" title="Databases"><svg><use href="#i-databases"></use></svg><span>Databases</span></a>{{- else}}<span class="sidebar-link sidebar-group-label" aria-disabled="true" title="Databases — needs a proxy-asserted level"><svg><use href="#i-databases"></use></svg><span>Databases</span></span>{{- end}}
       <div class="sidebar-sub">
-        <a class="sidebar-link" href="/databases"{{if eq .Current "databases-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
+        {{- if .CanRead}}<a class="sidebar-link" href="/databases"{{if eq .Current "databases-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>{{- else}}<span class="sidebar-link" aria-disabled="true" title="Overview — needs a proxy-asserted level"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></span>{{- end}}
+        {{- if .CanBrowse}}
         <a class="sidebar-link" href="/databases/roles"{{if eq .Current "databases-roles"}} aria-current="page"{{end}} title="Roles"><svg><use href="#i-roles"></use></svg><span class="sidebar-label">Roles</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Roles — needs the poweruser or dba level"><svg><use href="#i-roles"></use></svg><span class="sidebar-label">Roles</span></span>
+        {{- end}}
+        {{- if .CanBrowse}}
         <a class="sidebar-link" href="/databases/publications"{{if eq .Current "databases-publications"}} aria-current="page"{{end}} title="Publications"><svg><use href="#i-replication"></use></svg><span class="sidebar-label">Publications</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Publications — needs the poweruser or dba level"><svg><use href="#i-replication"></use></svg><span class="sidebar-label">Publications</span></span>
+        {{- end}}
+        {{- if .CanBrowse}}
         <a class="sidebar-link" href="/databases/subscriptions"{{if eq .Current "databases-subscriptions"}} aria-current="page"{{end}} title="Subscriptions"><svg><use href="#i-replication"></use></svg><span class="sidebar-label">Subscriptions</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Subscriptions — needs the poweruser or dba level"><svg><use href="#i-replication"></use></svg><span class="sidebar-label">Subscriptions</span></span>
+        {{- end}}
       </div>
     </div>
 
     <div class="sidebar-group">
-      <a class="sidebar-link sidebar-group-label" href="/poolers" title="Poolers"><svg><use href="#i-poolers"></use></svg><span>Poolers</span></a>
+      {{- if .CanRead}}<a class="sidebar-link sidebar-group-label" href="/poolers" title="Poolers"><svg><use href="#i-poolers"></use></svg><span>Poolers</span></a>{{- else}}<span class="sidebar-link sidebar-group-label" aria-disabled="true" title="Poolers — needs a proxy-asserted level"><svg><use href="#i-poolers"></use></svg><span>Poolers</span></span>{{- end}}
       <div class="sidebar-sub">
-        <a class="sidebar-link" href="/poolers"{{if eq .Current "poolers-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
+        {{- if .CanRead}}<a class="sidebar-link" href="/poolers"{{if eq .Current "poolers-overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>{{- else}}<span class="sidebar-link" aria-disabled="true" title="Overview — needs a proxy-asserted level"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></span>{{- end}}
+        {{- if .CanBrowse}}
         <a class="sidebar-link" href="/poolers/pods"{{if eq .Current "poolers-pods"}} aria-current="page"{{end}} title="Pods"><svg><use href="#i-pods"></use></svg><span class="sidebar-label">Pods</span></a>
+        {{- else}}
+        <span class="sidebar-link" aria-disabled="true" title="Pods — needs the poweruser or dba level"><svg><use href="#i-pods"></use></svg><span class="sidebar-label">Pods</span></span>
+        {{- end}}
         {{- if .PoolerMetricsAvailable}}
-        <a class="sidebar-link" href="/poolers/metrics"{{if eq .Current "poolers-metrics"}} aria-current="page"{{end}} title="Pooler metrics"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></a>
+        {{- if .CanRead}}<a class="sidebar-link" href="/poolers/metrics"{{if eq .Current "poolers-metrics"}} aria-current="page"{{end}} title="Pooler metrics"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></a>{{- else}}<span class="sidebar-link" aria-disabled="true" title="Pooler metrics — needs a proxy-asserted level"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></span>{{- end}}
         {{- else}}
         <span class="sidebar-link" aria-disabled="true" title="Pooler metrics — disabled in this deployment"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></span>
         {{- end}}

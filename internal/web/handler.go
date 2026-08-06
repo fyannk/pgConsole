@@ -285,28 +285,47 @@ func New(cfg Config, sources Sources, prober ReadinessProber, tailer LogTailer, 
 // probes and stylesheets carry no cluster state.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
-	// The read-only status baseline is ungated: reaching the console means
-	// the proxy already authenticated the request, and the deployment
-	// confines ingress to that proxy. Each section is its own screen; the
-	// Overview restates them in plain language.
-	mux.HandleFunc("GET /{$}", h.handleIndex)
-	mux.HandleFunc("GET /objects", h.handleObjects)
-	mux.HandleFunc("GET /cluster/overview", h.handleClusterOverview)
-	mux.HandleFunc("GET /cluster/pods", h.handleClusterPods)
-	mux.HandleFunc("GET /cluster/pods/{pod}", h.handlePodDetail)
-	mux.HandleFunc("GET /backups", h.handleBackupsOverview)
-	mux.HandleFunc("GET /backups/objects", h.handleBackupsObjects)
-	mux.HandleFunc("GET /backups/evidence", h.handleBackupsEvidence)
-	mux.HandleFunc("GET /databases", h.handleDatabases("databases-overview"))
-	mux.HandleFunc("GET /databases/roles", h.handleDatabases("databases-roles"))
-	mux.HandleFunc("GET /databases/publications", h.handleDatabases("databases-publications"))
-	mux.HandleFunc("GET /databases/subscriptions", h.handleDatabases("databases-subscriptions"))
-	mux.HandleFunc("GET /poolers", h.handlePoolers("poolers-overview"))
-	mux.HandleFunc("GET /poolers/pods", h.handlePoolers("poolers-pods"))
-	mux.HandleFunc("GET /poolers/pods/{pod}", h.handlePoolerPodDetail)
+	// Every screen is gated. Reaching the console is not authorization:
+	// the proxy authenticates, and the level it forwards decides which
+	// screens the request may reach. With no usable level nothing is
+	// served but the denial page, the readiness endpoints and the
+	// embedded assets.
+	//
+	// The ladder, in one place so it can be read as a whole:
+	//
+	//   view       the overviews and the two metrics screens
+	//   poweruser  + every other read screen: inventories, rosters, pod
+	//              detail, history, evidence and the log tails
+	//   dba        + the day-2 operations and the review panel
+	//
+	// Nothing here widens what the ServiceAccount may do. It decides
+	// which of the console's own screens a request reaches, and the
+	// deployed Role remains the enforcement boundary underneath.
+	view := func(next http.HandlerFunc) http.HandlerFunc {
+		return h.requireLevel(authz.TierView, requireViewLevel, next)
+	}
+	power := func(next http.HandlerFunc) http.HandlerFunc {
+		return h.requireLevel(authz.TierPowerUser, requirePowerLevel, next)
+	}
+	mux.HandleFunc("GET /{$}", view(h.handleIndex))
+	mux.HandleFunc("GET /cluster/overview", view(h.handleClusterOverview))
+	mux.HandleFunc("GET /backups", view(h.handleBackupsOverview))
+	mux.HandleFunc("GET /databases", view(h.handleDatabases("databases-overview")))
+	mux.HandleFunc("GET /poolers", view(h.handlePoolers("poolers-overview")))
+
+	mux.HandleFunc("GET /objects", power(h.handleObjects))
+	mux.HandleFunc("GET /cluster/pods", power(h.handleClusterPods))
+	mux.HandleFunc("GET /cluster/pods/{pod}", power(h.handlePodDetail))
+	mux.HandleFunc("GET /backups/objects", power(h.handleBackupsObjects))
+	mux.HandleFunc("GET /backups/evidence", power(h.handleBackupsEvidence))
+	mux.HandleFunc("GET /databases/roles", power(h.handleDatabases("databases-roles")))
+	mux.HandleFunc("GET /databases/publications", power(h.handleDatabases("databases-publications")))
+	mux.HandleFunc("GET /databases/subscriptions", power(h.handleDatabases("databases-subscriptions")))
+	mux.HandleFunc("GET /poolers/pods", power(h.handlePoolers("poolers-pods")))
+	mux.HandleFunc("GET /poolers/pods/{pod}", power(h.handlePoolerPodDetail))
 	if h.sources.PoolerMetrics != nil {
-		mux.HandleFunc("GET /poolers/metrics", h.handlePoolerMetrics)
-		mux.HandleFunc("GET /poolers/metrics/series", h.handlePoolerMetricsSeries)
+		mux.HandleFunc("GET /poolers/metrics", view(h.handlePoolerMetrics))
+		mux.HandleFunc("GET /poolers/metrics/series", view(h.handlePoolerMetricsSeries))
 	}
 	// The timeline is manifest-free metadata and stays at the baseline;
 	// the revision detail is the object's definition verbatim minus the
@@ -314,11 +333,11 @@ func (h *Handler) Routes() http.Handler {
 	// the same gate as the log tail, and the timeline hides the links
 	// below that level.
 	if h.sources.Metrics != nil {
-		mux.HandleFunc("GET /cluster/metrics", h.handleClusterMetrics)
-		mux.HandleFunc("GET /cluster/metrics/series", h.handleMetricsSeries)
+		mux.HandleFunc("GET /cluster/metrics", view(h.handleClusterMetrics))
+		mux.HandleFunc("GET /cluster/metrics/series", view(h.handleMetricsSeries))
 	}
 	if h.sources.History != nil {
-		mux.HandleFunc("GET /history", h.handleHistory)
+		mux.HandleFunc("GET /history", power(h.handleHistory))
 		mux.HandleFunc("GET /history/revisions/{seq}", h.requireLevel(authz.TierPowerUser,
 			"revision details require the poweruser or dba level", h.handleHistoryRevision))
 	}
@@ -327,15 +346,15 @@ func (h *Handler) Routes() http.Handler {
 	// The instance log tail sits above the baseline: it requires the
 	// poweruser level or above, and the affordance is hidden below it.
 	if h.cfg.AllowLogs {
-		mux.HandleFunc("GET /logs/{pod}", h.requireLevel(authz.TierPowerUser, "log access requires the poweruser or dba level", h.handleLogs))
-		mux.HandleFunc("GET /poolers/logs/{pod}", h.requireLevel(authz.TierPowerUser, "log access requires the poweruser or dba level", h.handlePoolerLogs))
+		mux.HandleFunc("GET /logs/{pod}", h.requireLevel(authz.TierPowerUser, requirePowerLevel, h.handleLogs))
+		mux.HandleFunc("GET /poolers/logs/{pod}", h.requireLevel(authz.TierPowerUser, requirePowerLevel, h.handlePoolerLogs))
 	}
 	// Operation routes exist only in operations mode with a wired
 	// executor: disabled mode registers no route to abuse. They require
 	// the poweruser level or above.
 	if h.cfg.AllowOperations && h.executor != nil {
 		operate := func(next http.HandlerFunc) http.HandlerFunc {
-			return h.requireLevel(authz.TierPowerUser, "operations require the poweruser or dba level", next)
+			return h.requireLevel(authz.TierDBA, "the day-2 operations require the dba level", next)
 		}
 		mux.HandleFunc("GET /operations", operate(h.handleOperationsIndex))
 		mux.HandleFunc("GET /operations/{op}", operate(h.handleOperationConfirm))
@@ -413,7 +432,10 @@ func (h *Handler) assemble(r *http.Request, current string) Page {
 	page.Shell.SnapshotAge = page.SnapshotAge
 	page.Shell.Generation = page.Generation
 	page.Shell.Identity = page.Identity
-	page.Shell.Links = page.Links
+	// Deliberately not page.Links: the page's list is every configured
+	// link-out, which the evidence screen reads to know whether the
+	// viewer is wired at all. The map's list is the one this reader may
+	// follow, and h.shell already decided it.
 	return page
 }
 
@@ -584,12 +606,15 @@ func (h *Handler) shell(r *http.Request, current string) ShellView {
 		Namespace:              h.cfg.Namespace,
 		CurrentURL:             r.URL.RequestURI(),
 		Identity:               h.buildIdentityView(r),
-		Links:                  buildLinks(h.cfg.Links),
+		Links:                  buildLinks(h.cfg.Links, access.hasIdentity && access.level >= authz.TierDBA),
 		OperationsAvailable:    h.cfg.AllowOperations && h.executor != nil,
 		CanOperate:             access.canOperate(h),
 		AccessReviewAvailable:  h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil,
 		CanReviewAccess:        access.canReviewAccess(h),
 		HistoryAvailable:       h.sources.History != nil,
+		CanRead:                access.hasIdentity && access.level >= authz.TierView,
+		CanBrowse:              access.hasIdentity && access.level >= authz.TierPowerUser,
+		CanAdminister:          access.hasIdentity && access.level >= authz.TierDBA,
 		MetricsAvailable:       h.sources.Metrics != nil,
 		PoolerMetricsAvailable: h.sources.PoolerMetrics != nil,
 		Current:                current,
@@ -617,8 +642,11 @@ func (h *Handler) requestAccess(r *http.Request) requestAccess {
 	return access
 }
 
+// canOperate follows the route: the day-2 operations are the dba's, in
+// the same tier as the review panel. The poweruser tier reads every
+// screen the console shows and changes none of them.
 func (a requestAccess) canOperate(h *Handler) bool {
-	return a.hasIdentity && a.level >= authz.TierPowerUser && h.cfg.AllowOperations && h.executor != nil
+	return a.hasIdentity && a.level >= authz.TierDBA && h.cfg.AllowOperations && h.executor != nil
 }
 
 func (a requestAccess) canReviewAccess(h *Handler) bool {
@@ -632,11 +660,24 @@ func (a requestAccess) canReviewAccess(h *Handler) bool {
 // confinement invariant; the console probes nothing. Denials render
 // categories only; neither the forwarded identity nor the asserted level
 // value ever enters a log line.
+// The requirement sentences the denial page shows. They name the level
+// the route needs, never the level the reader has: the reader's own
+// level is already in the top bar, and repeating it in a refusal reads
+// as an accusation rather than an explanation.
+const (
+	requireViewLevel  = "this console is read through a proxy-asserted level, and none reached it"
+	requirePowerLevel = "this screen requires the poweruser or dba level"
+)
+
 func (h *Handler) requireLevel(min authz.Tier, requirement string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.auth.Extractor == nil {
+		if h.auth.Extractor == nil || h.cfg.LevelHeader == "" {
+			// Every screen is decided by the forwarded level, so a
+			// deployment without the headers to read it serves nothing.
+			// That is a wiring fault rather than a refusal of this
+			// reader, and it says so.
 			h.renderDenied(w, r, http.StatusServiceUnavailable,
-				"level gating unavailable without a trusted identity header")
+				"this deployment forwards no identity or level header, so the console can admit nobody")
 			return
 		}
 		if _, ok := h.auth.Extractor.FromRequest(r); !ok {
@@ -665,10 +706,26 @@ func (h *Handler) level(r *http.Request) authz.Tier {
 }
 
 // renderDenied writes the constant denial page.
+// assertedLevel is the level the proxy forwarded, for the denial page
+// to restate. Empty when none was forwarded or none was recognised —
+// the two are the same thing to the ladder, and the page says so in
+// words rather than showing whatever string arrived.
+func (h *Handler) assertedLevel(r *http.Request) string {
+	if h.cfg.LevelHeader == "" {
+		return ""
+	}
+	switch level := authz.ParseLevel(r.Header.Get(h.cfg.LevelHeader)); level {
+	case authz.TierView, authz.TierPowerUser, authz.TierDBA:
+		return level.String()
+	default:
+		return ""
+	}
+}
+
 func (h *Handler) renderDenied(w http.ResponseWriter, r *http.Request, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	if err := h.tpl.ExecuteTemplate(w, "denied.html.tmpl", DeniedView{Shell: h.shell(r, ""), Message: message}); err != nil {
+	if err := h.tpl.ExecuteTemplate(w, "denied.html.tmpl", DeniedView{Shell: h.shell(r, ""), Message: message, Level: h.assertedLevel(r)}); err != nil {
 		h.logger.Error("render failed",
 			slog.String("route", "denied"),
 			slog.String("category", redact.Safe(err)))
