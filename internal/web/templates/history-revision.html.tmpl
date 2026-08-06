@@ -11,7 +11,7 @@
     <h2>{{.Object}} — revision {{.Seq}}</h2>
     <dl>
       <dt>Change</dt><dd>{{.Change}}</dd>
-      <dt>Observed</dt><dd><time datetime="{{.ObservedAt}}">{{.ObservedAt}}</time> by this pgConsole process</dd>
+      <dt>Observed</dt><dd><time datetime="{{.ObservedAt}}" data-local>{{.ObservedAt}}</time> by this pgConsole process</dd>
       <dt>Field manager</dt><dd>{{.Manager}}{{if .Operation}} — {{.Operation}}{{end}} (Kubernetes-reported, self-declared)</dd>
     </dl>
     <h3>Structural diff</h3>

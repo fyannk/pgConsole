@@ -48,7 +48,7 @@ type PodDetailView struct {
 	Node       string
 	IP         string
 	Image      string
-	Started    string
+	Started    Stamp
 	// Cluster-reported facts shown on the primary only.
 	IsPrimary     bool
 	Timeline      string
@@ -105,6 +105,9 @@ type PodTimelineEntry struct {
 	// Age and Stamp render the when column.
 	Age   string
 	Stamp string
+	// StampISO is the same instant machine-readable, so the browser may
+	// restate the short stamp above in the reader’s own zone.
+	StampISO string
 	// Seq links a revision's detail when non-zero and the viewer clears
 	// the gate.
 	Seq uint64
@@ -149,7 +152,7 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 		Image:    orUnknown(pod.Image),
 		Ready:    unknown,
 		Restarts: unknown,
-		Started:  unknown,
+		Started:  Stamp{Text: unknown},
 	}
 	if pod.Deleting {
 		view.Phase += " — deleting"
@@ -161,7 +164,7 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 		view.Restarts = fmt.Sprintf("%d", *pod.Restarts)
 	}
 	if pod.Started != nil {
-		view.Started = pod.Started.UTC().Format("2006-01-02 15:04:05 UTC")
+		view.Started = stampAt(*pod.Started)
 	}
 	row := PodRowView{Ready: view.Ready, Phase: view.Phase}
 	view.PhaseState = podState(row)
@@ -308,6 +311,7 @@ func (h *Handler) buildPodTimeline(name string, bound int, now time.Time) ([]Pod
 	for i := range entries {
 		entries[i].Age = formatAge(now.Sub(entries[i].at))
 		entries[i].Stamp = entries[i].at.UTC().Format("01-02 15:04")
+		entries[i].StampISO = entries[i].at.UTC().Format(time.RFC3339)
 	}
 	return entries, historyAvailable
 }

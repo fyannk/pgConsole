@@ -764,8 +764,8 @@ func scheduleRows(s ScheduledBackupRowView) []TopoGraphText {
 	switch {
 	case s.Suspended == "true":
 		rows = append(rows, TopoGraphText{C: "sub", T: "suspended"})
-	case s.NextSchedule != "" && s.NextSchedule != unknown:
-		rows = append(rows, TopoGraphText{C: "sub", T: "next " + s.NextSchedule})
+	case s.NextSchedule.Text != "" && s.NextSchedule.Text != unknown:
+		rows = append(rows, TopoGraphText{C: "sub", T: "next " + s.NextSchedule.Text})
 	}
 	return rows
 }

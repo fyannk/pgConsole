@@ -26,7 +26,7 @@
         <thead><tr><th>Name</th><th>Phase</th><th>Method</th><th>Started (UTC)</th><th>Stopped (UTC)</th><th>Age</th><th>Snapshot state</th></tr></thead>
         <tbody>
           {{- range .Rows}}
-          <tr><td>{{.Name}}</td><td>{{.Phase}}</td><td>{{.Method}}</td><td>{{.Started}}</td><td>{{.Stopped}}</td><td>{{.Age}}</td><td>{{.SnapshotState}}</td></tr>
+          <tr><td>{{.Name}}</td><td>{{.Phase}}</td><td>{{.Method}}</td><td>{{template "stamp" .Started}}</td><td>{{template "stamp" .Stopped}}</td><td>{{.Age}}</td><td>{{.SnapshotState}}</td></tr>
           {{- end}}
         </tbody>
       </table>
@@ -45,7 +45,7 @@
         <thead><tr><th>Name</th><th>Method</th><th>Schedule</th><th>Suspended</th><th>Last schedule (UTC)</th><th>Next schedule (UTC)</th></tr></thead>
         <tbody>
           {{- range .ScheduledRows}}
-          <tr><td>{{.Name}}</td><td>{{.Method}}</td><td>{{.Schedule}}</td><td>{{.Suspended}}</td><td>{{.LastSchedule}}</td><td>{{.NextSchedule}}</td></tr>
+          <tr><td>{{.Name}}</td><td>{{.Method}}</td><td>{{.Schedule}}</td><td>{{.Suspended}}</td><td>{{template "stamp" .LastSchedule}}</td><td>{{template "stamp" .NextSchedule}}</td></tr>
           {{- end}}
         </tbody>
       </table>

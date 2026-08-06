@@ -231,9 +231,9 @@ type BackupRowView struct {
 	// Method is the reported backup method.
 	Method string
 	// Started is the UTC start time or unknown.
-	Started string
+	Started Stamp
 	// Stopped is the UTC stop time or unknown.
-	Stopped string
+	Stopped Stamp
 	// Age is relative to stop time, falling back to creation time.
 	Age string
 	// SnapshotState is explicitly unknown for volume snapshots.
@@ -254,9 +254,9 @@ type ScheduledBackupRowView struct {
 	// Suspended is true, false, or unknown.
 	Suspended string
 	// LastSchedule is the reported UTC time or unknown.
-	LastSchedule string
+	LastSchedule Stamp
 	// NextSchedule is the reported UTC time or unknown.
-	NextSchedule string
+	NextSchedule Stamp
 }
 
 // BackupsView is the bounded Backup and ScheduledBackup section.
@@ -354,8 +354,11 @@ type BarmanSummaryView struct {
 	Retention StateLineView
 	// RetentionBackups is the visible/usable backup count display.
 	RetentionBackups string
-	// RetentionWindow is the oldest-to-newest completion window.
-	RetentionWindow string
+	// RetentionOldest and RetentionNewest bracket the completion window.
+	// Two stamps rather than one joined sentence, so each end can be
+	// restated in the reader’s zone on its own.
+	RetentionOldest Stamp
+	RetentionNewest Stamp
 	// RetentionMinimum is the configured redundancy expectation display.
 	RetentionMinimum string
 	// LatestArchiveAge is the newest WAL receipt age.
@@ -399,9 +402,9 @@ type RepositoryView struct {
 	// Overall is the snapshot state and reason code.
 	Overall StateLineView
 	// ScanCompleted is the evidence scan completion time or unknown.
-	ScanCompleted string
+	ScanCompleted Stamp
 	// LastAttempt is the last refresh attempt time or unknown.
-	LastAttempt string
+	LastAttempt Stamp
 	// Inventory is the provider-neutral inventory display.
 	Inventory string
 	// InventoryFailure is the producer's redacted failure category of
@@ -1757,7 +1760,7 @@ func buildBackupsView(snap observe.BackupsSnapshot, now time.Time, evidenceURL s
 		}
 		view.Rows = append(view.Rows, BackupRowView{
 			Name: orUnknown(backup.Name), Phase: phase, Method: orUnknown(backup.Method),
-			Started: formatTime(backup.StartedAt), Stopped: formatTime(backup.StoppedAt),
+			Started: stampOf(backup.StartedAt), Stopped: stampOf(backup.StoppedAt),
 			Age: formatTimeAge(backup.StoppedAt, backup.CreatedAt, now), SnapshotState: snapshotState,
 			SourceInstance: orUnknown(backup.SourceInstance),
 		})
@@ -1773,7 +1776,7 @@ func buildBackupsView(snap observe.BackupsSnapshot, now time.Time, evidenceURL s
 		view.ScheduledRows = append(view.ScheduledRows, ScheduledBackupRowView{
 			Name: orUnknown(schedule.Name), Method: orUnknown(schedule.Method),
 			Schedule: orUnknown(schedule.Schedule), Suspended: suspended,
-			LastSchedule: formatTime(schedule.LastScheduleTime), NextSchedule: formatTime(schedule.NextScheduleTime),
+			LastSchedule: stampOf(schedule.LastScheduleTime), NextSchedule: stampOf(schedule.NextScheduleTime),
 		})
 	}
 	return view
@@ -1816,8 +1819,8 @@ func buildRepositoryView(status evidence.Status, cluster observe.Snapshot, clust
 		Completeness:       orUnknown(report.Completeness),
 		SourceStale:        report.SourceStale,
 		Overall:            StateLineView{State: report.Overall.State, Code: report.Overall.Code},
-		ScanCompleted:      formatTime(report.CompletedAt),
-		LastAttempt:        formatTime(report.LastAttemptAt),
+		ScanCompleted:      stampOf(report.CompletedAt),
+		LastAttempt:        stampOf(report.LastAttemptAt),
 		Inventory:          repositoryInventory(report.Inventory),
 		InventoryFailure:   report.Inventory.LastFailureCategory,
 		DetailsType:        orUnknown(report.DetailsType),
@@ -1902,7 +1905,8 @@ func buildBarmanSummaryView(barman evidence.BarmanFacts, now time.Time) *BarmanS
 		Coverage:         StateLineView{State: barman.Coverage.State, Code: barman.Coverage.Code},
 		Retention:        StateLineView{State: barman.Retention.Result.State, Code: barman.Retention.Result.Code},
 		RetentionBackups: formatCount(barman.Retention.VisibleBackups) + " visible, " + formatCount(barman.Retention.StructurallyUsableBackups) + " structurally usable",
-		RetentionWindow:  formatTime(barman.Retention.OldestCompletionAt) + " to " + formatTime(barman.Retention.NewestCompletionAt),
+		RetentionOldest:  stampOf(barman.Retention.OldestCompletionAt),
+		RetentionNewest:  stampOf(barman.Retention.NewestCompletionAt),
 		RetentionMinimum: "not configured",
 		LatestArchiveAge: unknown,
 		Truncated:        barman.RangesTruncated || barman.DiagnosticsTruncated,
@@ -1961,6 +1965,34 @@ func formatTime(value *time.Time) string {
 	}
 	return value.UTC().Format("2006-01-02 15:04:05Z")
 }
+
+// Stamp is one absolute moment as the console states it: the UTC text
+// the server rendered, and the machine-readable form beside it.
+//
+// The two are separate because they answer different questions. Text is
+// the claim, and it is what a reader with no script — or a printed page
+// — sees, in the one spelling two operators in different places can
+// compare. ISO exists only so the browser may restate that same instant
+// in the reader's own zone; it is never a different fact. ISO is empty
+// when there is no time at all, which is what keeps "unknown" from
+// being dressed up as a date.
+type Stamp struct {
+	// Text is the UTC rendering, or "unknown".
+	Text string
+	// ISO is the RFC3339 form, or empty when there is no time.
+	ISO string
+}
+
+// stampOf renders one optional instant into both forms.
+func stampOf(value *time.Time) Stamp {
+	if value == nil || value.IsZero() {
+		return Stamp{Text: unknown}
+	}
+	return Stamp{Text: value.UTC().Format("2006-01-02 15:04:05Z"), ISO: value.UTC().Format(time.RFC3339)}
+}
+
+// stampAt renders one non-optional instant into both forms.
+func stampAt(value time.Time) Stamp { return stampOf(&value) }
 
 func formatTimeAge(preferred *time.Time, fallback time.Time, now time.Time) string {
 	if preferred != nil && !preferred.IsZero() {

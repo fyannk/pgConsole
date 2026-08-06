@@ -273,7 +273,7 @@ func objectsBackupGroup(p *Page) ObjectGroupView {
 		Observed: true, Truncated: b.SchedulesTruncated}
 	for _, s := range b.ScheduledRows {
 		schedules.Rows = append(schedules.Rows, ObjectRowView{
-			Name: s.Name, Detail: strings.TrimSpace(s.Schedule + " · " + s.Method + " · next " + s.NextSchedule),
+			Name: s.Name, Detail: strings.TrimSpace(s.Schedule + " · " + s.Method + " · next " + s.NextSchedule.Text),
 		})
 	}
 	schedules.Note = objectsEmptyNote(len(schedules.Rows), "no backup schedule references this cluster")

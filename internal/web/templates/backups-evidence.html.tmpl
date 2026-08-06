@@ -27,8 +27,8 @@
         <dt>Overall</dt><dd>{{.Overall.Display}}</dd>
         <dt>Completeness</dt><dd>{{.Completeness}}</dd>
         <dt>Evidence generation</dt><dd>{{.EvidenceGeneration}} (revision {{.Revision}})</dd>
-        <dt>Scan completed (UTC)</dt><dd>{{.ScanCompleted}}</dd>
-        <dt>Last attempt (UTC)</dt><dd>{{.LastAttempt}}</dd>
+        <dt>Scan completed</dt><dd>{{template "stamp" .ScanCompleted}}</dd>
+        <dt>Last attempt</dt><dd>{{template "stamp" .LastAttempt}}</dd>
         <dt>Inventory</dt><dd>{{.Inventory}}{{if .InventoryFailure}} — last attempt failed: {{.InventoryFailure}}{{end}}</dd>
       </dl>
       {{- if .DetailsUnknown}}
@@ -41,7 +41,7 @@
         <dt>Timeline history</dt><dd>{{.Timeline.Display}}</dd>
         <dt>Recovery coverage</dt><dd>{{.Coverage.Display}}</dd>
         <dt>Retention</dt><dd>{{.Retention.Display}} — {{.RetentionBackups}} — {{.RetentionMinimum}}</dd>
-        <dt>Completion window (UTC)</dt><dd>{{.RetentionWindow}}</dd>
+        <dt>Completion window</dt><dd>{{template "stamp" .RetentionOldest}} to {{template "stamp" .RetentionNewest}}</dd>
         <dt>Latest archive receipt age</dt><dd>{{.LatestArchiveAge}}</dd>
       </dl>
       {{- if .Truncated}}

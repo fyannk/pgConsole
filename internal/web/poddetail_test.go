@@ -128,6 +128,37 @@ func TestPodDetailStatesFactsAndMergedTimeline(t *testing.T) {
 	}
 }
 
+// Every absolute moment carries both halves: the UTC text is the claim
+// a reader with no script sees, and the RFC3339 twin beside it is the
+// only thing that lets the browser restate that same instant locally. A
+// relative age must not carry the marker — rewriting "4m ago" into a
+// date changes what the cell says.
+func TestPodDetailStampsCarryTheirMachineReadableTwin(t *testing.T) {
+	t.Parallel()
+	h := newPodDetailHandler(t, podDetailSources(), podDetailHistory())
+	body := get(t, h, http.MethodGet, "/cluster/pods/orders-1").Body.String()
+
+	started := strings.Index(body, "<dt>Started</dt>")
+	if started < 0 {
+		t.Fatal("pod detail states no start time")
+	}
+	cell := body[started : started+220]
+	if !strings.Contains(cell, `<time datetime="`) || !strings.Contains(cell, "data-local") {
+		t.Errorf("the start time cannot be restated locally: %q", cell)
+	}
+	if !strings.Contains(cell, "Z</time>") {
+		t.Errorf("the start time is not stated in UTC: %q", cell)
+	}
+	// The timeline's own stamps too: the age stays a plain age, and the
+	// absolute stamp beside it carries the twin.
+	if !strings.Contains(body, ` ago</b><time datetime="`) {
+		t.Error("a timeline entry states a time the browser cannot restate")
+	}
+	if strings.Contains(body, ` ago</b><time datetime="" `) {
+		t.Error("an entry with no known time still claims one")
+	}
+}
+
 func TestPodDetailAboveTheGateCarriesLogsAndRawDefinition(t *testing.T) {
 	t.Parallel()
 	h := newPodDetailHandler(t, podDetailSources(), podDetailHistory())

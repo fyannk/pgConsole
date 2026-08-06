@@ -41,6 +41,7 @@
 <symbol id="i-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"></circle><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"></path></symbol>
 <symbol id="i-moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"></path></symbol>
 <symbol id="i-close" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"></path></symbol>
+<symbol id="i-clock" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.75"></circle><path d="M8 4.5V8l2.5 1.5"></path></symbol>
 </defs></svg>
 {{- end -}}
 
@@ -65,6 +66,10 @@
     <button type="button" class="refresh-now" hx-get="{{.CurrentURL}}" hx-trigger="pgconsole:refresh">Refresh now</button>
     <span class="refresh-error" role="status" aria-live="polite"></span>
   </div>
+  {{- /* Hidden until the script that gives it meaning is running: the
+         server has no zone to offer, so with no script every time on
+         the page stays in the UTC the markup already states. */}}
+  <button type="button" class="tz-toggle" hidden aria-pressed="false" aria-label="Switch between this browser’s time zone and UTC"><svg aria-hidden="true"><use href="#i-clock"></use></svg><span class="tz-label">UTC</span></button>
   <button type="button" class="theme-toggle" aria-label="Switch between light and dark theme" title="Switch theme"><svg class="i-moon" aria-hidden="true"><use href="#i-moon"></use></svg><svg class="i-sun" aria-hidden="true"><use href="#i-sun"></use></svg></button>
 </header>
 {{- end -}}
@@ -152,6 +157,17 @@
   </nav>
   {{- end}}
 </aside>
+{{- end -}}
+
+{{- /* stamp renders one absolute moment. The argument is a Stamp, whose
+       Text is the UTC the server rendered — the claim, and the whole
+       reading with no script — and whose ISO is the machine-readable
+       form console.js needs to restate that same instant in the
+       reader's own zone. No ISO means there is no time to restate, so
+       the text stands alone rather than being wrapped in a <time> that
+       says nothing. */ -}}
+{{- define "stamp" -}}
+{{- if .ISO}}<time datetime="{{.ISO}}" data-local>{{.Text}}</time>{{else}}{{.Text}}{{end -}}
 {{- end -}}
 
 {{- /* page-head opens the document. The argument is the page title

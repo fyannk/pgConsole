@@ -1297,6 +1297,36 @@ header.topbar dl.target dd { color: var(--topbar-text); }
 }
 @media print { .theme-toggle { display: none !important; } }
 
+/* Time-zone switch. It carries a label rather than only an icon,
+   because the whole point is to state which zone the page is in — an
+   unlabelled clock glyph would leave that ambiguous, which is the
+   condition it exists to remove. Hidden in the served markup and
+   revealed by console.js: with no script every time on the page is the
+   UTC the server wrote, and a control that could not change that would
+   be a lie. */
+.tz-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--topbar-text) 32%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--topbar-text);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  gap: var(--space-2);
+  height: 1.75rem;
+  margin-left: var(--space-3);
+  padding: 0 var(--space-2);
+}
+.tz-toggle[hidden] { display: none; }
+.tz-toggle:hover { background: color-mix(in oklab, var(--topbar-text) 12%, transparent); }
+.tz-toggle svg { height: 1rem; width: 1rem; }
+.tz-label { font-variant-numeric: tabular-nums; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media print { .tz-toggle { display: none !important; } }
+@media (max-width: 60rem) { .tz-label { display: none; } }
+
 .shell { padding-top: var(--header-h); }
 .sidebar { max-height: calc(100vh - var(--header-h)); top: var(--header-h); }
 

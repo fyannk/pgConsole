@@ -42,7 +42,7 @@
         <dt>Restarts</dt><dd>{{.Restarts}}</dd>
         <dt>Node</dt><dd>{{.Node}}</dd>
         <dt>Pod IP</dt><dd>{{.IP}}</dd>
-        <dt>Started</dt><dd>{{.Started}}</dd>
+        <dt>Started</dt><dd>{{template "stamp" .Started}}</dd>
         <dt>Image</dt><dd>{{.Image}}</dd>
         {{- if .IsPrimary}}
         <dt>Write endpoint</dt><dd>{{.WriteEndpoint}}</dd>
@@ -63,7 +63,7 @@
         {{- $canInspect := .CanInspect}}
         {{- range .History}}
         <li data-kind="{{.Kind}}">
-          <div class="when"><b>{{.Age}} ago</b><time>{{.Stamp}}</time></div>
+          <div class="when"><b>{{.Age}} ago</b><time datetime="{{.StampISO}}" data-local>{{.Stamp}}</time></div>
           <div class="rail"></div>
           <div class="entry">
             <div class="head"><span class="title">{{.Title}}</span><span class="tag" data-kind="{{.Kind}}">{{.Tag}}</span><span class="object">{{.Object}}</span></div>

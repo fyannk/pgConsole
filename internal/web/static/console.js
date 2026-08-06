@@ -89,6 +89,91 @@ document.addEventListener('click', (event) => {
   writePref('pgconsole.theme', next);
 });
 
+/* ------------------------------------------------------------ Time zone
+
+   The server renders every absolute time in UTC, because a server has no
+   business guessing a reader's zone and because UTC is the one spelling
+   two operators in different places can compare. That is the fact; the
+   zone it is shown in is presentation, so it is decided here.
+
+   The contract is one element, and it is opt-in:
+   <time datetime="RFC3339" data-local>text</time>. The marker earns its
+   keep because the console also uses <time datetime> for elements whose
+   text is a relative age — "4m ago" has no zone, and rewriting it into
+   a date would change what the cell says rather than how it is spelled.
+   The original UTC text is stashed on first pass, so switching back
+   restores exactly what the server wrote rather than a re-rendered
+   approximation.
+
+   Default is the reader's own zone. Nothing here is required for the
+   page to be correct: with no script every time stays in the UTC the
+   server wrote, which is why the attribute and the text agree. */
+
+var TIMEZONE_KEY = 'pgconsole.timezone';
+
+/**
+ * Reports the active time-zone preference.
+ * @returns {string} Either 'local' or 'utc'.
+ */
+function timeZonePref() {
+  return readPref(TIMEZONE_KEY, 'local') === 'utc' ? 'utc' : 'local';
+}
+
+/**
+ * Restates one <time> element in the active zone.
+ * @param {HTMLElement} el The time element.
+ * @param {string} pref Either 'local' or 'utc'.
+ * @returns {void}
+ */
+function applyTimeZoneTo(el, pref) {
+  const stamp = el.getAttribute('datetime');
+  if (!stamp) return;
+  const ms = Date.parse(stamp);
+  if (!isFinite(ms)) return;
+  if (el.dataset.utcText === undefined) el.dataset.utcText = el.textContent;
+  if (pref === 'utc') { el.textContent = el.dataset.utcText; return; }
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  el.textContent = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+    ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+/**
+ * Restates every <time> in scope and labels the toggle.
+ * @param {Element|Document} [scope] Subtree to convert; defaults to the document.
+ * @returns {void}
+ */
+function applyTimeZone(scope) {
+  const pref = timeZonePref();
+  const root = scope && scope.querySelectorAll ? scope : document;
+  Array.prototype.forEach.call(root.querySelectorAll('time[datetime][data-local]'), (el) => {
+    applyTimeZoneTo(el, pref);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.tz-toggle'), (button) => {
+    button.dataset.zone = pref;
+    button.hidden = false;
+    button.setAttribute('aria-pressed', pref === 'local' ? 'true' : 'false');
+    const label = button.querySelector('.tz-label');
+    if (label) {
+      label.textContent = pref === 'local'
+        ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
+        : 'UTC';
+    }
+    button.title = pref === 'local'
+      ? 'Times are shown in this browser’s zone — switch to UTC'
+      : 'Times are shown in UTC — switch to this browser’s zone';
+  });
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest && event.target.closest('.tz-toggle');
+  if (!button) return;
+  writePref(TIMEZONE_KEY, timeZonePref() === 'utc' ? 'local' : 'utc');
+  applyTimeZone(document);
+  /* The charts label their own axis and cursor, so they need telling. */
+  document.dispatchEvent(new CustomEvent('pgconsole:timezone'));
+});
+
 /* ------------------------------------------------------------- Tabs, rows
 
    Delegated so an htmx swap keeps them working, and additive: without
@@ -236,15 +321,21 @@ function initTabs(scope) {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => { initTabs(document); initLogTails(document); });
+  document.addEventListener('DOMContentLoaded', () => {
+    initTabs(document);
+    initLogTails(document);
+    applyTimeZone(document);
+  });
 } else {
   initTabs(document);
   initLogTails(document);
+  applyTimeZone(document);
 }
 document.addEventListener('htmx:afterSwap', (event) => {
   const scope = event.detail && event.detail.elt;
   initTabs(scope);
   initLogTails(scope);
+  applyTimeZone(scope);
 });
 
 

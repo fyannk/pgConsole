@@ -131,6 +131,12 @@ func TestEnhancementIsAdditive(t *testing.T) {
 			t.Errorf("enhancement control is not cloaked: %q", cloaked)
 		}
 	}
+	// The time-zone switch is served hidden. Without the script that
+	// restates them, every time on the page is the UTC the server wrote,
+	// and a control that could not change that would be a lie.
+	if !strings.Contains(body, `<button type="button" class="tz-toggle" hidden`) {
+		t.Error("the time-zone switch is served without its hidden gate")
+	}
 	// Panel bodies are plain visible markup. The enhancement layer hides
 	// them by setting the hidden property at runtime, so the served
 	// document carries no gate at all and is complete without a script.
