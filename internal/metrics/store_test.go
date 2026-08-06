@@ -32,7 +32,7 @@ func TestGaugeRoundTripAndStats(t *testing.T) {
 	t.Parallel()
 	s := testStore()
 	for i, v := range []float64{5, 7, 3} {
-		s.Observe("orders-1", tick(i), map[string]float64{"connections": v})
+		s.Observe("orders-1", tick(i), map[string]float64{"connections": v}, nil)
 	}
 	times, byInstance := s.Range("connections", TierRaw)
 	if len(times) != 3 || len(byInstance["orders-1"]) != 3 {
@@ -53,7 +53,7 @@ func TestCounterBecomesRateAndResetIsAGap(t *testing.T) {
 	// 100 -> 200 over 10s is 10/s; the reset to 50 must not claim a
 	// negative rate, and 50 -> 150 resumes at 10/s.
 	for i, v := range []float64{100, 200, 50, 150} {
-		s.Observe("orders-1", tick(i), map[string]float64{"xact-commit": v})
+		s.Observe("orders-1", tick(i), map[string]float64{"xact-commit": v}, nil)
 	}
 	times, byInstance := s.Range("xact-commit", TierRaw)
 	column := byInstance["orders-1"]
@@ -80,9 +80,9 @@ func TestCounterBecomesRateAndResetIsAGap(t *testing.T) {
 func TestUnsweptSpanReadsAsGap(t *testing.T) {
 	t.Parallel()
 	s := testStore()
-	s.Observe("orders-1", tick(0), map[string]float64{"connections": 5})
+	s.Observe("orders-1", tick(0), map[string]float64{"connections": 5}, nil)
 	// The console was down for 50 ticks.
-	s.Observe("orders-1", tick(50), map[string]float64{"connections": 6})
+	s.Observe("orders-1", tick(50), map[string]float64{"connections": 6}, nil)
 	times, byInstance := s.Range("connections", TierRaw)
 	if len(times) != 3 {
 		t.Fatalf("times = %v, want a synthetic break inside the outage", times)
@@ -99,9 +99,9 @@ func TestRollupAggregatesAndInstanceAlignment(t *testing.T) {
 	// for the second bucket only.
 	for i := 0; i < 12; i++ {
 		values := map[string]float64{"connections": float64(i)}
-		s.Observe("orders-1", tick(i), values)
+		s.Observe("orders-1", tick(i), values, nil)
 		if i >= 6 {
-			s.Observe("orders-2", tick(i), map[string]float64{"connections": 100})
+			s.Observe("orders-2", tick(i), map[string]float64{"connections": 100}, nil)
 		}
 	}
 	times, byInstance := s.Range("connections", TierRollup)
@@ -123,10 +123,10 @@ func TestRollupAggregatesAndInstanceAlignment(t *testing.T) {
 func TestInstanceCapEvictsTheLeastRecentlyObserved(t *testing.T) {
 	t.Parallel()
 	s := testStore()
-	s.Observe("orders-1", tick(0), map[string]float64{"connections": 1})
-	s.Observe("orders-2", tick(1), map[string]float64{"connections": 2})
-	s.Observe("orders-3", tick(2), map[string]float64{"connections": 3})
-	s.Observe("orders-4", tick(3), map[string]float64{"connections": 4})
+	s.Observe("orders-1", tick(0), map[string]float64{"connections": 1}, nil)
+	s.Observe("orders-2", tick(1), map[string]float64{"connections": 2}, nil)
+	s.Observe("orders-3", tick(2), map[string]float64{"connections": 3}, nil)
+	s.Observe("orders-4", tick(3), map[string]float64{"connections": 4}, nil)
 	got := s.Instances()
 	if len(got) != 3 || got[0] != "orders-2" {
 		t.Fatalf("instances = %v, want orders-2..4 after evicting orders-1", got)
@@ -138,7 +138,7 @@ func TestRawRingStaysBounded(t *testing.T) {
 	s := NewStore(Limits{Interval: 10 * time.Second, RawWindow: time.Minute,
 		Retention: time.Hour, RollupEvery: time.Minute, MaxInstances: 2})
 	for i := 0; i < 100; i++ {
-		s.Observe("orders-1", tick(i), map[string]float64{"connections": float64(i)})
+		s.Observe("orders-1", tick(i), map[string]float64{"connections": float64(i)}, nil)
 	}
 	times, _ := s.Range("connections", TierRaw)
 	if len(times) != 6 {
@@ -152,7 +152,7 @@ func TestUnknownSeriesKeyIsRefused(t *testing.T) {
 		t.Fatal("unknown key resolved")
 	}
 	s := testStore()
-	s.Observe("orders-1", tick(0), map[string]float64{"nope": 1})
+	s.Observe("orders-1", tick(0), map[string]float64{"nope": 1}, nil)
 	if times, _ := s.Range("nope", TierRaw); times != nil {
 		t.Fatal("a value outside the catalog was stored")
 	}

@@ -42,11 +42,19 @@ cnpg_pg_stat_database_xact_commit{datname="app"} 1000
 not a metric line
 cnpg_pg_stat_database_blks_hit 42 1700000000000
 irrelevant_metric{x="y"} 9
+# One name, four readings, told apart only by a label.
+cnpg_collector_pg_wal{value="size"} 218103808
+cnpg_collector_pg_wal{value="count"} 13
+cnpg_collector_pg_wal{value="max"} 64
+cnpg_collector_pg_wal{value="slots_max"} NaN
+cnpg_collector_pg_wal_archive_status{value="ready"} 3
+cnpg_collector_pg_wal_archive_status{value="done"} 1
+cnpg_collector_postgres_version{cluster="orders",full="18.4"} 18.4
 `
 
 func TestParseFoldsTheCatalog(t *testing.T) {
 	t.Parallel()
-	values, err := Parse(strings.NewReader(exporterPayload))
+	values, _, err := Parse(strings.NewReader(exporterPayload))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -65,19 +73,64 @@ func TestParseFoldsTheCatalog(t *testing.T) {
 	if _, ok := values["database-size"]; ok {
 		t.Error("an absent metric produced a value")
 	}
-	if len(values) != 4 {
-		t.Errorf("values = %v, want exactly the four served series", values)
+}
+
+// One metric name carries several readings, separated only by a label.
+// Without label matching every one of them would fold into the same
+// number, so wal-disk-size would report the segment count added to the
+// byte total — a wrong answer that still looks like a plausible one.
+func TestParseSeparatesSeriesSharingAMetricNameByLabel(t *testing.T) {
+	t.Parallel()
+	values, instants, err := Parse(strings.NewReader(exporterPayload))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := values["wal-disk-size"]; got != 218103808 {
+		t.Errorf("wal-disk-size = %v, want only the value=\"size\" label set", got)
+	}
+	if got := values["wal-archive-ready"]; got != 3 {
+		t.Errorf("wal-archive-ready = %v, want only the value=\"ready\" label set", got)
+	}
+	if got := instants["wal-segments"]; got != 13 {
+		t.Errorf("wal-segments = %v, want only the value=\"count\" label set", got)
+	}
+	if got := instants["wal-segments-max"]; got != 64 {
+		t.Errorf("wal-segments-max = %v, want only the value=\"max\" label set", got)
+	}
+	if got := instants["archive-done"]; got != 1 {
+		t.Errorf("archive-done = %v, want only the value=\"done\" label set", got)
+	}
+	if got := instants["postgres-version"]; got != 18.4 {
+		t.Errorf("postgres-version = %v, want 18.4", got)
+	}
+	// The exporter reports NaN for "not applicable"; recording it as a
+	// reading would draw a value where the instance claimed none.
+	if _, ok := instants["wal-segments-min"]; ok {
+		t.Error("a label set absent from the payload produced a reading")
 	}
 }
 
 func TestParseSkipsHostileValues(t *testing.T) {
 	t.Parallel()
-	values, err := Parse(strings.NewReader("cnpg_backends_total NaN\ncnpg_pg_replication_lag +Inf\n"))
+	values, instants, err := Parse(strings.NewReader("cnpg_backends_total NaN\ncnpg_pg_replication_lag +Inf\ncnpg_collector_up{cluster=\"orders\"} NaN\n"))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(values) != 0 {
-		t.Fatalf("values = %v, want NaN and Inf refused", values)
+	if len(values) != 0 || len(instants) != 0 {
+		t.Fatalf("values = %v, instants = %v, want NaN and Inf refused", values, instants)
+	}
+}
+
+// A label named "value" must not be matched by one named "othervalue",
+// which a substring search would do.
+func TestParseMatchesWholeLabelNames(t *testing.T) {
+	t.Parallel()
+	_, instants, err := Parse(strings.NewReader(`cnpg_collector_pg_wal{othervalue="count"} 99` + "\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if _, ok := instants["wal-segments"]; ok {
+		t.Error("a label whose name merely ends in the wanted one matched")
 	}
 }
 

@@ -106,8 +106,12 @@ type instrument struct {
 // instanceSeries is one instance's instruments plus its recency, which
 // decides eviction when the instance cap is hit.
 type instanceSeries struct {
-	byKey  map[string]*instrument
-	lastAt int64
+	byKey map[string]*instrument
+	// instant holds the latest reading of each Instants key. One sample
+	// each: a tile states what the exporter says now, so there is
+	// nothing to retain and nothing to roll up.
+	instant map[string]Instant
+	lastAt  int64
 }
 
 // Store is the bounded in-memory metrics window. It is safe for one
@@ -134,18 +138,36 @@ func (s *Store) Retention() time.Duration { return s.limits.Retention }
 // reported for the catalog keys it served. Absent keys record nothing,
 // which reads back as a gap. Counters are converted to per-second rates
 // here; a reset (value went backwards) records nothing for that sweep.
-func (s *Store) Observe(instance string, at time.Time, values map[string]float64) {
+//
+// instants carries the point-in-time readings of the same sweep. They
+// overwrite rather than accumulate, so an instance that stops reporting
+// one keeps its last claim with the timestamp that claim was made — the
+// read side shows that age rather than pretending the value is current.
+func (s *Store) Observe(instance string, at time.Time, values map[string]float64, instants map[string]float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	inst := s.instances[instance]
 	if inst == nil {
 		s.evictForLocked()
-		inst = &instanceSeries{byKey: map[string]*instrument{}}
+		inst = &instanceSeries{byKey: map[string]*instrument{}, instant: map[string]Instant{}}
 		s.instances[instance] = inst
 	}
 	ts := at.Unix()
 	inst.lastAt = ts
+	if inst.instant == nil {
+		// A store primed from a snapshot rebuilds instruments but not
+		// instants, so the first sweep after a restart lands here.
+		inst.instant = map[string]Instant{}
+	}
+
+	for _, def := range Instants {
+		value, ok := instants[def.Key]
+		if !ok {
+			continue
+		}
+		inst.instant[def.Key] = Instant{At: ts, Value: value}
+	}
 
 	for _, def := range Catalog {
 		value, ok := values[def.Key]
@@ -219,6 +241,27 @@ func (s *Store) Instances() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// InstantReadings returns every instance's latest point-in-time claims,
+// keyed by instance then by Instants key. A key an instance has never
+// reported is absent rather than zero: a tile must be able to say "not
+// reported" instead of showing a fabricated 0.
+func (s *Store) InstantReadings() map[string]map[string]Instant {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]map[string]Instant, len(s.instances))
+	for name, inst := range s.instances {
+		if len(inst.instant) == 0 {
+			continue
+		}
+		copied := make(map[string]Instant, len(inst.instant))
+		for key, value := range inst.instant {
+			copied[key] = value
+		}
+		out[name] = copied
+	}
+	return out
 }
 
 // Range reads one series across all instances at the given tier, as

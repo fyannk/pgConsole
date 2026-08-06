@@ -229,7 +229,7 @@ body {
 .manifest .j-null { color: var(--storage); font-weight: 600; }
 
 .metric-chart { margin: var(--space-3) 0 var(--space-2); overflow-x: auto; }
-.metrics-window { align-items: center; display: flex; gap: var(--space-2); margin: var(--space-3) 0 0; }
+.metrics-window { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0 0; }
 /* The cursor readout. Positioned by transform inside uPlot's own over
    box, and pointer-events:none so it can never sit between the pointer
    and the plot it is reporting on. */
@@ -255,16 +255,213 @@ body {
 .metrics-window label { color: var(--text-muted); font-size: var(--text-sm); }
 .metrics-hint { color: var(--text-faint); font-size: var(--text-xs); margin-left: var(--space-3); }
 .metrics-range { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin-left: var(--space-4); }
+@media (max-width: 40rem) { .metrics-range { margin-left: 0; } .metrics-hint { margin-left: 0; } }
 .metrics-range label { color: var(--text-muted); font-size: var(--text-sm); }
 .metrics-range input { font-family: var(--font-mono); font-size: var(--text-xs); }
+/* A rejected range says so on the box rather than leaving Apply looking
+   broken. The message is the border plus the aria state, and the
+   placeholder beside it already states the shape expected. */
+.metrics-range input[aria-invalid="true"] { border-color: var(--bad); color: var(--bad); }
 .metric-chart .u-legend { color: var(--text-muted); font-size: var(--text-xs); }
+
+/* --- The metrics screen's own layout.
+
+   Order of the page is the argument it makes: the reading comes first,
+   its one-line gloss second, and the full explanation only when asked
+   for. The <details> is closed by default and is ordinary markup, so a
+   reader without script opens it exactly the same way, and print shows
+   the summary line either way. */
+
+.metrics-scope {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-4);
+  max-width: 90ch;
+}
+
+.metrics-group { margin: 0 0 var(--space-6); }
+.metrics-group-head { border-bottom: 1px solid var(--border); margin-bottom: var(--space-4); }
+.metrics-group-head h2 { font-size: var(--text-lg); margin: 0 0 var(--space-1); }
+.metrics-group-head p {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-3);
+  max-width: 90ch;
+}
+
+/* Two panels abreast where there is room. Forty charts stacked one per
+   row is a scroll nobody finishes; below the breakpoint they stack
+   anyway, which is the right shape for a phone. */
+.metrics-group { align-items: start; display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(min(30rem, 100%), 1fr)); }
+.metrics-group-head { grid-column: 1 / -1; }
+.metrics-group .tiles { grid-column: 1 / -1; }
+.metric-panel { margin: 0; }
+/* The global table floor exists so a wide table scrolls rather than
+   shredding its words. This one is five short columns of numbers, and
+   in a half-width panel the floor triggers a scrollbar under a table
+   that fits. */
+.metric-panel .table-scroll > table { min-width: 0; }
+
+/* Tiles: one point-in-time claim, or one per instance on the tab that
+   covers them all. No colour carries meaning here — every reading is a
+   word or a number, because a tile that said "green" would be the
+   console judging rather than reporting. */
+/* Between one and five across, never more. auto-fill alone packs as
+   many tracks as the floor allows, which on a wide screen made twelve
+   columns barely wider than the words in them — every reading broke
+   across two or three lines. Giving the track a floor of one fifth of
+   the row caps the count at five and lets each tile take the slack,
+   and the min(100%, …) keeps a single tile from overflowing a narrow
+   screen. The subtraction is the four gaps between five tracks.
+
+   Rows are 1fr so every tile is the same height, whatever the length
+   of its summary. */
+.tiles {
+  display: grid;
+  gap: var(--space-3);
+  grid-auto-rows: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, max(15rem, (100% - 4 * var(--space-3)) / 5)), 1fr));
+}
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-3);
+}
+.tile h3 { font-size: var(--text-sm); font-weight: 600; margin: 0 0 var(--space-2); }
+.tile-readings { display: grid; gap: var(--space-1) var(--space-3); grid-template-columns: max-content 1fr; margin: 0; }
+.tile-readings dt { color: var(--text-muted); font-size: var(--text-xs); padding-top: 0.15rem; }
+.tile-readings dd { display: flex; flex-direction: column; margin: 0; }
+/* One step down from the panel scale: at five tiles across, --text-base
+   in a monospace face broke a timestamp across two lines, and a date
+   that wraps mid-value is harder to read than a slightly smaller one
+   that does not. */
+.tile-value { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; }
+.tile-age { color: var(--text-faint); font-size: var(--text-xs); }
+/* One sweep produced every reading in the tile, so the time it was
+   claimed is stated once for the tile rather than once per line. */
+.tile-observed { color: var(--text-faint); font-size: var(--text-xs); margin: 0; }
+/* One instance on a pod tab: the reading is the tile, so the instance
+   name beside it is noise. */
+.tile-readings:has(dt:only-of-type) dt { display: none; }
+.tile-readings:has(dt:only-of-type) { grid-template-columns: 1fr; }
+/* The reading is the tile's payload, so it sits on the floor with the
+   observation line under it. That keeps the readings of a row aligned
+   however much gloss each tile carries above them, and it puts the
+   "observed" line where the chart panels put their own footer. */
+.tile-readings { margin-top: auto; padding-top: var(--space-3); }
+.tile-observed { margin-top: var(--space-2); }
+
+.metric-summary { color: var(--text-muted); font-size: var(--text-sm); margin: 0 0 var(--space-2); max-width: 80ch; }
+
+/* The explanation is a popover, not a disclosure: opening one used to
+   push everything below it down the page, which on a screen of seventy
+   panels loses the reader's place. The browser owns the open, the
+   close, the light dismiss and the focus; this only says what it looks
+   like. With no anchor positioning it lands centred, which is
+   predictable in a way a cursor-tracked tooltip is not — and it is
+   readable at a length no tooltip could carry. */
+.metric-note-open {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  padding: var(--space-1) 0;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+}
+.metric-note-open::before { content: "\24D8"; font-size: 1.1em; margin-right: var(--space-2); text-decoration: none; }
+.metric-note-open:hover { color: var(--accent); }
+
+.metric-note[popover] {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px oklch(0% 0 0 / 0.28);
+  color: var(--text);
+  max-height: 82vh;
+  max-width: min(44rem, 92vw);
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+/* Light: the explanation is read against the reading it explains, so
+   the page behind it should stay legible rather than be dismissed. */
+.metric-note[popover]::backdrop { background: oklch(0% 0 0 / 0.25); }
+.metric-note-head { align-items: flex-start; display: flex; gap: var(--space-3); }
+.metric-note-head h4 { font-size: var(--text-lg); margin: 0; }
+.metric-note-lead { color: var(--text-muted); font-size: var(--text-sm); margin: var(--space-2) 0 0; }
+.metric-note dl.facts { margin: var(--space-3) 0 0; }
+.metric-note dl.facts dd { font-family: var(--font-ui); max-width: 80ch; }
+@media (max-width: 40rem) {
+  .metric-note dl.facts { grid-template-columns: 1fr; }
+  .metric-note dl.facts dt { border-top: 1px solid var(--border); padding-bottom: 0; }
+  .metric-note dl.facts dd { border-top: 0; padding-top: 0; }
+}
+
+/* ---------------------------------------------------------- Callouts
+
+   A standing statement about the screen itself, not about the cluster —
+   which is why it carries no [data-state] and no snapshot: it would say
+   the same thing about an empty console.
+
+   The rule is the same one the state tokens follow: colour is never the
+   only signal. The lead sentence says what this is in words, so the red
+   is emphasis on a message that is already legible in monochrome. Only
+   the border and the lead take the hue; the body stays body text,
+   because a paragraph of saturated red is a paragraph people skip. */
+.callout {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+}
+/* No measure cap: this one is a standing warning about the screen,
+   not body copy to be read at leisure, and it should occupy the
+   width it is given rather than trail off two thirds across. */
+.callout p { margin: 0 0 var(--space-2); }
+.callout p:last-child { margin-bottom: 0; }
+.callout-lead { font-weight: 700; }
+.callout-bad { border-color: color-mix(in oklab, var(--bad) 40%, var(--border)); border-left-color: var(--bad); }
+.callout-bad .callout-lead { color: var(--bad); }
+.callout-bad .callout-lead::before { content: "\26A0"; margin-right: var(--space-2); }
+.callout-bad strong { color: var(--bad); }
+
+/* One origin for the whole screen, stated once at its foot. Every claim
+   above it comes from the same place, and seventy repetitions of that
+   sentence read as furniture rather than as attribution. */
+.metrics-origin { border-top: 1px solid var(--border); margin-top: var(--space-6); padding-top: var(--space-3); }
+.metrics-origin .origin { margin: 0; max-width: 100ch; }
 
 /* ------------------------------------------------------------- Tabs
 
    The panels are all served; the tablist only shows one at a time. With
    no script every panel stays visible, so nothing is hidden behind JS. */
 
-.tabs { border-bottom: 1px solid var(--border); display: flex; gap: var(--space-1); margin: 0 0 var(--space-4); }
+/* The metrics tablist is one tab per instance, so its width follows the
+   cluster's size rather than the design's. It scrolls inside itself on a
+   narrow screen instead of pushing the document sideways. */
+/* overflow-y: hidden because the buttons hang 1px below the container
+   to sit their underline on its border, and a bare overflow-x makes a
+   scroll container in both axes — which put a stub vertical scrollbar
+   beside the tabs for that one pixel. */
+.tabs {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-4);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 
 .tabs button {
   background: transparent;
@@ -272,6 +469,7 @@ body {
   border-bottom: 2px solid transparent;
   color: var(--text-muted);
   cursor: pointer;
+  flex: 0 0 auto;
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: 600;

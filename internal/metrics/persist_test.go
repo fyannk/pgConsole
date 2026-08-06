@@ -66,7 +66,7 @@ func TestSnapshotRoundTripRestoresTheWindow(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		a.Observe("orders-1", tick(i), map[string]float64{
 			"connections": float64(i), "xact-commit": float64(1000 + i*100),
-		})
+		}, map[string]float64{"nodes-used": 3})
 	}
 	clock := &persistClock{now: tick(12)}
 	pa, err := OpenPersister(path, a, clock, logger)
@@ -95,7 +95,7 @@ func TestSnapshotRoundTripRestoresTheWindow(t *testing.T) {
 	// The counter baseline is not persisted: the first post-restart
 	// sweep claims no rate, so the downtime reads as a gap.
 	before, _ := b.Range("xact-commit", TierRaw)
-	b.Observe("orders-1", tick(20), map[string]float64{"xact-commit": 9999})
+	b.Observe("orders-1", tick(20), map[string]float64{"xact-commit": 9999}, nil)
 	after, _ := b.Range("xact-commit", TierRaw)
 	if len(after) != len(before) {
 		t.Fatal("a restored counter claimed a rate across the restart")
@@ -142,7 +142,7 @@ func TestRunTakesAFinalSnapshotOnShutdown(t *testing.T) {
 	}
 	// Samples land after the last periodic flush; only the final
 	// shutdown snapshot can carry them.
-	store.Observe("orders-1", tick(1), map[string]float64{"connections": 5})
+	store.Observe("orders-1", tick(1), map[string]float64{"connections": 5}, nil)
 	if err := p.Run(context.Background()); !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("Run: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestImportClampsToTheConfiguredBounds(t *testing.T) {
 		Retention: 24 * time.Hour, RollupEvery: time.Minute, MaxInstances: 8})
 	for i := 0; i < 100; i++ {
 		for n, name := range []string{"a-1", "a-2", "a-3", "a-4"} {
-			big.Observe(name, tick(i+n), map[string]float64{"connections": float64(i)})
+			big.Observe(name, tick(i+n), map[string]float64{"connections": float64(i)}, nil)
 		}
 	}
 	small := NewStore(Limits{Interval: 10 * time.Second, RawWindow: time.Minute,

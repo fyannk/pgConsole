@@ -273,8 +273,14 @@ scans, and the tests. In short:
   htmx 2.x owns same-origin HTML navigation and atomic screen refresh;
   the Alpine CSP build owns local component state (never the standard
   Alpine build, which would require `script-src 'unsafe-eval'`); uPlot
-  draws the metrics charts from series the document already carries and
-  a same-origin JSON poll. No layer draws the diagram of record: that
+  draws the metrics charts from a same-origin JSON fetch of the series
+  endpoint, lazily, as each panel approaches the viewport on the visible
+  tab. That fetch replaced an inlined payload once the screen grew to a
+  full catalog on a tab per instance: inlining put every instrument's
+  whole raw window into the document several times over, nearly all of
+  it for tabs nobody opened. The no-script contract is unchanged and is
+  met the same way — the window summary is served as text beside every
+  chart, on every tab. No layer draws the diagram of record: that
   ships finished, so a reader without scripting sees the finished
   drawing and never an empty frame. All are served from the binary,
   htmx evaluation and browser history caching are disabled, and no
@@ -284,6 +290,16 @@ scans, and the tests. In short:
   window summary is stated in text beside it, and no state word is ever
   replaced by a colour or a mark. `make test-ui` enforces all of that
   in a browser.
+- **Absolute times are rendered in UTC and restated, never replaced.**
+  Every absolute moment the server renders goes through the `Stamp`
+  view type and the `stamp` template: the UTC text is the claim, and it
+  is what a reader with no script and every printed page sees. The
+  RFC3339 twin beside it exists only so `console.js` may restate that
+  same instant in the reader's own zone, which the top bar's toggle
+  switches and persists. The rewrite is opt-in per element
+  (`data-local`), because the console also renders relative ages inside
+  `<time datetime>` — "4m ago" has no zone, and converting it would
+  change what the cell says rather than how it is spelled.
 - Every vendored browser asset is MIT-licensed and never patched:
   replacing one means taking a new upstream release whole.
 

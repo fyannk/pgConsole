@@ -189,6 +189,9 @@ function selectTab(button) {
     const panel = document.getElementById(b.dataset.tab);
     if (panel) panel.hidden = !on;
   });
+  /* A panel that was hidden measured zero wide, so anything that sizes
+     itself to its container had to wait for this. */
+  document.dispatchEvent(new CustomEvent('pgconsole:tabshown', { detail: { list: list } }));
 }
 
 document.addEventListener('click', (event) => {

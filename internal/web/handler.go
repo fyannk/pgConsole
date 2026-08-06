@@ -178,6 +178,9 @@ type MetricsSource interface {
 	Range(key string, tier metrics.Tier) (times []int64, byInstance map[string][]*float64)
 	// SeriesStats summarises one series per instance.
 	SeriesStats(key string) map[string]metrics.Stats
+	// InstantReadings returns every instance's latest point-in-time
+	// claims, keyed by instance then by Instants key.
+	InstantReadings() map[string]map[string]metrics.Instant
 	// Interval is the scrape cadence, for the pages to state.
 	Interval() time.Duration
 	// Retention is the rollup window, for the pages to state.

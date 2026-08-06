@@ -113,18 +113,58 @@ func uiMetricsSource() *metrics.Store {
 		}
 		at := base.Add(time.Duration(i) * 10 * time.Second)
 		phase := float64(i) / 30
+		// The primary carries the primary-only families too, so the
+		// harness exercises a panel that is populated on one tab and
+		// honestly empty on the others.
 		store.Observe("orders-1", at, map[string]float64{
-			"connections":   12 + 4*math.Sin(phase),
-			"xact-commit":   float64(100000 + i*220),
-			"database-size": 2<<30 + float64(i)*4096,
+			"connections":        12 + 4*math.Sin(phase),
+			"xact-commit":        float64(100000 + i*220),
+			"xact-rollback":      float64(400 + i*3),
+			"blocks-hit":         float64(900000 + i*5100),
+			"blocks-read":        float64(12000 + i*40),
+			"backends-waiting":   math.Max(0, 3*math.Sin(phase/4)),
+			"max-tx-duration":    4 + 2*math.Sin(phase/5),
+			"database-size":      2<<30 + float64(i)*4096,
+			"wal-bytes":          float64(50 << 20 * i),
+			"wal-disk-size":      float64(208 << 20),
+			"wal-archive-ready":  math.Max(0, 6*math.Sin(phase/6)),
+			"wal-archived":       float64(1200 + i*2),
+			"streaming-replicas": 2,
+			"xid-age":            float64(120000 + i*40),
+		}, map[string]float64{
+			"postgres-version":       18.4,
+			"instance-up":            1,
+			"in-recovery":            0,
+			"wal-receiver-up":        0,
+			"postmaster-start":       float64(base.Add(-72 * time.Hour).Unix()),
+			"nodes-used":             3,
+			"sync-replicas-expected": 1,
+			"sync-replicas-observed": 1,
+			"last-archived-time":     float64(at.Add(-30 * time.Second).Unix()),
+			"last-backup":            float64(base.Add(-5 * time.Hour).Unix()),
+			"last-failed-backup":     0,
+			"wal-segments":           13,
+			"slots-active":           2,
 		})
 		store.Observe("orders-2", at, map[string]float64{
 			"connections":     5 + 2*math.Sin(phase/2),
 			"replication-lag": 0.2 + 0.15*math.Sin(phase/3),
+		}, map[string]float64{
+			"postgres-version": 18.4,
+			"instance-up":      1,
+			"in-recovery":      1,
+			"wal-receiver-up":  1,
+			"postmaster-start": float64(base.Add(-71 * time.Hour).Unix()),
 		})
 		store.Observe("orders-3", at, map[string]float64{
 			"connections":     4,
 			"replication-lag": 0.4 + 0.3*math.Sin(phase/4),
+		}, map[string]float64{
+			"postgres-version": 18.4,
+			"instance-up":      1,
+			"in-recovery":      1,
+			"wal-receiver-up":  1,
+			"postmaster-start": float64(base.Add(-70 * time.Hour).Unix()),
 		})
 	}
 	return store
