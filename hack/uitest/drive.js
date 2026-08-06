@@ -29,6 +29,18 @@ const STATES = {
   empty: `http://${HOST}:${BASE + 3}/`,
 };
 
+// Every screen is admitted by the forwarded level, so a context that
+// sends no identity is answered 403 and a denied page on every route —
+// on which the accessibility and viewport checks below pass vacuously
+// rather than failing. Each context states an identity for that reason;
+// poweruser is the lowest level that reaches every screen these checks
+// name, and deliberately not dba, so nothing here depends on a screen
+// only the highest level can see.
+const IDENTITY = {
+  'X-Forwarded-User': 'operator',
+  'X-PgToolBox-Level': 'poweruser',
+};
+
 const results = [];
 
 /**
@@ -95,7 +107,7 @@ async function checkEnhancement(browser) {
   // gate the history flow below exercises.
   const ctx = await browser.newContext({
     viewport: { width: 1440, height: 1200 },
-    extraHTTPHeaders: { 'X-Forwarded-User': 'operator', 'X-PgToolBox-Level': 'poweruser' },
+    extraHTTPHeaders: IDENTITY,
   });
   const page = await ctx.newPage();
   const errors = watch(page);
@@ -266,6 +278,7 @@ async function checkEnhancement(browser) {
 async function checkNoScript(browser) {
   const ctx = await browser.newContext({
     javaScriptEnabled: false, viewport: { width: 1440, height: 1400 },
+    extraHTTPHeaders: IDENTITY,
   });
   const page = await ctx.newPage();
   await page.goto(STATES.healthy, { waitUntil: 'domcontentloaded' });
@@ -316,24 +329,25 @@ async function checkNoScript(browser) {
   check('auto-refresh hidden without JavaScript',
     (await page.locator('.refresh').isVisible()) === false);
 
-  const state = await page.locator('dl.target dd[data-state]').innerText();
+  // The snapshot line states how fresh the reading is. It used to sit in
+  // the topbar's `dl.target`; the shell rebuild moved it onto the screen
+  // that carries the reading, so it is now the origin footer's mark.
+  const state = await page.locator('p.origin span[data-state]').innerText();
   check('state word present without JavaScript', /current/.test(state), state);
 
-
-  // The topbar snapshot must carry its state hue as well as its word.
-  // `dl.target dd` outranks the bare [data-state] tokens on specificity,
-  // so the colour is restated for the topbar; when that restatement is
-  // missing the mark still renders and only the hue silently flattens to
-  // the body text colour, which no rendered-string test can see.
+  // The snapshot must carry its state hue as well as its word. When the
+  // `[data-state]` rule is outranked the mark still renders and only the
+  // hue silently flattens to the body text colour, which no
+  // rendered-string test can see.
   const hue = await page.evaluate(() => {
-    const dd = document.querySelector('dl.target dd[data-state]');
+    const mark = document.querySelector('p.origin span[data-state]');
     const body = document.querySelector('body');
     return {
-      state: getComputedStyle(dd).color,
+      state: getComputedStyle(mark).color,
       text: getComputedStyle(body).color,
     };
   });
-  check('topbar snapshot carries its state hue, not the body text colour',
+  check('the snapshot carries its state hue, not the body text colour',
     hue.state !== hue.text, `state ${hue.state} vs text ${hue.text}`);
 
   await page.screenshot({ path: path.join(OUT, 'healthy-nojs-1440.png'), fullPage: true });
@@ -350,6 +364,7 @@ async function checkStates(browser) {
     for (const [name, url] of Object.entries(STATES)) {
       const ctx = await browser.newContext({
         colorScheme: scheme, viewport: { width: 1440, height: 1400 },
+        extraHTTPHeaders: IDENTITY,
       });
       const page = await ctx.newPage();
       const errors = watch(page);
@@ -381,7 +396,9 @@ async function checkStates(browser) {
  */
 async function checkResponsive(browser) {
   for (const width of [375, 768, 1024, 1440]) {
-    const ctx = await browser.newContext({ viewport: { width, height: 1200 } });
+    const ctx = await browser.newContext({
+      viewport: { width, height: 1200 }, extraHTTPHeaders: IDENTITY,
+    });
     const page = await ctx.newPage();
     await page.goto(STATES.healthy, { waitUntil: 'networkidle' });
     await page.waitForTimeout(200);
