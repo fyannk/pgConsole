@@ -777,10 +777,14 @@ func declaredState(d DeclaredView) string {
 	}
 }
 
-// buildDatabasesDrawing derives the declared-objects schema: the four
-// declarative kinds in one super-frame, publications and subscriptions
-// wired to the databases they name, and the whole region declared into
-// the cluster. Nil when nothing is declared.
+// buildDatabasesDrawing derives the declared-objects schema: the
+// databases and what lives in them on the left, the cluster they are
+// declared into in the middle, and the roles on the right. Nil when
+// nothing is declared.
+//
+// Only objects naming this cluster reach here at all — the boundary in
+// internal/kube drops the rest, so a role declared into a different
+// cluster in the same namespace is never drawn as if it were ours.
 func buildDatabasesDrawing(p *Page) *TopologyView {
 	if p.Cluster == nil || p.Cluster.Absent || p.Databases == nil {
 		return nil
@@ -955,21 +959,28 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 
 	root := add("cluster", "primary", "", clusterRootRows(p))
 
-	// --- Placement: the root, then two columns in one super-frame. ---
+	// --- Placement: databases left, the cluster between them, roles
+	// right.
+	//
+	// There is no super-frame. One dotted box drawn round everything
+	// said only "these are declared into the cluster", which is true of
+	// every object on the screen and so distinguished nothing; each
+	// group now says it for itself by wiring to the cluster.
+	//
+	// The publications and subscriptions stay with the databases they
+	// name, stacked under them in the left column, so those wires never
+	// leave that column and never cross the cluster.
 
 	frameW := chWBox + 2*grpPad
-	superPad := float64(grpPad)
 	top := float64(grpMargin)
-	rootX := float64(grpMargin) + grpPad
-	superX := rootX + chWBox + grpAlley + superPad
-	content := top + grpLabelBand + superPad
+	content := top
 
 	var frames []TopoFrame
-	stackFrames := func(x float64, groups []struct {
+	// stackFrames places a column of frames at x and returns its bottom.
+	stackFrames := func(x, y float64, groups []struct {
 		label string
 		boxes []*TopoNode
 	}) float64 {
-		y := content
 		for _, g := range groups {
 			if len(g.boxes) == 0 {
 				continue
@@ -981,39 +992,43 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 				boxY += float64(b.H) + chBoxGap
 			}
 			frames = append(frames, TopoFrame{
-				Label: g.label,
-				X:     int(x), Y: int(y), W: frameW, H: int(boxY - chBoxGap + grpPad - y),
+				Label: g.label, Kind: "cluster",
+				X: int(x), Y: int(y), W: frameW, H: int(boxY - chBoxGap + grpPad - y),
 			})
 			y = boxY - chBoxGap + grpPad + chFrameGap
 		}
 		return y - chFrameGap
 	}
-	col0 := superX
-	col1 := superX + float64(frameW) + grpAlley*0.7
-	bottom0 := stackFrames(col0, []struct {
+
+	// Left margin enough for the publication and subscription wires to
+	// run up the outside of their own column without hugging the
+	// viewBox edge.
+	leftX := float64(grpMargin) + 16
+	rootX := leftX + float64(frameW) + grpAlley
+	rightX := rootX + chWBox + grpAlley
+
+	leftBottom := stackFrames(leftX, content, []struct {
 		label string
 		boxes []*TopoNode
-	}{{"Databases", dbBoxes}, {"Database roles", roleBoxes}})
-	bottom1 := stackFrames(col1, []struct {
+	}{{"Databases", dbBoxes}, {"Publications", pubBoxes}, {"Subscriptions", subBoxes}})
+	rightBottom := stackFrames(rightX, content, []struct {
 		label string
 		boxes []*TopoNode
-	}{{"Publications", pubBoxes}, {"Subscriptions", subBoxes}})
-	superBottom := bottom0
-	if bottom1 > superBottom {
-		superBottom = bottom1
-	}
-	superW := float64(frameW)
-	if len(pubBoxes) > 0 || len(subBoxes) > 0 {
-		superW = col1 - superX + float64(frameW)
-	}
-	super := TopoFrame{
-		Label: "Declared into the cluster", Kind: "cluster",
-		X: int(superX - superPad), Y: int(top),
-		W: int(superW + 2*superPad), H: int(superBottom + superPad - top),
+	}{{"Database roles", roleBoxes}})
+
+	// The frame each group wires to the cluster from, remembered by
+	// value: frames reallocates as columns are added.
+	frameByLabel := map[string]TopoFrame{}
+	for _, f := range frames {
+		frameByLabel[f.Label] = f
 	}
 
+	columnsBottom := leftBottom
+	if rightBottom > columnsBottom {
+		columnsBottom = rightBottom
+	}
 	root.X = int(rootX)
-	root.Y = int((top+superBottom+superPad)/2) - root.H/2
+	root.Y = int((content+columnsBottom)/2) - root.H/2
 	if root.Y < int(content) {
 		root.Y = int(content)
 	}
@@ -1025,58 +1040,77 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 	var edges []TopoEdge
 	var links []TopoGraphLink
 	rootCy := cy(root)
-	edges = append(edges, TopoEdge{
-		Kind: "refs",
-		Path: roundedRoute(corners([]topoPoint{
-			{float64(super.X), rootCy},
-			{float64(root.X + root.W), rootCy},
-		})),
-		Label:  "declares",
-		LabelX: (super.X + root.X + root.W) / 2,
-		LabelY: int(rootCy) - 7,
-	})
-	links = append(links, TopoGraphLink{Source: "declared", Target: "cluster", Kind: "refs"})
 
-	// Publications and subscriptions against the database they name.
-	// Two buses in the inter-column gap, so the two relations never
-	// ride the same vertical.
-	ownsBus := col1 - grpAlley*0.45
-	replBus := col1 - grpAlley*0.2
+	// Each group states for itself that it is declared into the
+	// cluster, which is what the removed super-frame used to say once
+	// for all of them.
+	declares := func(label, id string, fromRight bool) {
+		f, ok := frameByLabel[label]
+		if !ok {
+			return
+		}
+		frameCy := float64(f.Y) + float64(f.H)/2
+		from, to := float64(f.X+f.W), float64(root.X)
+		if fromRight {
+			from, to = float64(f.X), float64(root.X+root.W)
+		}
+		edges = append(edges, TopoEdge{Kind: "refs", Path: roundedRoute(corners([]topoPoint{
+			{from, frameCy}, {(from + to) / 2, frameCy}, {(from + to) / 2, rootCy}, {to, rootCy},
+		}))})
+		links = append(links, TopoGraphLink{Source: id, Target: "cluster", Kind: "refs"})
+	}
+	declares("Databases", "databases", false)
+	declares("Database roles", "roles", true)
+
+	// Publications and subscriptions against the database they name,
+	// in the gutter left of their own column.
+	inBus := leftX - 10
 	for _, w := range pubWires {
 		db := byDatabase[w.db]
 		if db == nil {
 			continue
 		}
+		kind := "owns"
 		if w.sub {
-			edges = append(edges, TopoEdge{Kind: "replicate", Path: roundedRoute(corners([]topoPoint{
-				{float64(w.node.X), cy(w.node)}, {replBus, cy(w.node)},
-				{replBus, cy(db)}, {float64(db.X + db.W), cy(db)},
-			}))})
-			links = append(links, TopoGraphLink{Source: w.node.ID, Target: db.ID, Kind: "replicate"})
-		} else {
-			edges = append(edges, TopoEdge{Kind: "owns", Path: roundedRoute(corners([]topoPoint{
-				{float64(db.X + db.W), cy(db)}, {ownsBus, cy(db)},
-				{ownsBus, cy(w.node)}, {float64(w.node.X), cy(w.node)},
-			}))})
-			links = append(links, TopoGraphLink{Source: db.ID, Target: w.node.ID, Kind: "owns"})
+			kind = "replicate"
 		}
+		edges = append(edges, TopoEdge{Kind: kind, Path: roundedRoute(corners([]topoPoint{
+			{float64(w.node.X), cy(w.node)}, {inBus, cy(w.node)},
+			{inBus, cy(db)}, {float64(db.X), cy(db)},
+		}))})
+		links = append(links, TopoGraphLink{Source: w.node.ID, Target: db.ID, Kind: kind})
 	}
 
-	// A database and the role that owns it. Both frames are stacked in
-	// the same column, so this runs in the super frame's left gutter
-	// rather than the alley the other two relations already use, and
-	// enters both boxes on their left edge. The relation is declared —
-	// the Database object names the role — so it is drawn, not inferred
-	// from anything read out of PostgreSQL.
-	ownerBus := superX - superPad/2
-	for _, w := range ownerOf {
+	// A database and the role that owns it sit on opposite sides of the
+	// cluster, so these route over it: out of the role's left edge, up
+	// the right gutter, across a lane above the cluster box, down the
+	// left gutter, into the database's right edge.
+	//
+	// Leaving by the side rather than the top is what makes it work.
+	// Both columns are vertical stacks, so a wire entering a box from
+	// above would have to pass through every box stacked over it; and
+	// every box in a column shares one centre x, so three wires drawn
+	// over the top would have laid down on each other and read as one.
+	// The gutters are empty, and each wire takes its own x and its own
+	// lane there.
+	laneBase := rootCy - float64(root.H)/2 - 14
+	for i, w := range ownerOf {
 		role := byRole[w.role]
 		if role == nil {
 			continue // owner declared, no DatabaseRole observed for it
 		}
+		offset := float64(10 + i*8)
+		lane := laneBase - float64(i)*9
+		if lane < content+4 {
+			lane = content + 4
+		}
 		edges = append(edges, TopoEdge{Kind: "owner", Path: roundedRoute(corners([]topoPoint{
-			{float64(role.X), cy(role)}, {ownerBus, cy(role)},
-			{ownerBus, cy(w.db)}, {float64(w.db.X), cy(w.db)},
+			{float64(role.X), cy(role)},
+			{rootX + chWBox + offset, cy(role)},
+			{rootX + chWBox + offset, lane},
+			{leftX + float64(frameW) + offset, lane},
+			{leftX + float64(frameW) + offset, cy(w.db)},
+			{float64(w.db.X + w.db.W), cy(w.db)},
 		}))})
 		links = append(links, TopoGraphLink{Source: role.ID, Target: w.db.ID, Kind: "owner"})
 	}
@@ -1084,9 +1118,9 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 	view.Edges = edges
 	view.Graph.Links = links
 	view.Legend = topoLegend(links)
-	view.Frames = append([]TopoFrame{super}, frames...)
+	view.Frames = frames
 
-	right := 0
+	right := root.X + root.W
 	bottom := root.Y + root.H
 	for _, f := range view.Frames {
 		right = maxI(right, f.X+f.W)
@@ -1099,6 +1133,6 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
-	view.Caption = "Declarations and their reconciliation verdicts, exactly as the operator reports them: a green border marks an applied declaration, a red one a failed one. Publications and subscriptions are wired to the database they name, and each database to the role it declares as its owner. Nothing here is read from PostgreSQL."
+	view.Caption = "Declarations and their reconciliation verdicts, exactly as the operator reports them: a green border marks an applied declaration, a red one a failed one. Only objects naming this cluster appear at all. Each group is wired to the cluster it is declared into, publications and subscriptions to the database they name, and each database to the role it declares as its owner. Nothing here is read from PostgreSQL."
 	return view
 }
