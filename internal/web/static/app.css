@@ -831,8 +831,12 @@ dialog.raw .panel-body { padding: var(--space-4); }
   stroke-width: 1.5;
   width: 1rem;
 }
-.sidebar-group-label { color: var(--text-muted); font-weight: 600; }
-.sidebar-sub .sidebar-link { color: var(--text-muted); }
+/* Hierarchy comes from weight and indent, not from dimming. Every entry
+   in the map is a destination this reader may open — muting them made
+   the whole column read as unavailable, which is exactly what the
+   disabled treatment below is for. */
+.sidebar-group-label { color: var(--text); font-weight: 650; }
+.sidebar-sub .sidebar-link { color: var(--text); }
 .sidebar-sub .sidebar-link:hover { color: var(--accent); }
 
 /* A destination this snapshot does not carry is shown, not hidden, so
