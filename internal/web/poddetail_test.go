@@ -261,3 +261,29 @@ func TestPoolerPodDetailUsesTheirOwnRoster(t *testing.T) {
 		t.Error("a pooler pod claims the cluster's write endpoint")
 	}
 }
+
+// The follow poll asks the raw route for the tail alone. Serving it the
+// rendered page instead is invisible on first paint — the server-side
+// content is right — and only shows up when the first refresh writes
+// the page's own markup into the log pane.
+func TestRawLogTailsServeTextNotAPage(t *testing.T) {
+	t.Parallel()
+	h := newPodDetailHandler(t, podDetailSources(), podDetailHistory())
+	for _, url := range []string{
+		"/logs/orders-1?raw=1",
+		"/poolers/logs/orders-pool-rw-abc?raw=1",
+	} {
+		rec := getWithHeaders(t, h, url,
+			map[string]string{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "dba"})
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s status = %d, want 200", url, rec.Code)
+			continue
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+			t.Errorf("%s content-type = %q, want text/plain", url, ct)
+		}
+		if strings.Contains(rec.Body.String(), "<html") || strings.Contains(rec.Body.String(), "<pre") {
+			t.Errorf("%s served markup into the log pane", url)
+		}
+	}
+}

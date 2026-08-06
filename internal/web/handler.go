@@ -685,12 +685,15 @@ var podNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`
 
 // serveRawTail writes the bounded tail as plain text. It sits behind
 // the same requireLevel gate as the page form of the route.
-func (h *Handler) serveRawTail(w http.ResponseWriter, r *http.Request, pod string) {
+// tail is the roster's own membership-proving fetch: the two rosters
+// are separate ownership chains, and the raw route must not be the way
+// round one of them.
+func (h *Handler) serveRawTail(w http.ResponseWriter, r *http.Request, pod string, tail func(context.Context, string) (observe.LogTail, error)) {
 	if h.tailer == nil {
 		http.Error(w, "no Kubernetes access", http.StatusServiceUnavailable)
 		return
 	}
-	tail, err := h.tailer.TailLogs(r.Context(), pod)
+	tailed, err := tail(r.Context(), pod)
 	if err != nil {
 		if redact.Categorize(err) == redact.CategoryNotFound {
 			http.NotFound(w, r)
@@ -701,7 +704,7 @@ func (h *Handler) serveRawTail(w http.ResponseWriter, r *http.Request, pod strin
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(tail.Content))
+	_, _ = w.Write([]byte(tailed.Content))
 }
 
 // handleLogs serves one bounded, on-demand log tail for a verified
@@ -717,7 +720,7 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Query().Get("raw") == "1" {
-		h.serveRawTail(w, r, pod)
+		h.serveRawTail(w, r, pod, h.tailer.TailLogs)
 		return
 	}
 	view := LogsView{
@@ -769,6 +772,14 @@ func (h *Handler) handlePoolerLogs(w http.ResponseWriter, r *http.Request) {
 	pod := r.PathValue("pod")
 	if !podNamePattern.MatchString(pod) {
 		http.NotFound(w, r)
+		return
+	}
+	// The follow poll asks for the tail alone. Without this the poller
+	// was handed the whole HTML page and wrote it into the log pane —
+	// the screen looked right until its first refresh, then filled with
+	// its own markup.
+	if r.URL.Query().Get("raw") == "1" {
+		h.serveRawTail(w, r, pod, h.tailer.TailPoolerLogs)
 		return
 	}
 	view := LogsView{
