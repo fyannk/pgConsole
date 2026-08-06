@@ -14,7 +14,7 @@
         <p class="meta" data-state="{{stateToken .Meta.State}}">sidecar contact: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}){{if .ContactFailure}} — {{.ContactFailure}}{{end}}</p>
       </div>
       <div class="panel-body">
-      <p class="state">This section is <strong>ObjectStoreViewer&#39;s</strong> report, read over the sidecar API — not the operator&#39;s account of the same backups. pgConsole never reads object storage itself, so everything below is the independent observer&#39;s word about what the repository actually holds.{{if $.Links}} To browse the objects themselves, open ObjectStoreViewer from the sidebar.{{end}}</p>
+      <p class="state">This section is <strong>ObjectStoreViewer&#39;s</strong> report, read over the sidecar API — not the operator&#39;s account of the same backups. pgConsole never reads object storage itself, so everything below is the independent observer&#39;s word about what the repository actually holds.{{if $.ViewerLinked}} To browse the objects themselves, open ObjectStoreViewer from the sidebar.{{end}}</p>
       {{- if .SourceStale}}
       <p class="state" data-state="stale">stale: the sidecar reports its evidence no longer reflects the latest refresh attempt</p>
       {{- end}}

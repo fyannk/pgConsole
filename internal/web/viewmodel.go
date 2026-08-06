@@ -794,6 +794,12 @@ type Page struct {
 	Panels []Panel
 	// Links are the configured link-outs, possibly empty.
 	Links []Link
+	// ViewerLinked reports that the ObjectStoreViewer link-out in
+	// particular is configured — not merely that some sibling tool is.
+	// The evidence screen tells a reader to open the viewer from the
+	// sidebar, and that sentence is only true when the viewer is the
+	// link that is there.
+	ViewerLinked bool
 	// Identity is the display-only identity line, nil when no identity
 	// was forwarded or display is disabled.
 	Identity *IdentityView
@@ -849,6 +855,7 @@ func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, 
 		Namespace:     namespace,
 		SnapshotState: "none",
 		Links:         buildLinks(links),
+		ViewerLinked:  links.ObjectStoreViewer != "",
 	}
 	if s.evidenceEnabled {
 		if s.evidence.HasReport {
