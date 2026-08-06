@@ -33,7 +33,7 @@
 #
 # Environment overrides: CLUSTER, KIND_NODE_IMAGE, CNPG_MANIFEST,
 # CERT_MANAGER_MANIFEST, BARMAN_MANIFEST, IMAGE, VIEWER_IMAGE,
-# VIEWER_PORT, MINIO_ENDPOINT, EVIDENCE_REGION, SKIP_BUILD=true,
+# MINIO_ENDPOINT, EVIDENCE_REGION, SKIP_BUILD=true,
 # SKIP_BACKUP=true, SKIP_EVIDENCE=true, RECREATE=true, NO_FORWARD=true.
 #
 # Behind a mandatory HTTP proxy, export HTTP_PROXY/HTTPS_PROXY/NO_PROXY
@@ -68,10 +68,6 @@ VIEWER_IMAGE="${VIEWER_IMAGE:-ghcr.io/fyannk/pgobjectstoreviewer:latest}"
 # on the region exactly: it is one of the fingerprint inputs.
 MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://minio.minio.svc:9000}"
 EVIDENCE_REGION="${EVIDENCE_REGION:-us-east-1}"
-# The local port the browsable ObjectStoreViewer is forwarded to. The
-# console's link-out names it, because a link-out is followed by the
-# browser rather than by the console.
-VIEWER_PORT="${VIEWER_PORT:-3004}"
 
 log() { echo "[dev-up] $*"; }
 need() { command -v "$1" > /dev/null 2>&1 || { echo "dev-up needs '$1' on PATH" >&2; exit 1; }; }
@@ -270,125 +266,6 @@ enable_evidence() {
   kubectl -n payments rollout status deployment/pgconsole-orders --timeout=240s > /dev/null
 }
 
-# enable_viewer_ui stands the same ObjectStoreViewer image up a second
-# time, in its standalone HTTP mode, so the sidebar's ObjectStoreViewer
-# entry opens something real.
-#
-# It has to be a second instance. The sidecar beside the console runs
-# RUNTIME_MODE=pgconsole-sidecar, which serves the evidence API on a
-# pod-private socket and rejects LISTEN_ADDR outright — it has no UI to
-# link to, by design. The two read the same bucket with the same
-# credentials and answer different questions: the sidecar answers the
-# console's, this one answers a person's.
-#
-# Nothing about the console changes because of it. This is a link-out to
-# a sibling tool, which is all the console ever knows about the viewer.
-enable_viewer_ui() {
-  if [ "${SKIP_EVIDENCE:-false}" = "true" ]; then
-    return 0
-  fi
-  log "deploying the browsable ObjectStoreViewer"
-  cat <<YAML | kubectl apply -f - > /dev/null
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: objectstoreviewer
-  namespace: payments
-  labels:
-    app.kubernetes.io/name: objectstoreviewer
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: objectstoreviewer
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: objectstoreviewer
-    spec:
-      automountServiceAccountToken: false
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
-        # The credential files are mounted 0440 and the image runs as
-        # 65532; without an fsGroup they stay group-root and the viewer
-        # exits with "file cannot be opened" before it listens.
-        fsGroup: 65532
-      containers:
-        - name: viewer
-          image: $VIEWER_IMAGE
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: http
-              containerPort: 3000
-          env:
-            - name: REPOSITORY_FORMAT
-              value: barman-cloud
-            - name: PROVIDER
-              value: s3
-            - name: DESTINATION_PATH
-              value: s3://pgbackups/orders
-            - name: ENDPOINT_URL
-              value: $MINIO_ENDPOINT
-            - name: BARMAN_SERVER_NAMES
-              value: orders
-            - name: AWS_ACCESS_KEY_ID_FILE
-              value: /var/run/secrets/objectstoreviewer-store/aws-access-key-id
-            - name: AWS_SECRET_ACCESS_KEY_FILE
-              value: /var/run/secrets/objectstoreviewer-store/aws-secret-access-key
-            - name: AWS_REGION
-              value: $EVIDENCE_REGION
-          livenessProbe:
-            httpGet: { path: /healthz, port: http }
-          readinessProbe:
-            httpGet: { path: /readyz, port: http }
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            readOnlyRootFilesystem: true
-          volumeMounts:
-            - name: store
-              mountPath: /var/run/secrets/objectstoreviewer-store
-              readOnly: true
-            - name: tmp
-              mountPath: /tmp
-      volumes:
-        - name: store
-          secret:
-            secretName: pgconsole-evidence-store
-            defaultMode: 0440
-        - name: tmp
-          emptyDir:
-            sizeLimit: 16Mi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: objectstoreviewer
-  namespace: payments
-spec:
-  selector:
-    app.kubernetes.io/name: objectstoreviewer
-  ports:
-    - name: http
-      port: 3000
-      targetPort: http
-YAML
-  kubectl -n payments rollout status deployment/objectstoreviewer --timeout=180s > /dev/null
-
-  # The link-out is followed by the browser, not by the console, so it
-  # names the port-forward on this machine rather than a Service. http
-  # on loopback needs the lab-only opt-in; a real deployment gets an
-  # https Route from pgtoolbox and never sets this.
-  log "pointing the sidebar's ObjectStoreViewer entry at it"
-  kubectl -n payments set env deployment/pgconsole-orders \
-    OBJECTSTOREVIEWER_URL="http://localhost:$VIEWER_PORT" \
-    ALLOW_INSECURE_LINKS=true > /dev/null
-  kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
-}
-
 # setup_backup gives the dev cluster a real object store: cert-manager,
 # the barman-cloud plugin, a throwaway MinIO, and the ObjectStore the
 # Cluster then names. The order matters and the waits are not padding —
@@ -485,6 +362,11 @@ else
 
   log "creating the target cluster orders/payments"
   kubectl create namespace payments > /dev/null
+  # wal_level logical because orders publishes as well as subscribes;
+  # externalClusters is the entry its Subscription names, pointing at
+  # the small analytics cluster stood up later in this run. The password
+  # rides the Secret CloudNativePG generates for that cluster's app
+  # user — the console holds no permission on it and never reads it.
   cat <<'YAML' | kubectl apply -f - > /dev/null
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -495,6 +377,18 @@ spec:
   instances: 3
   storage:
     size: 1Gi
+  postgresql:
+    parameters:
+      wal_level: logical
+  externalClusters:
+    - name: analytics
+      connectionParameters:
+        host: analytics-rw
+        user: analytics
+        dbname: analytics
+      password:
+        name: analytics-app
+        key: password
 YAML
 
   log "waiting for the cluster to become healthy (this takes a minute)"
@@ -510,6 +404,28 @@ YAML
 
   log "adding the connection poolers"
   kubectl apply -f hack/testdata/dev-poolers.yaml > /dev/null
+
+  # The declarative objects the Databases, Roles, Publications and
+  # Subscriptions screens render. Every one is a Kubernetes object plus
+  # the operator's report of reconciling it: the console never connects
+  # to PostgreSQL and reads no catalog.
+  log "declaring roles and databases"
+  kubectl apply -f hack/testdata/dev-databases.yaml > /dev/null
+
+  # A second, single-instance cluster so the replication objects have a
+  # real other end. The console does not watch it — it watches exactly
+  # one Cluster — but the Publication and Subscription that name orders
+  # are only meaningful because it exists.
+  log "creating the analytics cluster and the replication between the two"
+  kubectl apply -f hack/testdata/dev-replication.yaml > /dev/null
+  phase=""
+  i=0
+  while [ "$phase" != "Cluster in healthy state" ]; do
+    i=$((i + 1))
+    [ "$i" -le 120 ] || { log "analytics never became healthy (last phase: $phase)"; break; }
+    sleep 5
+    phase=$(kubectl -n payments get cluster analytics -o jsonpath='{.status.phase}' 2>/dev/null || true)
+  done
 
   if [ "${SKIP_BACKUP:-false}" != "true" ]; then
     setup_backup
@@ -578,9 +494,12 @@ YAML
   # uiharness_test.go), so dev, the browser tests and the design project
   # all show the same three entries. They are deliberately unreachable —
   # this is about the console's own chrome, not about the sibling tools.
-  log "configuring the sibling-tool link-outs (ObjectStoreViewer, pgAdmin, monitoring)"
+  # No OBJECTSTOREVIEWER_URL. The viewer runs here only as the console's
+  # evidence sidecar, which serves a socket and has no UI to open, so a
+  # link-out would advertise a page that does not exist. The evidence
+  # screens then correctly stay quiet about browsing the objects.
+  log "configuring the sibling-tool link-outs (pgAdmin, monitoring)"
   kubectl -n payments set env deployment/pgconsole-orders \
-    OBJECTSTOREVIEWER_URL=https://viewer.example.com/orders \
     PGADMIN_URL=https://pgadmin.example.com \
     MONITORING_URL=https://grafana.example.com/d/pg > /dev/null
   kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
@@ -591,7 +510,6 @@ fi
 # patch is a no-op once applied, so the reuse path stays fast.
 enable_persistence
 enable_evidence
-enable_viewer_ui
 
 if [ "${NO_FORWARD:-false}" = "true" ]; then
   log "NO_FORWARD set — start the tunnel yourself:"
@@ -656,11 +574,6 @@ log "port-forwarding the console to 127.0.0.1:3000"
 kubectl -n payments port-forward deploy/pgconsole-orders 3000:3000 > /dev/null 2>&1 &
 PIDS="$PIDS $!"
 
-if [ "${SKIP_EVIDENCE:-false}" != "true" ]; then
-  log "port-forwarding ObjectStoreViewer to 127.0.0.1:$VIEWER_PORT"
-  kubectl -n payments port-forward svc/objectstoreviewer "$VIEWER_PORT":3000 > /dev/null 2>&1 &
-  PIDS="$PIDS $!"
-fi
 
 # Wait until the raw console answers before the proxies start pointing at it.
 # --noproxy keeps this off any http_proxy the machine mandates: the console
@@ -690,11 +603,7 @@ cat <<EOF
   The review panel (:3003 -> Access requests) is seeded with one pending
   request from 'alice', role picker reader / operator.
 
-  The sidebar's ObjectStoreViewer entry opens http://localhost:$VIEWER_PORT,
-  the same viewer the console reads evidence from over its socket —
-  browsable this time, because that is a separate standalone instance.
-
-  Ctrl-C stops the forwards and proxies; the kind cluster stays up, so
+  Ctrl-C stops the forward and proxies; the kind cluster stays up, so
   re-running this script relaunches the ports fast.
   Full teardown:  kind delete cluster --name $CLUSTER
 

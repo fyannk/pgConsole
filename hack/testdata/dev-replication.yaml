@@ -1,0 +1,97 @@
+# Logical replication between the dev cluster and a second, smaller one.
+#
+# `analytics` is a single-instance cluster that exists to be the other
+# end of a replication link — the console does not watch it, and cannot:
+# it watches exactly one Cluster, permanently. What the console sees is
+# the Publication and the Subscription that name `orders`, plus the
+# operator's report of reconciling each. The second cluster is what
+# makes those objects mean something instead of pointing nowhere.
+#
+# Both ends run wal_level=logical. Logical replication needs it on the
+# publisher, and `orders` is both: it publishes billing and subscribes
+# to analytics, so the Publications and Subscriptions screens each have
+# a row that is really being reconciled rather than a fixture.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: analytics
+  namespace: payments
+spec:
+  instances: 1
+  storage:
+    size: 1Gi
+  postgresql:
+    parameters:
+      wal_level: logical
+  bootstrap:
+    initdb:
+      database: analytics
+      owner: analytics
+---
+# The subscriber connects as this role, and starting a WAL sender needs
+# the REPLICATION attribute — without it PostgreSQL refuses with
+# "permission denied to start WAL sender" and the Subscription stays
+# unapplied. The app role initdb created does not have it.
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: analytics-publisher
+  namespace: payments
+spec:
+  cluster:
+    name: analytics
+  name: analytics
+  login: true
+  replication: true
+  comment: the role orders subscribes as
+---
+# Published by the small cluster, consumed by `orders` below.
+apiVersion: postgresql.cnpg.io/v1
+kind: Publication
+metadata:
+  name: analytics-events
+  namespace: payments
+spec:
+  cluster:
+    name: analytics
+  name: analytics_events
+  dbname: analytics
+  target:
+    allTables: true
+  publicationReclaimPolicy: delete
+---
+# Published by `orders` itself, so the watched cluster owns a
+# publication as well as a subscription.
+apiVersion: postgresql.cnpg.io/v1
+kind: Publication
+metadata:
+  name: billing-changes
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: billing_changes
+  dbname: billing
+  target:
+    allTables: true
+  publicationReclaimPolicy: delete
+---
+# The subscription on `orders`. externalClusterName names the entry the
+# Cluster spec carries, which is what dev-up patches onto `orders`; the
+# password rides a Secret CloudNativePG generated for the analytics app
+# user, and the console never reads it.
+apiVersion: postgresql.cnpg.io/v1
+kind: Subscription
+metadata:
+  name: orders-from-analytics
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: orders_from_analytics
+  dbname: ledger
+  externalClusterName: analytics
+  publicationName: analytics_events
+  publicationDBName: analytics
+  subscriptionReclaimPolicy: delete
