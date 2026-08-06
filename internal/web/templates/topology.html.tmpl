@@ -11,7 +11,13 @@
 <section class="panel topo-panel{{if .Frames}} topo-panel-grouped{{end}}">
   <h2 class="topo-title">{{.Title}}</h2>
   <div class="topo-scroll">
-  <svg class="topo" viewBox="0 0 {{.Width}} {{.Height}}" role="img"
+  {{- /* width and height carry the size the layout actually settled on.
+         Without them the stylesheet stretched a framed drawing to fill
+         whatever panel it sat in, so a compact schema was blown up past
+         the size its own arithmetic chose — bigger boxes, bigger text,
+         and more air between them than the geometry intended. With
+         them it draws at its own size and only ever scales down. */}}
+  <svg class="topo" viewBox="0 0 {{.Width}} {{.Height}}" width="{{.Width}}" height="{{.Height}}" role="img"
        aria-label="{{.Aria}}"
        preserveAspectRatio="xMidYMid meet">
     <defs>

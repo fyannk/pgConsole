@@ -1667,7 +1667,11 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
    58rem ceiling that suits the four-tier drawing would shrink its type
    past reading. It takes the panel's full width instead; its height
    follows from the taller viewBox. */
-.topo-panel-grouped svg.topo { max-width: none; }
+/* A framed drawing renders at the size its layout computed, and
+   shrinks to fit a narrower panel — it is never enlarged past it.
+   width:100% did the enlarging; width:auto lets the element's own
+   width attribute stand. */
+.topo-panel-grouped svg.topo { max-width: 100%; width: auto; }
 
 .topo text { font-family: var(--font-ui); }
 .topo-label { fill: var(--text); font-size: 13px; font-weight: 600; }

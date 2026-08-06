@@ -30,6 +30,27 @@ import (
 // secMaxBoxes bounds each drawn list; more become one "+N more" box.
 const secMaxBoxes = 6
 
+// secMaxBackups bounds the drawn Backup catalog, which grows with every
+// scheduled run and would otherwise be the tallest thing on the screen
+// within a week. Three, and the middle one summarises: the newest, a
+// count of what sits between, and the oldest.
+//
+// A truncating "+N more" would be the wrong shape here. The catalog is
+// a time series, so the two ends are the informative rows — the newest
+// says whether backups are still running, the oldest says how far the
+// retained record reaches — and the middle is a quantity, not a list.
+const secMaxBackups = 3
+
+// elideMiddle picks the rows a bounded list shows: everything when it
+// fits, otherwise the first and the last with the count between them.
+// count is 0 when nothing was dropped.
+func elideMiddle[T any](rows []T, max int) (head []T, count int, tail []T) {
+	if max < 3 || len(rows) <= max {
+		return rows, 0, nil
+	}
+	return rows[:1], len(rows) - 2, rows[len(rows)-1:]
+}
+
 // secWPod is the pooler-pod boxes' width: a deployment pod name
 // carries two hash suffixes, so these boxes run wider than their
 // pooler's.
@@ -121,7 +142,7 @@ func buildBackupsDrawing(p *Page) *TopologyView {
 		Aria:  "The schedules that trigger this cluster, the destinations its archive reaches, and the reported Backup records",
 	}
 
-	capacity := 1 + minI(schedules, grpMaxSched) + minI(catalog, secMaxBoxes) + minI(snapshots, secMaxBoxes) + 2
+	capacity := 1 + minI(schedules, grpMaxSched) + minI(catalog, secMaxBackups) + minI(snapshots, secMaxBoxes) + 2
 	nodes := make([]TopoNode, 0, capacity)
 	rowsByID := map[string][]TopoGraphText{}
 	add := func(id, kind, state string, w int, rows []TopoGraphText) *TopoNode {
@@ -220,7 +241,61 @@ func buildBackupsDrawing(p *Page) *TopologyView {
 	}
 	destBottom := destY - grpRowGap
 
-	// The schedules frame on the left.
+	// The cluster faces the things it actually wires to, not the extent
+	// of the column they sit in. Centring on the column put the cluster
+	// half a label band above a lone destination box, and every wire out
+	// of it then had to step to reach anything — the drawing was full of
+	// jogs that meant nothing. Averaging the wire endpoints makes the
+	// single-destination case exactly straight and keeps the multiple
+	// case balanced between them.
+	//
+	// Everything placed so far is the destination column, so remember
+	// where it ends: if the cluster's own height would push it above the
+	// frame label band, that column moves down to meet it rather than
+	// the cluster being clamped. Clamping was the bug — it left the
+	// alignment silently a few pixels out, which is exactly the kind of
+	// near-miss a reader reads as sloppiness rather than as meaning.
+	destNodes := len(nodes)
+	destFrames := len(frames)
+	root := add("cluster", "primary", "", chWBox, clusterRootRows(p))
+	root.X = int(rootX)
+	var targets []float64
+	if store != nil {
+		targets = append(targets, cy(store))
+	}
+	if hasSnapFrame {
+		targets = append(targets, float64(snapFrame.Y)+float64(snapFrame.H)/2)
+	}
+	if len(targets) > 0 {
+		sum := 0.0
+		for _, t := range targets {
+			sum += t
+		}
+		root.Y = int(sum/float64(len(targets))) - root.H/2
+		if shift := int(content) - root.Y; shift > 0 {
+			for i := 0; i < destNodes; i++ {
+				nodes[i].Y += shift
+			}
+			for i := 0; i < destFrames; i++ {
+				frames[i].Y += shift
+			}
+			snapFrame.Y += shift
+			root.Y = int(content)
+		}
+	} else {
+		oppositeBottom := destBottom
+		if oppositeBottom <= top {
+			oppositeBottom = content + float64(root.H)
+		}
+		root.Y = int((top+oppositeBottom)/2) - root.H/2
+		if root.Y < int(content) {
+			root.Y = int(content)
+		}
+	}
+	rootCy := cy(root)
+
+	// The schedules frame on the left, centred on the cluster for the
+	// same reason: one schedule should wire to it in a straight line.
 	var schedBoxes []*TopoNode
 	if schedules > 0 {
 		shown := p.Backups.ScheduledRows
@@ -238,43 +313,47 @@ func buildBackupsDrawing(p *Page) *TopologyView {
 				{C: "sub", T: "backup schedules"},
 			}))
 		}
-		bottom := stack(schedBoxes, schedX+grpPad, content)
+		stackH := 0.0
+		for i, b := range schedBoxes {
+			if i > 0 {
+				stackH += chBoxGap
+			}
+			stackH += float64(b.H)
+		}
+		stackTop := rootCy - stackH/2
+		if stackTop < content {
+			stackTop = content
+		}
+		bottom := stack(schedBoxes, schedX+grpPad, stackTop)
+		frameTop := stackTop - grpPad - grpLabelBand
+		if frameTop < top {
+			frameTop = top
+		}
 		frames = append(frames, TopoFrame{
 			Label: "Backup schedules", Kind: "backup",
-			X: int(schedX), Y: int(top), W: frameW, H: int(bottom + grpPad - top),
+			X: int(schedX), Y: int(frameTop), W: frameW, H: int(bottom + grpPad - frameTop),
 		})
-	}
-
-	// The cluster, facing the middle of whatever stands opposite.
-	root := add("cluster", "primary", "", chWBox, clusterRootRows(p))
-	oppositeBottom := destBottom
-	if oppositeBottom <= top {
-		oppositeBottom = content + float64(root.H)
-	}
-	root.X = int(rootX)
-	root.Y = int((top+oppositeBottom)/2) - root.H/2
-	if root.Y < int(content) {
-		root.Y = int(content)
 	}
 
 	// The catalog of Backup records, under the cluster.
 	var catFrame TopoFrame
 	hasCatFrame := false
 	if catalog > 0 {
-		rows := p.Backups.Rows
-		extra := 0
-		if len(rows) > secMaxBoxes {
-			extra = len(rows) - (secMaxBoxes - 1)
-			rows = rows[:secMaxBoxes-1]
-		}
+		// Newest first, so head is the most recent run and tail the
+		// oldest record still reported.
+		head, between, tail := elideMiddle(p.Backups.Rows, secMaxBackups)
 		var boxes []*TopoNode
-		for i, b := range rows {
+		for i, b := range head {
 			boxes = append(boxes, add(fmt.Sprintf("bak-%d", i), "storage", "", chWBox, backupBoxRows(b)))
 		}
-		if extra > 0 {
-			boxes = append(boxes, add("bak-more", "storage", "", chWBox, []TopoGraphText{
-				{C: "label", T: fmt.Sprintf("+%d more", extra)},
+		if between > 0 {
+			boxes = append(boxes, add("bak-between", "storage", "", chWBox, []TopoGraphText{
+				{C: "label", T: fmt.Sprintf("%d more backups", between)},
+				{C: "sub", T: "between these two"},
 			}))
+		}
+		for i, b := range tail {
+			boxes = append(boxes, add(fmt.Sprintf("bak-tail-%d", i), "storage", "", chWBox, backupBoxRows(b)))
 		}
 		frameX := float64(root.X+root.W/2) - float64(frameW)/2
 		frameTop := float64(root.Y+root.H) + grpRowGap + 14
@@ -306,7 +385,6 @@ func buildBackupsDrawing(p *Page) *TopologyView {
 		view.Dots = append(view.Dots, TopoDot{Kind: "archive", X: int(x), Y: int(y)})
 	}
 
-	rootCy := cy(root)
 	// Schedules fan into the cluster.
 	if len(schedBoxes) > 0 {
 		bus := rootX - grpAlley/2
@@ -326,15 +404,24 @@ func buildBackupsDrawing(p *Page) *TopologyView {
 	// The archive reaches each destination.
 	// The destination frames name themselves, so their wires carry no
 	// label — a label here would ride over the cluster box.
+	//
+	// The port offset exists to keep two wires leaving the same edge
+	// from smearing into one line. With a single destination there is
+	// nothing to separate, and applying it anyway bent a wire that had
+	// every reason to be straight — so it is spent only when earned.
+	port := 0.0
+	if len(targets) > 1 {
+		port = grpPortOff
+	}
 	if store != nil {
-		out := rootCy - grpPortOff
+		out := rootCy - port
 		bus := destX - grpAlley*0.5
 		wire("cluster", "store", "", []topoPoint{
 			{right(root), out}, {bus, out}, {bus, cy(store)}, {float64(store.X), cy(store)},
 		})
 	}
 	if hasSnapFrame {
-		out := rootCy + grpPortOff
+		out := rootCy + port
 		bus := destX - grpAlley*0.25
 		frameCy := float64(snapFrame.Y) + float64(snapFrame.H)/2
 		wire("cluster", "snapshots", "", []topoPoint{

@@ -16,6 +16,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,125 @@ func TestBackupsDrawingStatesThePath(t *testing.T) {
 	}, testNow, Links{})
 	if empty.BackupsDrawing != nil {
 		t.Error("a page with no backup evidence drew a backup path")
+	}
+}
+
+// backupsPageWith builds a page whose catalog holds n Backup records,
+// newest first, so the drawn catalog's bound can be exercised without
+// waiting for a schedule to produce them.
+func backupsPageWith(t *testing.T, n int) Page {
+	t.Helper()
+	src := wiringSources()
+	var records []observe.BackupFacts
+	for i := 0; i < n; i++ {
+		records = append(records, observe.BackupFacts{
+			Name: fmt.Sprintf("orders-nightly-%03d", i), UID: fmt.Sprintf("b%d", i),
+			Phase: "completed", Method: "plugin",
+		})
+	}
+	return buildPage(context.Background(), "orders", "payments", snapshots{
+		window: time.Hour, cluster: src.snap, ok: true,
+		pods: src.pods, podsOK: true,
+		backups: observe.BackupsSnapshot{
+			Generation: 6, ObservedAt: testNow.Add(-2 * time.Second),
+			Backups: records,
+			ScheduledBackups: []observe.ScheduledBackupFacts{
+				{Name: "daily", UID: "sb1", Method: "plugin", Schedule: "0 0 2 * * *"},
+			},
+		},
+		backupsOK: true,
+	}, testNow, Links{})
+}
+
+// The catalog frame is a bounded window on a list that grows with every
+// scheduled run: at most three boxes, and past that the two ends plus a
+// count of what sits between them. The ends are the informative rows —
+// the newest says whether backups still run, the oldest how far the
+// record reaches — so this elides the middle rather than truncating the
+// tail.
+func TestBackupsDrawingBoundsTheCatalogToItsTwoEnds(t *testing.T) {
+	t.Parallel()
+
+	// At the bound every record is drawn.
+	view := backupsPageWith(t, secMaxBackups).BackupsDrawing
+	if view == nil {
+		t.Fatal("no backups drawing was built")
+	}
+	names := drawnBoxLabels(view)
+	if len(names) != secMaxBackups {
+		t.Fatalf("%d catalog boxes at the bound, want %d: %v", len(names), secMaxBackups, names)
+	}
+
+	// Past it, exactly three: newest, the count, oldest.
+	view = backupsPageWith(t, 12).BackupsDrawing
+	names = drawnBoxLabels(view)
+	if len(names) != 3 {
+		t.Fatalf("%d catalog boxes for 12 records, want 3: %v", len(names), names)
+	}
+	if names[0] != "orders-nightly-000" {
+		t.Errorf("first box = %q, want the newest record", names[0])
+	}
+	if names[2] != "orders-nightly-011" {
+		t.Errorf("last box = %q, want the oldest record", names[2])
+	}
+	// 12 records, two of them drawn, so ten are accounted for by the
+	// count — never silently dropped.
+	if names[1] != "10 more backups" {
+		t.Errorf("middle box = %q, want the ten it stands for", names[1])
+	}
+}
+
+// drawnBoxLabels returns the label row of every box inside the catalog
+// frame, in draw order.
+func drawnBoxLabels(view *TopologyView) []string {
+	var out []string
+	for _, n := range view.Nodes {
+		if !strings.HasPrefix(n.ID, "bak-") {
+			continue
+		}
+		for _, l := range n.Lines {
+			if l.Class == "label" {
+				out = append(out, l.Text)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// Two wires that could be straight must be straight. A single schedule
+// and a single destination both sit opposite the cluster, so their
+// wires have no reason to step — and a drawing full of jogs that mean
+// nothing teaches a reader to ignore the ones that do.
+func TestBackupsDrawingKeepsUnforcedWiresStraight(t *testing.T) {
+	t.Parallel()
+	view := backupsPageWith(t, 2).BackupsDrawing
+	if view == nil {
+		t.Fatal("no backups drawing was built")
+	}
+	var cluster *TopoNode
+	for i := range view.Nodes {
+		if view.Nodes[i].ID == "cluster" {
+			cluster = &view.Nodes[i]
+		}
+	}
+	if cluster == nil {
+		t.Fatal("no cluster box")
+	}
+	clusterCy := cluster.Y + cluster.H/2
+	for _, id := range []string{"sched-0", "store"} {
+		var box *TopoNode
+		for i := range view.Nodes {
+			if view.Nodes[i].ID == id {
+				box = &view.Nodes[i]
+			}
+		}
+		if box == nil {
+			t.Fatalf("no %s box", id)
+		}
+		if got := box.Y + box.H/2; got != clusterCy {
+			t.Errorf("%s centre y = %d, cluster centre y = %d — the wire between them steps", id, got, clusterCy)
+		}
 	}
 }
 
