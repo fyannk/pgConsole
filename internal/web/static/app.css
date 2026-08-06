@@ -1761,6 +1761,10 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 /* The children drawing's two relations: ownership solid, reference
    dashed. Each wire carries its own word, so there is no legend. */
 .topo-edge-owns { stroke: var(--ok); }
+/* The declared owner of a database. Distinct from .topo-edge-owns
+   so the two relations on the declared-objects diagram — who owns
+   a database, and what lives in it — never read as one. */
+.topo-edge-owner { stroke: var(--storage); stroke-dasharray: 4 3; }
 .topo-edge-refs { stroke: var(--accent); stroke-dasharray: 5 4; }
 /* The head belongs to its wire, so it takes the referencing path's own
    stroke. The flat fallback comes first for anything that does not know

@@ -380,7 +380,11 @@ func objectsDatabaseGroup(p *Page) ObjectGroupView {
 			Name: r.Name, Detail: strings.TrimSpace(r.Role + " · " + r.Attributes),
 		})
 	}
-	add("Roles", "", roles, "no declared roles were observed")
+	// DatabaseRole, not empty: the journal taps this scope like the
+	// other three, so a row here does resolve to a retained
+	// revision. Leaving it blank silently withheld the raw
+	// definition from the one declarative kind that had it.
+	add("Roles", "DatabaseRole", roles, "no declared roles were observed")
 
 	var pubs []ObjectRowView
 	for _, r := range d.Publications {

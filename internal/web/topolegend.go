@@ -37,6 +37,12 @@ var legendOrder = []LegendItem{
 	{Kind: "wal", Label: "WAL streaming"},
 	{Kind: "archive", Label: "base backup"},
 	{Kind: "disk", Label: "volume"},
+	// The declared-objects diagram: a database names the role that
+	// owns it, and a publication or subscription names the database
+	// it lives in. Both are declarations read off the objects, never
+	// a reading of PostgreSQL.
+	{Kind: "owner", Label: "declared owner"},
+	{Kind: "owns", Label: "declared in"},
 }
 
 // topoLegend lists the entries for the styles a diagram actually drew.

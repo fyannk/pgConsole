@@ -290,3 +290,53 @@ func TestDatabasesDrawingWiresDeclarationsToTheirDatabase(t *testing.T) {
 		t.Errorf("an unreported subscription carries state %q, want unknown", states["sub-0"])
 	}
 }
+
+// A Database names the role that owns it, so the declared-objects
+// drawing wires the two. The relation is a declaration read off the
+// objects — the owner field against the DatabaseRole's PostgreSQL name
+// — never anything read out of PostgreSQL.
+func TestDatabasesDrawingWiresEachDatabaseToItsOwner(t *testing.T) {
+	t.Parallel()
+	view := sectionsPage(t).DatabasesDrawing
+	if view == nil {
+		t.Fatal("no databases drawing was built")
+	}
+	owners := 0
+	for _, l := range view.Graph.Links {
+		if l.Kind == "owner" {
+			owners++
+			if !strings.HasPrefix(l.Source, "role-") || !strings.HasPrefix(l.Target, "db-") {
+				t.Errorf("owner wire runs %s -> %s, want role -> database", l.Source, l.Target)
+			}
+		}
+	}
+	if owners == 0 {
+		t.Error("no database is wired to the role it declares as its owner")
+	}
+	// Every drawn database whose owner is a declared role is wired, or
+	// the bound elided the far end of a wire the diagram is about to
+	// draw and the reader sees an unexplained gap.
+	drawn := 0
+	for _, n := range view.Nodes {
+		if strings.HasPrefix(n.ID, "db-") && n.ID != "db-more" {
+			drawn++
+		}
+	}
+	if owners != drawn {
+		t.Errorf("%d databases drawn, %d wired to an owner", drawn, owners)
+	}
+	// Every style the diagram draws is keyed, or the reader is left to
+	// guess what a line means.
+	keyed := map[string]bool{}
+	for _, item := range view.Legend {
+		keyed[item.Kind] = true
+	}
+	for _, l := range view.Graph.Links {
+		if l.Kind == "refs" {
+			continue // carries its own inline label
+		}
+		if !keyed[l.Kind] {
+			t.Errorf("the drawing draws %q wires and the legend does not key them", l.Kind)
+		}
+	}
+}

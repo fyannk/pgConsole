@@ -819,6 +819,14 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		sub  bool
 	}
 	var pubWires []pubWire
+	// A database names the role that owns it. Both boxes sit in the
+	// same column — databases above, roles below — so the wire is
+	// resolved after both frames are placed.
+	type ownerWire struct {
+		db   *TopoNode
+		role string
+	}
+	var ownerOf []ownerWire
 
 	bounded := func(n int) (int, int) {
 		if n > secMaxBoxes {
@@ -847,6 +855,9 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		if db.Database != "" {
 			byDatabase[db.Database] = n
 		}
+		if db.Owner != "" && db.Owner != unknown {
+			ownerOf = append(ownerOf, ownerWire{db: n, role: db.Owner})
+		}
 	}
 	if extra > 0 {
 		dbBoxes = append(dbBoxes, add("db-more", "endpoint", "", []TopoGraphText{
@@ -854,8 +865,31 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		}))
 	}
 
-	shown, extra = bounded(len(d.Roles))
-	for i, role := range d.Roles[:shown] {
+	// Remembered by the PostgreSQL role name, because that is what a
+	// Database's owner field names — not the resource name.
+	byRole := map[string]*TopoNode{}
+	// The roles a drawn database names as its owner come first, so the
+	// bound below cannot elide the far end of a wire this diagram is
+	// about to draw. Two of three databases wired and the third not,
+	// for no reason a reader can see, reads as the diagram being wrong
+	// rather than as the list being long.
+	wanted := make(map[string]bool, len(ownerOf))
+	for _, w := range ownerOf {
+		wanted[w.role] = true
+	}
+	roles := make([]DatabaseRoleRowView, 0, len(d.Roles))
+	for _, role := range d.Roles {
+		if wanted[role.Role] {
+			roles = append(roles, role)
+		}
+	}
+	for _, role := range d.Roles {
+		if !wanted[role.Role] {
+			roles = append(roles, role)
+		}
+	}
+	shown, extra = bounded(len(roles))
+	for i, role := range roles[:shown] {
 		rows := []TopoGraphText{{C: "label", T: role.Name}}
 		if role.Role != "" && role.Role != role.Name {
 			rows = append(rows, TopoGraphText{C: "sub", T: "role " + role.Role})
@@ -865,7 +899,11 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 			line += " · " + role.Attributes
 		}
 		rows = append(rows, TopoGraphText{C: "disk", T: line})
-		roleBoxes = append(roleBoxes, add(fmt.Sprintf("role-%d", i), "pvc", declaredState(role.Declared), rows))
+		n := add(fmt.Sprintf("role-%d", i), "pvc", declaredState(role.Declared), rows)
+		roleBoxes = append(roleBoxes, n)
+		if role.Role != "" {
+			byRole[role.Role] = n
+		}
 	}
 	if extra > 0 {
 		roleBoxes = append(roleBoxes, add("role-more", "pvc", "", []TopoGraphText{
@@ -1024,6 +1062,25 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		}
 	}
 
+	// A database and the role that owns it. Both frames are stacked in
+	// the same column, so this runs in the super frame's left gutter
+	// rather than the alley the other two relations already use, and
+	// enters both boxes on their left edge. The relation is declared —
+	// the Database object names the role — so it is drawn, not inferred
+	// from anything read out of PostgreSQL.
+	ownerBus := superX - superPad/2
+	for _, w := range ownerOf {
+		role := byRole[w.role]
+		if role == nil {
+			continue // owner declared, no DatabaseRole observed for it
+		}
+		edges = append(edges, TopoEdge{Kind: "owner", Path: roundedRoute(corners([]topoPoint{
+			{float64(role.X), cy(role)}, {ownerBus, cy(role)},
+			{ownerBus, cy(w.db)}, {float64(w.db.X), cy(w.db)},
+		}))})
+		links = append(links, TopoGraphLink{Source: role.ID, Target: w.db.ID, Kind: "owner"})
+	}
+
 	view.Edges = edges
 	view.Graph.Links = links
 	view.Legend = topoLegend(links)
@@ -1042,6 +1099,6 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		wirePlace(&view.Nodes[i], rowsByID[view.Nodes[i].ID])
 	}
 	view.Graph.Nodes = wireGraphNodes(view.Nodes, rowsByID)
-	view.Caption = "Declarations and their reconciliation verdicts, exactly as the operator reports them: a green border marks an applied declaration, a red one a failed one. Publications and subscriptions are wired to the database they name. Nothing here is read from PostgreSQL."
+	view.Caption = "Declarations and their reconciliation verdicts, exactly as the operator reports them: a green border marks an applied declaration, a red one a failed one. Publications and subscriptions are wired to the database they name, and each database to the role it declares as its owner. Nothing here is read from PostgreSQL."
 	return view
 }
