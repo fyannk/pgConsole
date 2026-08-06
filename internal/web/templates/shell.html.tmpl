@@ -89,6 +89,14 @@
   <nav class="sidebar-nav" hx-boost="true">
     <a class="sidebar-link" href="/"{{if eq .Current "overview"}} aria-current="page"{{end}} title="Overview"><svg><use href="#i-overview"></use></svg><span class="sidebar-label">Overview</span></a>
     <a class="sidebar-link" href="/objects"{{if eq .Current "objects"}} aria-current="page"{{end}} title="Objects"><svg><use href="#i-objects"></use></svg><span class="sidebar-label">Objects</span></a>
+    {{- /* History spans every watched object, not the cluster alone, so
+           it sits beside Objects rather than under Cluster: the two
+           answer "what exists" and "what changed" about the same set. */}}
+    {{- if .HistoryAvailable}}
+    <a class="sidebar-link" href="/history"{{if eq .Current "history"}} aria-current="page"{{end}} title="Object history"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></a>
+    {{- else}}
+    <span class="sidebar-link" aria-disabled="true" title="Object history — disabled in this deployment"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></span>
+    {{- end}}
 
     <div class="sidebar-group">
       <a class="sidebar-link sidebar-group-label" href="/cluster/overview" title="Cluster"><svg><use href="#i-cluster"></use></svg><span>Cluster</span></a>
@@ -99,11 +107,6 @@
 		<a class="sidebar-link" href="/cluster/metrics"{{if eq .Current "cluster-metrics"}} aria-current="page"{{end}} title="Instance metrics"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></a>
 		{{- else}}
 		<span class="sidebar-link" aria-disabled="true" title="Instance metrics — disabled in this deployment"><svg><use href="#i-metrics"></use></svg><span class="sidebar-label">Metrics</span></span>
-		{{- end}}
-		{{- if .HistoryAvailable}}
-		<a class="sidebar-link" href="/history"{{if eq .Current "history"}} aria-current="page"{{end}} title="Object history"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></a>
-		{{- else}}
-		<span class="sidebar-link" aria-disabled="true" title="Object history — disabled in this deployment"><svg><use href="#i-history"></use></svg><span class="sidebar-label">History</span></span>
 		{{- end}}
       </div>
     </div>
