@@ -49,6 +49,15 @@ func podDetailSources() staticSnapshots {
 			}},
 		},
 		eventsOK: true,
+		// A pooler and one pod it owns, so the pooler roster has a
+		// membership proof of its own to be tested against.
+		poolers: observe.PoolersSnapshot{
+			Generation: 5, ObservedAt: testNow.Add(-2 * time.Second),
+			Poolers: []observe.PoolerFacts{{Name: "orders-pool-rw", UID: "p1", Type: "rw", Phase: "active"}},
+		},
+		poolersOK:    true,
+		poolerPods:   podsSnapshot(false, memberPod("orders-pool-rw-abc", "orders-pool-rw")),
+		poolerPodsOK: true,
 	}
 }
 
@@ -208,5 +217,47 @@ func TestClusterPodsCarriesRecentTimelineAndRowLinks(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("pods roster misses %q", want)
 		}
+	}
+}
+
+// The pooler roster gets the same screen the instance roster does, and
+// through its own membership proof: a pod the pooler watch never
+// reported is not found there, whatever else the cluster runs.
+func TestPoolerPodDetailUsesTheirOwnRoster(t *testing.T) {
+	t.Parallel()
+	h := newPodDetailHandler(t, podDetailSources(), podDetailHistory())
+
+	// An instance pod is not a pooler pod, and vice versa.
+	if got := get(t, h, http.MethodGet, "/poolers/pods/orders-1").Code; got != http.StatusNotFound {
+		t.Errorf("an instance pod resolved on the pooler roster: status %d", got)
+	}
+	if got := get(t, h, http.MethodGet, "/cluster/pods/orders-1").Code; got != http.StatusOK {
+		t.Fatalf("instance pod detail status = %d, want 200", got)
+	}
+	body := get(t, h, http.MethodGet, "/cluster/pods/orders-1").Body.String()
+	for _, want := range []string{`href="/cluster/pods"`, "Instance pods", "<dt>Role</dt>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("instance pod detail misses %q", want)
+		}
+	}
+	// The roster screen links each row at its own detail route, and the
+	// detail names the roster it came from rather than the other one.
+	roster := get(t, h, http.MethodGet, "/poolers/pods").Body.String()
+	if !strings.Contains(roster, `data-href="/poolers/pods/orders-pool-rw-abc"`) {
+		t.Error("the pooler roster does not open its pods")
+	}
+	detail := get(t, h, http.MethodGet, "/poolers/pods/orders-pool-rw-abc")
+	if detail.Code != http.StatusOK {
+		t.Fatalf("pooler pod detail status = %d, want 200", detail.Code)
+	}
+	for _, want := range []string{`href="/poolers/pods"`, "Pooler pods", "<dt>Pooler</dt>"} {
+		if !strings.Contains(detail.Body.String(), want) {
+			t.Errorf("pooler pod detail misses %q", want)
+		}
+	}
+	// A pooler pod has no primary, so it never carries the write
+	// endpoint or the timeline the operator reports for one.
+	if strings.Contains(detail.Body.String(), "Write endpoint") {
+		t.Error("a pooler pod claims the cluster's write endpoint")
 	}
 }

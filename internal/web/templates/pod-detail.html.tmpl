@@ -9,14 +9,14 @@
 {{template "page-head" "pod detail"}}
 {{template "shell-open" .Shell}}
   <nav class="breadcrumb" aria-label="Breadcrumb">
-    <a href="/cluster/pods">Instance pods</a>
+    <a href="{{.RosterURL}}">{{.RosterLabel}}</a>
     <span aria-hidden="true">/</span>
     <span aria-current="page">{{.Name}}</span>
   </nav>
   <header>
     <div class="header-bar">
       <h1>{{.Name}}</h1>
-      <dl class="target"><dt>Cluster</dt><dd>{{.Shell.ClusterName}}</dd><dt>Role</dt><dd>{{.Role}}</dd></dl>
+      <dl class="target"><dt>Cluster</dt><dd>{{.Shell.ClusterName}}</dd><dt>{{.RoleLabel}}</dt><dd>{{.Role}}</dd></dl>
     </div>
   </header>
   <div class="tabs" role="tablist" aria-label="Pod detail sections">
@@ -37,7 +37,7 @@
     <div class="panel-body">
       <dl class="facts">
         <dt>Phase</dt><dd data-state="{{.PhaseState}}">{{.Phase}}</dd>
-        <dt>Role</dt><dd>{{.Role}}</dd>
+        <dt>{{.RoleLabel}}</dt><dd>{{.Role}}</dd>
         <dt>Ready</dt><dd>{{.Ready}}</dd>
         <dt>Restarts</dt><dd>{{.Restarts}}</dd>
         <dt>Node</dt><dd>{{.Node}}</dd>

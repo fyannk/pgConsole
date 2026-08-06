@@ -146,7 +146,16 @@ func (c *Client) convertPoolerPod(ctx context.Context, owners *poolerOwnership, 
 		Role:     pod.Labels[poolerNameLabel],
 		Phase:    string(pod.Status.Phase),
 		Node:     pod.Spec.NodeName,
+		IP:       pod.Status.PodIP,
 		Deleting: pod.DeletionTimestamp != nil,
+	}
+	// Carried for the same reason the instance pods carry them: the
+	// detail screen states both, and reporting "unknown" for something
+	// the API server did report would be the console's omission read as
+	// the cluster's silence.
+	if pod.Status.StartTime != nil {
+		started := pod.Status.StartTime.Time
+		facts.Started = &started
 	}
 	for _, cond := range pod.Status.Conditions {
 		if cond.Type == corev1.PodReady {

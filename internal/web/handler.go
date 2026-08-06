@@ -296,6 +296,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /databases/subscriptions", h.handleDatabases("databases-subscriptions"))
 	mux.HandleFunc("GET /poolers", h.handlePoolers("poolers-overview"))
 	mux.HandleFunc("GET /poolers/pods", h.handlePoolers("poolers-pods"))
+	mux.HandleFunc("GET /poolers/pods/{pod}", h.handlePoolerPodDetail)
 	mux.HandleFunc("GET /poolers/logs", h.handlePoolers("poolers-logs"))
 	// The timeline is manifest-free metadata and stays at the baseline;
 	// the revision detail is the object's definition verbatim minus the
@@ -494,8 +495,23 @@ func (h *Handler) handleClusterOverview(w http.ResponseWriter, r *http.Request) 
 // the merged recent per-pod timeline.
 func (h *Handler) handleClusterPods(w http.ResponseWriter, r *http.Request) {
 	page := h.assemble(r, "cluster-pods")
-	page.PodHistory, _ = h.buildPodTimeline("", recentPodHistoryBound, h.now())
+	page.PodHistory, _ = h.buildPodTimeline("", h.rosterMembers(h.sources.Pods.CurrentPods), recentPodHistoryBound, h.now())
 	h.renderPage(w, "cluster-pods", "cluster-pods.html.tmpl", page)
+}
+
+// rosterMembers is the set of pod names one watch proved membership
+// for. A nil set would mean "every Pod", which is the wrong answer for
+// a screen that lists one roster.
+func (h *Handler) rosterMembers(current func() (observe.PodsSnapshot, bool)) map[string]bool {
+	members := map[string]bool{}
+	snap, ok := current()
+	if !ok {
+		return members
+	}
+	for _, pod := range snap.Pods {
+		members[pod.Name] = true
+	}
+	return members
 }
 
 // recentPodHistoryBound caps the roster screen's timeline; the per-pod
@@ -538,7 +554,12 @@ func (h *Handler) handleDatabases(current string) http.HandlerFunc {
 // as current.
 func (h *Handler) handlePoolers(current string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		h.renderPage(w, current, "poolers.html.tmpl", h.assemble(r, current))
+		page := h.assemble(r, current)
+		if current == "poolers-pods" {
+			page.PodHistory, _ = h.buildPodTimeline("",
+				h.rosterMembers(h.poolerPodsSnapshot), recentPodHistoryBound, h.now())
+		}
+		h.renderPage(w, current, "poolers.html.tmpl", page)
 	}
 }
 

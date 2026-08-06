@@ -16,6 +16,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -49,6 +50,13 @@ type PodDetailView struct {
 	IP         string
 	Image      string
 	Started    Stamp
+	// RosterLabel, RosterURL and RoleLabel say which roster this pod
+	// came from, so one screen serves the instance pods and the pooler
+	// pods without either pretending to be the other. A pooler pod has
+	// no primary and no timeline; it has an owner.
+	RosterLabel string
+	RosterURL   string
+	RoleLabel   string
 	// Cluster-reported facts shown on the primary only.
 	IsPrimary     bool
 	Timeline      string
@@ -119,12 +127,72 @@ type PodTimelineEntry struct {
 // is not found: the roster is the same membership-verified snapshot
 // every other screen trusts.
 func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
+	h.renderPodDetail(w, r, podRoster{
+		source:  h.sources.Pods.CurrentPods,
+		current: "cluster-pods",
+		label:   "Instance pods",
+		url:     "/cluster/pods",
+		role:    "Role",
+		missing: "no such member pod",
+		primary: true,
+		logs:    h.podLogs,
+	})
+}
+
+// handlePoolerPodDetail is the same screen for a pod one of this
+// cluster's poolers owns. The two rosters are separate watches with
+// separate membership proofs, so they are separate routes — but a pod
+// is a pod, and a reader who has learnt one screen has learnt both.
+func (h *Handler) handlePoolerPodDetail(w http.ResponseWriter, r *http.Request) {
+	h.renderPodDetail(w, r, podRoster{
+		source:  h.poolerPodsSnapshot,
+		current: "poolers-pods",
+		label:   "Pooler pods",
+		url:     "/poolers/pods",
+		role:    "Pooler",
+		missing: "no such pooler pod",
+		logs:    h.poolerPodLogs,
+	})
+}
+
+// podRoster is the one thing that differs between the two: which watch
+// proved membership, and what the pod is called there. The two sources
+// are separate interfaces with separate methods on purpose — the two
+// rosters are different watches with different ownership proofs — so
+// the roster carries a reader rather than one of them.
+type podRoster struct {
+	source  func() (observe.PodsSnapshot, bool)
+	current string
+	label   string
+	url     string
+	role    string
+	missing string
+	// primary marks the roster whose pods the operator may name as the
+	// cluster's primary. A pooler pod is never one.
+	primary bool
+	logs    func(*http.Request, string) *PodLogsView
+}
+
+// poolerPodsSnapshot adapts the pooler roster to the shared reader, and
+// reports no snapshot when poolers are not observed at all.
+func (h *Handler) poolerPodsSnapshot() (observe.PodsSnapshot, bool) {
+	if h.sources.PoolerPods == nil {
+		return observe.PodsSnapshot{}, false
+	}
+	return h.sources.PoolerPods.CurrentPoolerPods()
+}
+
+func (h *Handler) renderPodDetail(w http.ResponseWriter, r *http.Request, roster podRoster) {
 	name := r.PathValue("pod")
 	if !podNamePattern.MatchString(name) {
 		http.NotFound(w, r)
 		return
 	}
-	snap, ok := h.sources.Pods.CurrentPods()
+	if roster.source == nil {
+		h.renderDenied(w, r, http.StatusNotFound, "no pod snapshot")
+		return
+	}
+	snap, ok := roster.source()
 	if !ok {
 		h.renderDenied(w, r, http.StatusNotFound, "no pod snapshot")
 		return
@@ -137,7 +205,7 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if pod == nil {
-		h.renderDenied(w, r, http.StatusNotFound, "no such member pod")
+		h.renderDenied(w, r, http.StatusNotFound, roster.missing)
 		return
 	}
 
@@ -153,6 +221,10 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 		Ready:    unknown,
 		Restarts: unknown,
 		Started:  Stamp{Text: unknown},
+
+		RosterLabel: roster.label,
+		RosterURL:   roster.url,
+		RoleLabel:   roster.role,
 	}
 	if pod.Deleting {
 		view.Phase += " — deleting"
@@ -171,7 +243,7 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 
 	// Cluster-reported facts ride only on the pod the operator names as
 	// primary, in the operator's own vocabulary.
-	if clusterSnap, ok := h.sources.Cluster.Current(); ok && clusterSnap.Cluster.Present {
+	if clusterSnap, ok := h.sources.Cluster.Current(); ok && roster.primary && clusterSnap.Cluster.Present {
 		if clusterSnap.Cluster.CurrentPrimary == pod.Name {
 			view.IsPrimary = true
 			view.WriteEndpoint = h.cfg.ClusterName + "-rw"
@@ -182,7 +254,7 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	view.History, view.HistoryAvailable = h.buildPodTimeline(pod.Name, 0, now)
+	view.History, view.HistoryAvailable = h.buildPodTimeline(pod.Name, nil, 0, now)
 
 	access := h.requestAccess(r)
 	elevated := access.hasIdentity && access.level >= authz.TierPowerUser
@@ -198,10 +270,10 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 		view.LogsGate = "log access requires the poweruser or dba level"
 	default:
 		view.CanTailLogs = true
-		view.Logs = h.podLogs(r, pod.Name)
+		view.Logs = roster.logs(r, pod.Name)
 	}
 
-	view.Shell = h.shell(r, "cluster-pods")
+	view.Shell = h.shell(r, roster.current)
 	h.renderPage(w, "pod-detail", "pod-detail.html.tmpl", view)
 }
 
@@ -209,17 +281,28 @@ func (h *Handler) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 // closed request-time exception as the standalone route: request-scoped,
 // bounded, never cached.
 func (h *Handler) podLogs(r *http.Request, pod string) *PodLogsView {
-	logs := &PodLogsView{RawURL: "/logs/" + pod + "?raw=1"}
+	return h.podLogsFrom(r, pod, "/logs/"+pod+"?raw=1", h.tailer.TailLogs)
+}
+
+// poolerPodLogs takes the same bounded tail through the pooler roster's
+// own membership proof, which is a different ownership chain and so a
+// different call.
+func (h *Handler) poolerPodLogs(r *http.Request, pod string) *PodLogsView {
+	return h.podLogsFrom(r, pod, "/poolers/logs/"+pod+"?raw=1", h.tailer.TailPoolerLogs)
+}
+
+func (h *Handler) podLogsFrom(r *http.Request, pod, rawURL string, tail func(context.Context, string) (observe.LogTail, error)) *PodLogsView {
+	logs := &PodLogsView{RawURL: rawURL}
 	if h.tailer == nil {
 		logs.State = "unavailable: no Kubernetes access"
 		return logs
 	}
-	tail, err := h.tailer.TailLogs(r.Context(), pod)
+	tailed, err := tail(r.Context(), pod)
 	switch {
 	case err == nil:
-		logs.Bounds = fmt.Sprintf("last %d lines, at most %d bytes", tail.LineLimit, tail.ByteLimit)
-		logs.Content = tail.Content
-		logs.Truncated = tail.TruncatedByBytes
+		logs.Bounds = fmt.Sprintf("last %d lines, at most %d bytes", tailed.LineLimit, tailed.ByteLimit)
+		logs.Content = tailed.Content
+		logs.Truncated = tailed.TruncatedByBytes
 	case redact.Categorize(err) == redact.CategoryForbidden:
 		logs.State = "not granted: pods/log"
 	default:
@@ -259,7 +342,17 @@ func (h *Handler) retainedDefinition(pod string) (template.HTML, uint64) {
 // retained revisions, newest first. An empty name merges every instance
 // pod, for the roster screen's recent-history panel. Each entry keeps
 // its source's words; nothing is narrated.
-func (h *Handler) buildPodTimeline(name string, bound int, now time.Time) ([]PodTimelineEntry, bool) {
+func (h *Handler) buildPodTimeline(name string, member map[string]bool, bound int, now time.Time) ([]PodTimelineEntry, bool) {
+	// A roster screen asks for every pod it lists, and there are two
+	// rosters. Without the membership set the instance-pods timeline
+	// also carried pooler-pod events, which are Pods too — the same
+	// name-blind match that makes the per-pod case work.
+	keep := func(object string) bool {
+		if name != "" {
+			return object == name
+		}
+		return member == nil || member[object]
+	}
 	var entries []PodTimelineEntry
 
 	if events, ok := h.sources.Events.CurrentEvents(); ok {
@@ -267,7 +360,7 @@ func (h *Handler) buildPodTimeline(name string, bound int, now time.Time) ([]Pod
 			if ev.Kind != "Pod" {
 				continue
 			}
-			if name != "" && ev.Object != name {
+			if !keep(ev.Object) {
 				continue
 			}
 			kind := "normal"
@@ -296,7 +389,7 @@ func (h *Handler) buildPodTimeline(name string, bound int, now time.Time) ([]Pod
 				if e.Kind != "Pod" {
 					continue
 				}
-				if name != "" && e.Name != name {
+				if !keep(e.Name) {
 					continue
 				}
 				entries = append(entries, podRevisionEntry(e))
