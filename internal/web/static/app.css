@@ -1725,6 +1725,17 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-panel-grouped .topo-pvc rect,
 .topo-panel-grouped .topo-snapshot rect { stroke: var(--storage); }
 .topo-panel-grouped .topo-storage rect { fill: var(--surface-2); stroke: var(--storage); }
+
+/* The declared-objects drawing gives each kind its own fill, so a band
+   is identifiable before its label is read. The border stays the
+   reconciliation verdict — applied or failed — because that is the
+   thing worth noticing, and it must not be repainted by the kind. The
+   verdict is in each box's text either way; the colour only repeats
+   it. */
+.topo-database rect { fill: color-mix(in oklab, var(--ok) 9%, var(--surface)); }
+.topo-publication rect { fill: color-mix(in oklab, var(--accent) 11%, var(--surface)); }
+.topo-subscription rect { fill: color-mix(in oklab, var(--storage) 11%, var(--surface)); }
+.topo-role rect { fill: color-mix(in oklab, var(--warn) 11%, var(--surface)); }
 /* Health by border colour; the state word rides in the diagram's labels
    and on the Cluster status screen, so colour is reinforcement. */
 .topo-node[data-state="current"] rect { stroke: var(--ok); }

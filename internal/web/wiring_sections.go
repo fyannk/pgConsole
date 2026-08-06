@@ -16,6 +16,7 @@ package web
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -40,6 +41,12 @@ const secMaxBoxes = 6
 // says whether backups are still running, the oldest says how far the
 // retained record reaches — and the middle is a quantity, not a list.
 const secMaxBackups = 3
+
+// secMaxRoles bounds the drawn roles. Higher than the other lists
+// because roles routinely run to dozens and the drawing has columns to
+// spare beside the cluster; still bounded, because the count is the
+// deployment's to choose and a drawing has to fit on a page.
+const secMaxRoles = 24
 
 // elideMiddle picks the rows a bounded list shows: everything when it
 // fits, otherwise the first and the last with the count between them.
@@ -854,7 +861,7 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 			line += " · " + db.Encoding
 		}
 		rows = append(rows, TopoGraphText{C: "disk", T: line})
-		n := add(fmt.Sprintf("db-%d", i), "endpoint", declaredState(db.Declared), rows)
+		n := add(fmt.Sprintf("db-%d", i), "database", declaredState(db.Declared), rows)
 		dbBoxes = append(dbBoxes, n)
 		if db.Database != "" {
 			byDatabase[db.Database] = n
@@ -864,7 +871,7 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		}
 	}
 	if extra > 0 {
-		dbBoxes = append(dbBoxes, add("db-more", "endpoint", "", []TopoGraphText{
+		dbBoxes = append(dbBoxes, add("db-more", "database", "", []TopoGraphText{
 			{C: "label", T: fmt.Sprintf("+%d more", extra)},
 		}))
 	}
@@ -892,7 +899,15 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 			roles = append(roles, role)
 		}
 	}
-	shown, extra = bounded(len(roles))
+	// Roles are not bounded to the six every other list uses: they are
+	// the one kind that routinely runs to dozens, they carry the wire a
+	// database points at, and there is room beside the cluster for
+	// several columns of them. The cap is a safety ceiling on a
+	// declaration count nobody controls, not a display choice.
+	shown, extra = len(roles), 0
+	if shown > secMaxRoles {
+		shown, extra = secMaxRoles-1, len(roles)-(secMaxRoles-1)
+	}
 	for i, role := range roles[:shown] {
 		rows := []TopoGraphText{{C: "label", T: role.Name}}
 		if role.Role != "" && role.Role != role.Name {
@@ -903,14 +918,14 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 			line += " · " + role.Attributes
 		}
 		rows = append(rows, TopoGraphText{C: "disk", T: line})
-		n := add(fmt.Sprintf("role-%d", i), "pvc", declaredState(role.Declared), rows)
+		n := add(fmt.Sprintf("role-%d", i), "role", declaredState(role.Declared), rows)
 		roleBoxes = append(roleBoxes, n)
 		if role.Role != "" {
 			byRole[role.Role] = n
 		}
 	}
 	if extra > 0 {
-		roleBoxes = append(roleBoxes, add("role-more", "pvc", "", []TopoGraphText{
+		roleBoxes = append(roleBoxes, add("role-more", "role", "", []TopoGraphText{
 			{C: "label", T: fmt.Sprintf("+%d more", extra)},
 		}))
 	}
@@ -926,12 +941,12 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 			line += " · " + pub.Target
 		}
 		rows = append(rows, TopoGraphText{C: "disk", T: line})
-		n := add(fmt.Sprintf("pub-%d", i), "pvc", declaredState(pub.Declared), rows)
+		n := add(fmt.Sprintf("pub-%d", i), "publication", declaredState(pub.Declared), rows)
 		pubBoxes = append(pubBoxes, n)
 		pubWires = append(pubWires, pubWire{node: n, db: pub.Database})
 	}
 	if extra > 0 {
-		pubBoxes = append(pubBoxes, add("pub-more", "pvc", "", []TopoGraphText{
+		pubBoxes = append(pubBoxes, add("pub-more", "publication", "", []TopoGraphText{
 			{C: "label", T: fmt.Sprintf("+%d more", extra)},
 		}))
 	}
@@ -947,85 +962,211 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 			line += " · from " + sub.Publication
 		}
 		rows = append(rows, TopoGraphText{C: "disk", T: line})
-		n := add(fmt.Sprintf("sub-%d", i), "pvc", declaredState(sub.Declared), rows)
+		n := add(fmt.Sprintf("sub-%d", i), "subscription", declaredState(sub.Declared), rows)
 		subBoxes = append(subBoxes, n)
 		pubWires = append(pubWires, pubWire{node: n, db: sub.Database, sub: true})
 	}
 	if extra > 0 {
-		subBoxes = append(subBoxes, add("sub-more", "pvc", "", []TopoGraphText{
+		subBoxes = append(subBoxes, add("sub-more", "subscription", "", []TopoGraphText{
 			{C: "label", T: fmt.Sprintf("+%d more", extra)},
 		}))
 	}
 
 	root := add("cluster", "primary", "", clusterRootRows(p))
 
-	// --- Placement: databases left, the cluster between them, roles
-	// right.
+	// --- Placement.
 	//
-	// There is no super-frame. One dotted box drawn round everything
-	// said only "these are declared into the cluster", which is true of
-	// every object on the screen and so distinguished nothing; each
-	// group now says it for itself by wiring to the cluster.
-	//
-	// The publications and subscriptions stay with the databases they
-	// name, stacked under them in the left column, so those wires never
-	// leave that column and never cross the cluster.
+	// Four bands, left to right in the order a declaration is read:
+	// what lives in a database, the databases, the cluster they are
+	// declared into, and the roles. Each band is its own column, and
+	// the boxes inside a band are placed at the vertical position that
+	// makes their wire straight rather than packed to the top — a step
+	// in an orthogonal wire is supposed to mean the two ends are not
+	// aligned, so a drawing full of steps that mean nothing teaches a
+	// reader to stop reading them.
 
 	frameW := chWBox + 2*grpPad
 	top := float64(grpMargin)
 	content := top
 
 	var frames []TopoFrame
-	// stackFrames places a column of frames at x and returns its bottom.
-	stackFrames := func(x, y float64, groups []struct {
-		label string
-		boxes []*TopoNode
-	}) float64 {
-		for _, g := range groups {
-			if len(g.boxes) == 0 {
+	// frameAround wraps boxes already placed, at x, in a labelled frame.
+	frameAround := func(label, kind string, x float64, boxes []*TopoNode) (TopoFrame, bool) {
+		if len(boxes) == 0 {
+			return TopoFrame{}, false
+		}
+		frameTop, frameBottom := math.Inf(1), math.Inf(-1)
+		for _, b := range boxes {
+			b.X = int(x) + grpPad
+			frameTop = math.Min(frameTop, float64(b.Y))
+			frameBottom = math.Max(frameBottom, float64(b.Y+b.H))
+		}
+		f := TopoFrame{
+			Label: label, Kind: kind,
+			X: int(x), Y: int(frameTop - grpLabelBand - grpPad),
+			W: frameW, H: int(frameBottom + grpPad - (frameTop - grpLabelBand - grpPad)),
+		}
+		frames = append(frames, f)
+		return f, true
+	}
+
+	// stackAt places boxes top-down from y and returns the next free y.
+	stackAt := func(boxes []*TopoNode, y float64) float64 {
+		for _, b := range boxes {
+			b.Y = int(y)
+			y += float64(b.H) + chBoxGap
+		}
+		return y
+	}
+
+	// The databases are the spine every other band aligns to, so they
+	// are placed first and packed.
+	dbTop := content + grpLabelBand + grpPad
+	stackAt(dbBoxes, dbTop)
+
+	// alignTo places one box so its centre matches a target centre,
+	// never above minY, and returns the y the next box may use.
+	alignTo := func(b *TopoNode, targetCy, minY float64) float64 {
+		y := targetCy - float64(b.H)/2
+		if y < minY {
+			y = minY
+		}
+		b.Y = int(y)
+		return y + float64(b.H) + chBoxGap
+	}
+
+	// Publications and subscriptions, each opposite the database it
+	// names. Ordered by that database so the column reads in the same
+	// order as the one beside it.
+	placeAgainstDatabases := func(boxes []*TopoNode, target map[string]*TopoNode, wires []pubWire, minY float64) float64 {
+		next := minY
+		for _, b := range boxes {
+			cyTarget := 0.0
+			found := false
+			for _, w := range wires {
+				if w.node == b {
+					if db := target[w.db]; db != nil {
+						cyTarget, found = cy(db), true
+					}
+					break
+				}
+			}
+			if !found {
+				b.Y = int(next)
+				next += float64(b.H) + chBoxGap
 				continue
 			}
-			boxY := y + grpLabelBand + grpPad
-			for _, b := range g.boxes {
-				b.X = int(x) + grpPad
-				b.Y = int(boxY)
-				boxY += float64(b.H) + chBoxGap
-			}
-			frames = append(frames, TopoFrame{
-				Label: g.label, Kind: "cluster",
-				X: int(x), Y: int(y), W: frameW, H: int(boxY - chBoxGap + grpPad - y),
-			})
-			y = boxY - chBoxGap + grpPad + chFrameGap
+			next = alignTo(b, cyTarget, next)
 		}
-		return y - chFrameGap
+		return next
 	}
 
-	// Left margin enough for the publication and subscription wires to
-	// run up the outside of their own column without hugging the
-	// viewBox edge.
+	pubTop := content + grpLabelBand + grpPad
+	pubNext := placeAgainstDatabases(pubBoxes, byDatabase, pubWires, pubTop)
+	subTop := pubTop
+	if len(pubBoxes) > 0 {
+		subTop = math.Max(subTop, pubNext+chFrameGap+grpLabelBand+grpPad)
+	}
+	placeAgainstDatabases(subBoxes, byDatabase, pubWires, subTop)
+
+	// Roles: the owners opposite the database they own, everything else
+	// packed into further columns beside them. All of them, within a
+	// bound — a cluster may declare hundreds, and an unbounded column
+	// would be a wall rather than a drawing.
+	ownerRole := map[*TopoNode]bool{}
+	for _, w := range ownerOf {
+		if r := byRole[w.role]; r != nil {
+			ownerRole[r] = true
+		}
+	}
+	var ownerBoxes, otherBoxes []*TopoNode
+	for _, b := range roleBoxes {
+		if ownerRole[b] {
+			ownerBoxes = append(ownerBoxes, b)
+		} else {
+			otherBoxes = append(otherBoxes, b)
+		}
+	}
+	roleTop := content + grpLabelBand + grpPad
+	next := roleTop
+	for _, b := range ownerBoxes {
+		target := roleTop
+		for _, w := range ownerOf {
+			if byRole[w.role] == b {
+				target = cy(w.db)
+				break
+			}
+		}
+		next = alignTo(b, target, next)
+	}
+	// The rest fill columns beside the owners, each column no taller
+	// than the drawing already is.
+	var otherColumns [][]*TopoNode
+	if len(otherBoxes) > 0 {
+		perColumn := len(dbBoxes) + len(pubBoxes) + len(subBoxes)
+		if perColumn < 4 {
+			perColumn = 4
+		}
+		for i := 0; i < len(otherBoxes); i += perColumn {
+			end := i + perColumn
+			if end > len(otherBoxes) {
+				end = len(otherBoxes)
+			}
+			otherColumns = append(otherColumns, otherBoxes[i:end])
+		}
+	}
+	for _, col := range otherColumns {
+		stackAt(col, roleTop)
+	}
+
+	// Columns, left to right.
 	leftX := float64(grpMargin) + 16
-	rootX := leftX + float64(frameW) + grpAlley
-	rightX := rootX + chWBox + grpAlley
+	dbX := leftX + float64(frameW) + grpAlley
+	rootX := dbX + float64(frameW) + grpAlley
+	rolesX := rootX + chWBox + grpAlley
 
-	leftBottom := stackFrames(leftX, content, []struct {
-		label string
-		boxes []*TopoNode
-	}{{"Databases", dbBoxes}, {"Publications", pubBoxes}, {"Subscriptions", subBoxes}})
-	rightBottom := stackFrames(rightX, content, []struct {
-		label string
-		boxes []*TopoNode
-	}{{"Database roles", roleBoxes}})
-
-	// The frame each group wires to the cluster from, remembered by
-	// value: frames reallocates as columns are added.
-	frameByLabel := map[string]TopoFrame{}
-	for _, f := range frames {
-		frameByLabel[f.Label] = f
+	frameAround("Publications", "publication", leftX, pubBoxes)
+	frameAround("Subscriptions", "subscription", leftX, subBoxes)
+	dbFrame, hasDBFrame := frameAround("Databases", "database", dbX, dbBoxes)
+	// One frame around every roles column, not one per column: the
+	// continuation columns are the same group carried on, and a second
+	// dotted box beside the first reads as a second group with a name
+	// nobody wrote.
+	roleColumns := [][]*TopoNode{}
+	if len(ownerBoxes) > 0 {
+		roleColumns = append(roleColumns, ownerBoxes)
+	}
+	roleColumns = append(roleColumns, otherColumns...)
+	var rolesFrame TopoFrame
+	hasRolesFrame := false
+	for i, col := range roleColumns {
+		x := rolesX + float64(i)*(float64(frameW)+grpAlley*0.4)
+		for _, b := range col {
+			b.X = int(x) + grpPad
+		}
+	}
+	if len(roleColumns) > 0 {
+		frameTop, frameBottom := math.Inf(1), math.Inf(-1)
+		for _, col := range roleColumns {
+			for _, b := range col {
+				frameTop = math.Min(frameTop, float64(b.Y))
+				frameBottom = math.Max(frameBottom, float64(b.Y+b.H))
+			}
+		}
+		lastX := rolesX + float64(len(roleColumns)-1)*(float64(frameW)+grpAlley*0.4)
+		rolesFrame = TopoFrame{
+			Label: "Database roles", Kind: "role",
+			X: int(rolesX), Y: int(frameTop - grpLabelBand - grpPad),
+			W: int(lastX + float64(frameW) - rolesX),
+			H: int(frameBottom + grpPad - (frameTop - grpLabelBand - grpPad)),
+		}
+		frames = append(frames, rolesFrame)
+		hasRolesFrame = true
 	}
 
-	columnsBottom := leftBottom
-	if rightBottom > columnsBottom {
-		columnsBottom = rightBottom
+	columnsBottom := content
+	for _, f := range frames {
+		columnsBottom = math.Max(columnsBottom, float64(f.Y+f.H))
 	}
 	root.X = int(rootX)
 	root.Y = int((content+columnsBottom)/2) - root.H/2
@@ -1044,8 +1185,7 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 	// Each group states for itself that it is declared into the
 	// cluster, which is what the removed super-frame used to say once
 	// for all of them.
-	declares := func(label, id string, fromRight bool) {
-		f, ok := frameByLabel[label]
+	declares := func(f TopoFrame, ok bool, id string, fromRight bool) {
 		if !ok {
 			return
 		}
@@ -1059,12 +1199,11 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 		}))})
 		links = append(links, TopoGraphLink{Source: id, Target: "cluster", Kind: "refs"})
 	}
-	declares("Databases", "databases", false)
-	declares("Database roles", "roles", true)
+	declares(dbFrame, hasDBFrame, "databases", false)
+	declares(rolesFrame, hasRolesFrame, "roles", true)
 
-	// Publications and subscriptions against the database they name,
-	// in the gutter left of their own column.
-	inBus := leftX - 10
+	// Publications and subscriptions against the database they name.
+	// Placement put the two ends level, so these are straight lines.
 	for _, w := range pubWires {
 		db := byDatabase[w.db]
 		if db == nil {
@@ -1075,46 +1214,48 @@ func buildDatabasesDrawing(p *Page) *TopologyView {
 			kind = "replicate"
 		}
 		edges = append(edges, TopoEdge{Kind: kind, Path: roundedRoute(corners([]topoPoint{
-			{float64(w.node.X), cy(w.node)}, {inBus, cy(w.node)},
-			{inBus, cy(db)}, {float64(db.X), cy(db)},
+			{float64(w.node.X + w.node.W), cy(w.node)},
+			{(float64(w.node.X+w.node.W) + float64(db.X)) / 2, cy(w.node)},
+			{(float64(w.node.X+w.node.W) + float64(db.X)) / 2, cy(db)},
+			{float64(db.X), cy(db)},
 		}))})
 		links = append(links, TopoGraphLink{Source: w.node.ID, Target: db.ID, Kind: kind})
 	}
 
-	// A database and the role that owns it sit on opposite sides of the
-	// cluster, so these route over it: out of the role's left edge, up
-	// the right gutter, across a lane above the cluster box, down the
-	// left gutter, into the database's right edge.
-	//
-	// Leaving by the side rather than the top is what makes it work.
-	// Both columns are vertical stacks, so a wire entering a box from
-	// above would have to pass through every box stacked over it; and
-	// every box in a column shares one centre x, so three wires drawn
-	// over the top would have laid down on each other and read as one.
-	// The gutters are empty, and each wire takes its own x and its own
-	// lane there.
-	laneBase := rootCy - float64(root.H)/2 - 14
+	// A database and the role that owns it. The two are placed level,
+	// so the wire is a straight line across — unless that line would
+	// run through the cluster box standing between them, in which case
+	// it takes the gutters and a lane above it.
 	for i, w := range ownerOf {
 		role := byRole[w.role]
 		if role == nil {
 			continue // owner declared, no DatabaseRole observed for it
 		}
+		from, to := float64(role.X), float64(w.db.X+w.db.W)
+		level := math.Abs(cy(role)-cy(w.db)) < 1
+		clears := cy(role) < float64(root.Y)-6 || cy(role) > float64(root.Y+root.H)+6
+		if level && clears {
+			edges = append(edges, TopoEdge{Kind: "owner", Path: roundedRoute(corners([]topoPoint{
+				{from, cy(role)}, {to, cy(w.db)},
+			}))})
+			links = append(links, TopoGraphLink{Source: role.ID, Target: w.db.ID, Kind: "owner"})
+			continue
+		}
 		offset := float64(10 + i*8)
-		lane := laneBase - float64(i)*9
+		lane := rootCy - float64(root.H)/2 - 14 - float64(i)*9
 		if lane < content+4 {
 			lane = content + 4
 		}
 		edges = append(edges, TopoEdge{Kind: "owner", Path: roundedRoute(corners([]topoPoint{
-			{float64(role.X), cy(role)},
+			{from, cy(role)},
 			{rootX + chWBox + offset, cy(role)},
 			{rootX + chWBox + offset, lane},
-			{leftX + float64(frameW) + offset, lane},
-			{leftX + float64(frameW) + offset, cy(w.db)},
-			{float64(w.db.X + w.db.W), cy(w.db)},
+			{dbX + float64(frameW) + offset, lane},
+			{dbX + float64(frameW) + offset, cy(w.db)},
+			{to, cy(w.db)},
 		}))})
 		links = append(links, TopoGraphLink{Source: role.ID, Target: w.db.ID, Kind: "owner"})
 	}
-
 	view.Edges = edges
 	view.Graph.Links = links
 	view.Legend = topoLegend(links)
