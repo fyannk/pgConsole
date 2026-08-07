@@ -19,6 +19,7 @@ endpoints and the static assets, and nothing else.
 | Method | Path | Level | Exists when | Purpose |
 |---|---|---|---|---|
 | GET | `/` | `view` | always | Plain-language overview assembled from the attributed screens. |
+| GET | `/cluster/overview` | `view` | always | The cluster verdict with its conditions table and per-section freshness. |
 | GET | `/objects` | `poweruser` | always | Inventory of every observed object, grouped by the resource it belongs to, each kind carrying its own watch's freshness. |
 | GET | `/cluster/pods` | `poweruser` | always | Membership-verified instance pods observed by Kubernetes. |
 | GET | `/backups` | `view` | always | Backup overview and operator/repository cross-check. |
