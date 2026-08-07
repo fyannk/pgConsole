@@ -54,16 +54,20 @@ if [ -f deploy/operations-role.yaml ]; then
 fi
 
 # The access-review Role may grant only the enumerated review access:
-# reads on the two pgToolBox CRDs and update on the request status
-# subresource. It must never grant a create, delete, spec-write, or
-# privilege escalation, and nothing on secrets.
+# reads on the two pgToolBox CRDs and patch on the request status
+# subresource. The verb is patch because the decision write is a merge
+# patch; update is forbidden here precisely because granting it would
+# not authorize that write, and a Role that cannot perform the one write
+# it exists for is worse than one that is obviously wrong. It must never
+# grant a create, delete, spec-write, or privilege escalation, and
+# nothing on secrets.
 if [ -f deploy/access-review-role.yaml ]; then
-  if grep -En '"(create|delete|deletecollection|patch|impersonate|escalate|bind)"' deploy/access-review-role.yaml; then
+  if grep -En '"(create|update|delete|deletecollection|impersonate|escalate|bind)"' deploy/access-review-role.yaml; then
     echo "forbidden verb in the access-review Role" >&2
     status=1
   fi
-  if grep -Eq '"update"' deploy/access-review-role.yaml && ! grep -Eq 'pgtoolboxaccessrequests/status' deploy/access-review-role.yaml; then
-    echo "access-review Role grants update outside the request status subresource" >&2
+  if grep -Eq '"patch"' deploy/access-review-role.yaml && ! grep -Eq 'pgtoolboxaccessrequests/status' deploy/access-review-role.yaml; then
+    echo "access-review Role grants patch outside the request status subresource" >&2
     status=1
   fi
 fi

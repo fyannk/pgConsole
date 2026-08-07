@@ -23,10 +23,13 @@ rules:
   - apiGroups: ["pgtoolbox.fyannk.dev"]
     resources: ["pgtoolboxaccessrequests"]
     verbs: ["get", "list", "watch"]
-  # Record the reviewer's decision on the request status subresource.
+  # Record the reviewer's decision on the request status subresource. The
+  # verb is patch, not update: the console writes the decision as a merge
+  # patch, and RBAC names the HTTP verb rather than the intent. A Role
+  # granting update alone refuses that write.
   - apiGroups: ["pgtoolbox.fyannk.dev"]
     resources: ["pgtoolboxaccessrequests/status"]
-    verbs: ["update"]
+    verbs: ["patch"]
   # Read the role names to populate the approval picker.
   - apiGroups: ["pgtoolbox.fyannk.dev"]
     resources: ["pgtoolboxroles"]
