@@ -31,10 +31,12 @@ import (
 	"github.com/fyannk/pgConsole/internal/config"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/ops"
 	"github.com/fyannk/pgConsole/internal/redact"
 	"github.com/fyannk/pgConsole/internal/review"
+	"github.com/fyannk/pgConsole/internal/scrape"
 	"github.com/fyannk/pgConsole/internal/web"
 )
 
@@ -78,10 +80,45 @@ type Deps struct {
 	// BackupSource observes the target cluster's Backup and
 	// ScheduledBackup resources plus its optional ObjectStore reference.
 	BackupSource observe.BackupSource
+	// PoolerSource observes the target cluster's Pooler resources.
+	PoolerSource observe.PoolerSource
+	// PoolerPodSource observes the pods run by the cluster's poolers.
+	PoolerPodSource observe.PoolerPodSource
+	// FailoverQuorumSource observes the cluster's FailoverQuorum.
+	FailoverQuorumSource observe.FailoverQuorumSource
+	// ImageCatalogSource observes the namespace's ImageCatalog set.
+	ImageCatalogSource observe.ImageCatalogSource
+	// DatabaseObjectsSource observes the cluster's declared databases,
+	// roles, publications and subscriptions.
+	DatabaseObjectsSource observe.DatabaseObjectsSource
+	// InfrastructureSource observes the cluster's services, volume
+	// claims and volume snapshots.
+	InfrastructureSource observe.InfrastructureSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
 	EvidenceFetcher evidence.Fetcher
+	// HistoryRunner is the durable history journal's background flush
+	// loop, owning the journal file's lifecycle. Nil means history is
+	// in-memory or disabled and no loop runs.
+	HistoryRunner func(ctx context.Context) error
+	// HistorySource reads the same bounded store that the Kubernetes watch
+	// recorder writes. Nil means history is disabled and no UI route exists.
+	HistorySource web.HistorySource
+	// Metrics is the bounded metrics window the scraper fills and the
+	// UI reads. Nil means metrics are disabled: no scraper runs and no
+	// route exists. The scraper needs the pod roster, so it only runs
+	// when PodSource is also wired.
+	Metrics *metrics.Store
+	// PoolerMetrics is the same window over the PgBouncer exporter's
+	// surface, filled from the pooler pods. Nil means no pooler metrics
+	// screen; it needs PoolerPodSource for the same reason Metrics
+	// needs PodSource.
+	PoolerMetrics *metrics.Store
+	// MetricsRunner is the metrics snapshot loop, owning the snapshot
+	// file's cadence and final flush. Nil means the window is in-memory
+	// or disabled and no loop runs.
+	MetricsRunner func(ctx context.Context) error
 	// Prober answers the readiness endpoint.
 	Prober web.ReadinessProber
 	// Clock supplies time to the collectors and the page ages.
@@ -110,10 +147,16 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 
 	var runners []runner
 	sources := web.Sources{
-		Cluster: web.EmptySnapshots{},
-		Pods:    web.EmptySnapshots{},
-		Events:  web.EmptySnapshots{},
-		Backups: web.EmptySnapshots{},
+		Cluster:         web.EmptySnapshots{},
+		Pods:            web.EmptySnapshots{},
+		Events:          web.EmptySnapshots{},
+		Backups:         web.EmptySnapshots{},
+		Poolers:         web.EmptySnapshots{},
+		PoolerPods:      web.EmptySnapshots{},
+		FailoverQuorum:  web.EmptySnapshots{},
+		ImageCatalogs:   web.EmptySnapshots{},
+		DatabaseObjects: web.EmptySnapshots{},
+		History:         deps.HistorySource,
 	}
 	if deps.Source != nil {
 		store := observe.NewStore()
@@ -124,6 +167,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		podStore := observe.NewPodStore()
 		sources.Pods = podStore
 		runners = append(runners, observe.NewPodCollector(deps.PodSource, podStore, deps.Clock, logger).Run)
+		if deps.Metrics != nil {
+			sources.Metrics = deps.Metrics
+			runners = append(runners, scrape.New(podStore, deps.Metrics, scrape.InstancePort,
+				deps.Metrics.Interval(), deps.Clock, logger).Run)
+		}
 	}
 	if deps.EventSource != nil {
 		eventStore := observe.NewEventStore()
@@ -135,10 +183,51 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		sources.Backups = backupStore
 		runners = append(runners, observe.NewBackupCollector(deps.BackupSource, backupStore, deps.Clock, logger).Run)
 	}
+	if deps.PoolerSource != nil {
+		poolerStore := observe.NewPoolerStore()
+		sources.Poolers = poolerStore
+		runners = append(runners, observe.NewPoolerCollector(deps.PoolerSource, poolerStore, deps.Clock, logger).Run)
+	}
+	if deps.PoolerPodSource != nil {
+		poolerPodStore := observe.NewPoolerPodStore()
+		sources.PoolerPods = poolerPodStore
+		runners = append(runners, observe.NewPoolerPodCollector(deps.PoolerPodSource, poolerPodStore, deps.Clock, logger).Run)
+		if deps.PoolerMetrics != nil {
+			sources.PoolerMetrics = deps.PoolerMetrics
+			runners = append(runners, scrape.New(poolerPodStore, deps.PoolerMetrics, scrape.PoolerPort,
+				deps.PoolerMetrics.Interval(), deps.Clock, logger).Run)
+		}
+	}
+	if deps.FailoverQuorumSource != nil {
+		quorumStore := observe.NewFailoverQuorumStore()
+		sources.FailoverQuorum = quorumStore
+		runners = append(runners, observe.NewFailoverQuorumCollector(deps.FailoverQuorumSource, quorumStore, deps.Clock, logger).Run)
+	}
+	if deps.ImageCatalogSource != nil {
+		catalogStore := observe.NewImageCatalogStore()
+		sources.ImageCatalogs = catalogStore
+		runners = append(runners, observe.NewImageCatalogCollector(deps.ImageCatalogSource, catalogStore, deps.Clock, logger).Run)
+	}
+	if deps.DatabaseObjectsSource != nil {
+		declaredStore := observe.NewDatabaseObjectsStore()
+		sources.DatabaseObjects = declaredStore
+		runners = append(runners, observe.NewDatabaseObjectsCollector(deps.DatabaseObjectsSource, declaredStore, deps.Clock, logger).Run)
+	}
+	if deps.InfrastructureSource != nil {
+		infraStore := observe.NewInfrastructureStore()
+		sources.Infrastructure = infraStore
+		runners = append(runners, observe.NewInfrastructureCollector(deps.InfrastructureSource, infraStore, deps.Clock, logger).Run)
+	}
 	if deps.EvidenceFetcher != nil {
 		evidenceStore := evidence.NewStore()
 		sources.Evidence = evidenceStore
 		runners = append(runners, evidence.NewPoller(deps.EvidenceFetcher, evidenceStore, deps.Clock, logger).Run)
+	}
+	if deps.HistoryRunner != nil {
+		runners = append(runners, deps.HistoryRunner)
+	}
+	if deps.MetricsRunner != nil {
+		runners = append(runners, deps.MetricsRunner)
 	}
 	// The access-review collector runs only in review mode with a wired
 	// source: disabled mode observes nothing and renders no panel.

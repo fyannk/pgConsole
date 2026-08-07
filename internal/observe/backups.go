@@ -17,11 +17,8 @@ package observe
 import (
 	"context"
 	"log/slog"
-	"sort"
 	"sync"
 	"time"
-
-	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Backup catalog bounds. One extra item is retained internally as a
@@ -68,6 +65,13 @@ type BackupFacts struct {
 	// method, empty otherwise. Correlation eligibility requires the
 	// accepted Barman Cloud plugin.
 	PluginName string
+	// SourceInstance is the pod the operator reports the backup was
+	// taken from (status.instanceID.podName), empty when it reported
+	// none. It is the only word on where a base backup came from, and
+	// it is not the primary by default: CloudNativePG's backup target
+	// prefers a standby, so a base backup and the WAL stream routinely
+	// leave the cluster from different instances.
+	SourceInstance string
 	// CreatedAt is the resource creation time.
 	CreatedAt time.Time
 	// StartedAt is the reported backup-tool start time.
@@ -106,6 +110,14 @@ type ObjectStoreReference struct {
 	Name string
 	// State is the metadata-only lookup outcome.
 	State ObjectStoreState
+	// Destination is the reported destination path, such as an s3:// or
+	// azure:// URL. Empty when the store reports none.
+	Destination string
+	// Endpoint is the reported endpoint URL, empty when the store uses
+	// the provider default.
+	Endpoint string
+	// RetentionPolicy is the reported retention, empty when none is set.
+	RetentionPolicy string
 }
 
 // BackupCatalogState is one complete seed and the resource versions from
@@ -212,24 +224,15 @@ func (s *BackupStore) CurrentBackups() (BackupsSnapshot, bool) {
 }
 
 func (s *BackupStore) publish(backups []BackupFacts, schedules []ScheduledBackupFacts, objectStore ObjectStoreReference, observedAt time.Time, sourceBackupsTruncated, sourceSchedulesTruncated bool) {
-	backupCopy := append([]BackupFacts(nil), backups...)
-	sort.Slice(backupCopy, func(i, j int) bool {
-		if !backupCopy[i].CreatedAt.Equal(backupCopy[j].CreatedAt) {
-			return backupCopy[i].CreatedAt.After(backupCopy[j].CreatedAt)
-		}
-		return backupCopy[i].Name < backupCopy[j].Name
-	})
-	backupsTruncated := sourceBackupsTruncated || len(backupCopy) > MaxBackups
-	if backupsTruncated {
-		backupCopy = backupCopy[:MaxBackups]
-	}
+	// Both cuts are decided by the length, never by the flag. The source
+	// flags are sticky for the life of a seed, so a set that was once
+	// over its bound and has since shrunk below it still arrives here
+	// flagged; cutting on the flag sliced past the end and panicked.
+	backupCopy, backupsCut := bounded(backups, lessBackupRecency, MaxBackups)
+	backupsTruncated := sourceBackupsTruncated || backupsCut
 
-	scheduleCopy := append([]ScheduledBackupFacts(nil), schedules...)
-	sort.Slice(scheduleCopy, func(i, j int) bool { return scheduleCopy[i].Name < scheduleCopy[j].Name })
-	schedulesTruncated := sourceSchedulesTruncated || len(scheduleCopy) > MaxScheduledBackups
-	if schedulesTruncated {
-		scheduleCopy = scheduleCopy[:MaxScheduledBackups]
-	}
+	scheduleCopy, schedulesCut := bounded(schedules, lessScheduleName, MaxScheduledBackups)
+	schedulesTruncated := sourceSchedulesTruncated || schedulesCut
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -253,16 +256,57 @@ func (s *BackupStore) markStale() {
 	}
 }
 
+// lessBackupRecency orders the rendered catalog newest first: a backup's
+// relevance is its recency, and the question the screen answers is when
+// the last one ran. Name breaks ties so the order is total.
+func lessBackupRecency(a, b BackupFacts) bool {
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.After(b.CreatedAt)
+	}
+	return a.Name < b.Name
+}
+
+// lessScheduleName orders schedules by name. A schedule has no
+// meaningful recency — it is a standing instruction, not an event.
+func lessScheduleName(a, b ScheduledBackupFacts) bool { return a.Name < b.Name }
+
+// backupRetention identifies retained backups and bounds them at one
+// above the rendered bound, the extra entry being the truncation
+// sentinel. The oldest loses, which matches lessBackupRecency: an
+// evicted entry is one the page would have cut anyway.
+var backupRetention = retention[BackupFacts]{
+	Name:      func(b BackupFacts) string { return b.Name },
+	UID:       func(b BackupFacts) string { return b.UID },
+	Limit:     MaxBackups + 1,
+	Evictable: func(a, b BackupFacts) bool { return a.CreatedAt.Before(b.CreatedAt) },
+}
+
+// scheduleRetention identifies retained schedules. Schedules carry no
+// useful arrival order, so the lexically largest name loses: the choice
+// is arbitrary but deterministic, and it matches lessScheduleName so an
+// evicted entry is one the page would have cut anyway.
+var scheduleRetention = retention[ScheduledBackupFacts]{
+	Name:      func(s ScheduledBackupFacts) string { return s.Name },
+	UID:       func(s ScheduledBackupFacts) string { return s.UID },
+	Limit:     MaxScheduledBackups + 1,
+	Evictable: func(a, b ScheduledBackupFacts) bool { return a.Name > b.Name },
+}
+
 // BackupCollector maintains a bounded catalog using seed, merged watch,
 // immutable publication, stale retention, and bounded retry backoff.
+// That contract is the shared loop in loop.go; what follows is only the
+// catalog-specific part of it.
+//
+// This is the two-set shape: the catalog merges two watches into one
+// change stream, and each set keeps its own truncation flag so one
+// screen never reports one set's bound as the other's.
 type BackupCollector struct {
 	source             BackupSource
 	store              *BackupStore
 	clock              Clock
 	logger             *slog.Logger
-	backoff            time.Duration
-	backups            map[string]BackupFacts
-	schedules          map[string]ScheduledBackupFacts
+	backups            keyed[BackupFacts]
+	schedules          keyed[ScheduledBackupFacts]
 	objectStore        ObjectStoreReference
 	backupsTruncated   bool
 	schedulesTruncated bool
@@ -270,161 +314,82 @@ type BackupCollector struct {
 
 // NewBackupCollector wires a backup collector onto a store.
 func NewBackupCollector(source BackupSource, store *BackupStore, clock Clock, logger *slog.Logger) *BackupCollector {
-	return &BackupCollector{source: source, store: store, clock: clock, logger: logger, backoff: backoffInitial}
+	return &BackupCollector{source: source, store: store, clock: clock, logger: logger}
 }
 
 // Run blocks until ctx is canceled, maintaining the store.
 func (c *BackupCollector) Run(ctx context.Context) error {
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
-		state, err := c.source.FetchBackupCatalog(ctx)
-		if err != nil {
-			c.loseContact("backup catalog fetch", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.seed(state)
-		c.publish()
-
-		w, err := c.source.WatchBackupCatalog(ctx, state)
-		if err != nil {
-			c.loseContact("backup catalog watch start", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.follow(ctx, w)
-		if ctx.Err() != nil {
-			return nil
-		}
-		c.loseContact("backup catalog watch", nil)
-		if c.wait(ctx) != nil {
-			return nil
-		}
-	}
+	return newLoop[BackupCatalogState, BackupChange](c, c.clock, c.logger).Run(ctx)
 }
 
-func (c *BackupCollector) seed(state BackupCatalogState) {
+// op names this resource in contact-loss logs.
+func (c *BackupCollector) op() string { return "backup catalog" }
+
+// seed replaces both retained sets and the object-store reference. The
+// cursor is the whole seed state rather than a resource version: the
+// catalog resumes two watches and needs both versions.
+func (c *BackupCollector) seed(ctx context.Context) (BackupCatalogState, error) {
+	state, err := c.source.FetchBackupCatalog(ctx)
+	if err != nil {
+		return BackupCatalogState{}, err
+	}
 	c.backupsTruncated = state.BackupsTruncated
-	c.backups = make(map[string]BackupFacts, len(state.Backups))
+	c.backups = make(keyed[BackupFacts], len(state.Backups))
 	for _, backup := range state.Backups {
-		c.retainBackup(backup)
+		if c.backups.put(backup, backupRetention) {
+			c.backupsTruncated = true
+		}
 	}
 	c.schedulesTruncated = state.SchedulesTruncated
-	c.schedules = make(map[string]ScheduledBackupFacts, len(state.ScheduledBackups))
+	c.schedules = make(keyed[ScheduledBackupFacts], len(state.ScheduledBackups))
 	for _, schedule := range state.ScheduledBackups {
-		c.retainSchedule(schedule)
+		if c.schedules.put(schedule, scheduleRetention) {
+			c.schedulesTruncated = true
+		}
 	}
 	c.objectStore = state.ObjectStore
+	return state, nil
 }
 
-func (c *BackupCollector) follow(ctx context.Context, w BackupWatch) {
-	defer w.Stop()
-	for {
-		select {
-		case change, ok := <-w.Changes():
-			if !ok {
-				return
-			}
-			c.apply(change)
-			continue
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case change, ok := <-w.Changes():
-			if !ok {
-				return
-			}
-			c.apply(change)
-		}
+// follow starts the merged catalog watch from the seed state. Either
+// underlying stream ending ends the merged one, so the collector
+// re-seeds both kinds rather than publishing a half-current generation.
+func (c *BackupCollector) follow(ctx context.Context, from BackupCatalogState) (<-chan BackupChange, func(), error) {
+	w, err := c.source.WatchBackupCatalog(ctx, from)
+	if err != nil {
+		return nil, nil, err
 	}
+	return w.Changes(), w.Stop, nil
 }
 
-func (c *BackupCollector) apply(change BackupChange) {
+// apply folds one change from either watch into its set. It reports
+// whether the change was recognized; a change carrying nothing is not.
+func (c *BackupCollector) apply(change BackupChange) bool {
 	switch {
 	case change.PutBackup != nil:
-		c.retainBackup(*change.PutBackup)
+		if c.backups.put(*change.PutBackup, backupRetention) {
+			c.backupsTruncated = true
+		}
 	case change.DeleteBackup != nil:
-		if current, ok := c.backups[change.DeleteBackup.Name]; ok && current.UID == change.DeleteBackup.UID {
-			delete(c.backups, change.DeleteBackup.Name)
-		}
+		c.backups.remove(change.DeleteBackup.Name, change.DeleteBackup.UID, backupRetention)
 	case change.PutScheduledBackup != nil:
-		c.retainSchedule(*change.PutScheduledBackup)
+		if c.schedules.put(*change.PutScheduledBackup, scheduleRetention) {
+			c.schedulesTruncated = true
+		}
 	case change.DeleteScheduledBackup != nil:
-		if current, ok := c.schedules[change.DeleteScheduledBackup.Name]; ok && current.UID == change.DeleteScheduledBackup.UID {
-			delete(c.schedules, change.DeleteScheduledBackup.Name)
-		}
+		c.schedules.remove(change.DeleteScheduledBackup.Name, change.DeleteScheduledBackup.UID, scheduleRetention)
 	default:
-		return
+		return false
 	}
-	c.publish()
+	return true
 }
 
-func (c *BackupCollector) retainBackup(backup BackupFacts) {
-	const retained = MaxBackups + 1
-	if _, exists := c.backups[backup.Name]; !exists && len(c.backups) >= retained {
-		c.backupsTruncated = true
-		oldestName := ""
-		var oldest time.Time
-		for name, current := range c.backups {
-			if oldestName == "" || current.CreatedAt.Before(oldest) {
-				oldestName, oldest = name, current.CreatedAt
-			}
-		}
-		delete(c.backups, oldestName)
-	}
-	c.backups[backup.Name] = backup
+// publish snapshots both retained sets and the object-store reference
+// into the store.
+func (c *BackupCollector) publish(observedAt time.Time) {
+	c.store.publish(c.backups.list(), c.schedules.list(), c.objectStore, observedAt,
+		c.backupsTruncated, c.schedulesTruncated)
 }
 
-func (c *BackupCollector) retainSchedule(schedule ScheduledBackupFacts) {
-	const retained = MaxScheduledBackups + 1
-	if _, exists := c.schedules[schedule.Name]; !exists && len(c.schedules) >= retained {
-		c.schedulesTruncated = true
-		largest := ""
-		for name := range c.schedules {
-			if name > largest {
-				largest = name
-			}
-		}
-		delete(c.schedules, largest)
-	}
-	c.schedules[schedule.Name] = schedule
-}
-
-func (c *BackupCollector) publish() {
-	backups := make([]BackupFacts, 0, len(c.backups))
-	for _, backup := range c.backups {
-		backups = append(backups, backup)
-	}
-	schedules := make([]ScheduledBackupFacts, 0, len(c.schedules))
-	for _, schedule := range c.schedules {
-		schedules = append(schedules, schedule)
-	}
-	c.store.publish(backups, schedules, c.objectStore, c.clock.Now(), c.backupsTruncated, c.schedulesTruncated)
-	c.backoff = backoffInitial
-}
-
-func (c *BackupCollector) loseContact(op string, err error) {
-	c.store.markStale()
-	attrs := []any{slog.String("op", op)}
-	if err != nil {
-		attrs = append(attrs, slog.String("category", redact.Safe(err)))
-	}
-	c.logger.Info("contact lost", attrs...)
-}
-
-func (c *BackupCollector) wait(ctx context.Context) error {
-	d := c.backoff
-	c.backoff *= 2
-	if c.backoff > backoffMax {
-		c.backoff = backoffMax
-	}
-	return c.clock.Wait(ctx, d)
-}
+// markStale marks the retained snapshot stale, if one exists.
+func (c *BackupCollector) markStale() { c.store.markStale() }

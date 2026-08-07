@@ -2,21 +2,33 @@
   Denial page. Renders web.DeniedView: a constant message stating why
   the request was refused — never the identity, never probe detail.
 */ -}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pgConsole — denied</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <header><h1>pgConsole</h1></header>
-  <main>
-    <section class="panel">
-      <h2>Access denied</h2>
-      <p class="state">{{.Message}}</p>
+{{template "page-head" "denied"}}
+{{template "shell-open" .Shell}}
+  <header>
+    <div class="header-bar">
+      <h1>pgConsole</h1>
+    </div>
+  </header>
+    {{- /* The refusal states the reason, what the reader holds, and the
+           whole ladder — so someone who has been refused can tell what
+           to ask for instead of guessing. The level is display only and
+           is already in the top bar; nothing here is an identity. */}}
+    <section class="panel denied">
+      <h2>Not available at your level</h2>
+      <p class="denied-reason">{{.Message}}.</p>
+      {{- if .Level}}
+      <p class="denied-level">The proxy asserted the <strong>{{.Level}}</strong> level for this request.</p>
+      {{- else}}
+      <p class="denied-level">The proxy asserted <strong>no level</strong> for this request, so the console admits it to nothing. Reaching the console is not authorization: the level decides every screen.</p>
+      {{- end}}
+      <dl class="facts">
+        <dt>view</dt>
+        <dd>The overviews — cluster, backups, databases and poolers — and the two metrics screens.</dd>
+        <dt>poweruser</dt>
+        <dd>Everything the console reads: the object inventories, the pod rosters and their detail, the object history, the repository evidence, and the bounded log tails.</dd>
+        <dt>dba</dt>
+        <dd>Everything above, plus the four day-2 operations and the access-request review panel.</dd>
+      </dl>
+      <p class="origin">Levels are asserted by the proxy in front of this console, not decided here. Ask whoever operates that proxy; the console has no way to grant one.</p>
     </section>
-  </main>
-</body>
-</html>
+{{template "shell-close"}}

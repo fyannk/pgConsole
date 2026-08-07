@@ -1,0 +1,238 @@
+# The declared PostgreSQL objects of the dev cluster: roles, databases,
+# and the logical replication that runs between `orders` and a second,
+# smaller cluster.
+#
+# All four kinds here are CloudNativePG's declarative CRDs, and that is
+# the whole reason the console can show them. pgConsole never connects
+# to PostgreSQL and never reads a catalog: every row on the Databases,
+# Roles, Publications and Subscriptions screens is a Kubernetes object
+# plus the operator's report of reconciling it. A role's password is a
+# Secret reference the console can see the existence of and nothing
+# more — it holds no permission on Secrets at all.
+#
+# Roles come first in this file because a Database names its owner, and
+# an owner that does not exist yet leaves the Database unreconciled
+# until it does. The operator recovers on its own once both are applied;
+# the ordering just avoids a stretch of red on first run.
+
+# CloudNativePG builds the cluster's own Role from the Secrets its
+# Cluster spec names, and a DatabaseRole's passwordSecret is not one of
+# them — so without this the instance manager is refused and the role
+# reports "secrets ... is forbidden". Named exactly, get only. This is
+# the CNPG cluster's ServiceAccount, not pgConsole's: pgConsole holds no
+# permission on Secrets at all and needs none, because it renders only
+# the fact that a reference exists.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: orders-declared-role-passwords
+  namespace: payments
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "watch"]
+    resourceNames:
+      - billing-owner-password
+      - catalog-owner-password
+      - ledger-owner-password
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: orders-declared-role-passwords
+  namespace: payments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: orders-declared-role-passwords
+subjects:
+  - kind: ServiceAccount
+    name: orders
+    namespace: payments
+---
+# --------------------------------------------------------------- roles
+#
+# Three owners and three readers, one pair per database, plus a group
+# the readers belong to. Passwords are generated Secrets the operator
+# owns; the console shows only that the reference exists.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: billing-owner-password
+  namespace: payments
+stringData:
+  username: billing_owner
+  password: devonly-billing-owner
+type: kubernetes.io/basic-auth
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: catalog-owner-password
+  namespace: payments
+stringData:
+  username: catalog_owner
+  password: devonly-catalog-owner
+type: kubernetes.io/basic-auth
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ledger-owner-password
+  namespace: payments
+stringData:
+  username: ledger_owner
+  password: devonly-ledger-owner
+type: kubernetes.io/basic-auth
+---
+# The group the per-database readers are members of, so the Roles screen
+# has a membership to render rather than three unrelated logins.
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: analysts
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: analysts
+  login: false
+  comment: group role the per-database readers belong to
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: billing-owner
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: billing_owner
+  login: true
+  createdb: false
+  createrole: false
+  connectionLimit: 20
+  passwordSecret:
+    name: billing-owner-password
+  comment: owns the billing database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: billing-reader
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: billing_reader
+  login: true
+  connectionLimit: 5
+  inRoles:
+    - analysts
+  comment: read-only access to billing
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: catalog-owner
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: catalog_owner
+  login: true
+  connectionLimit: 20
+  passwordSecret:
+    name: catalog-owner-password
+  comment: owns the catalog database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: catalog-reader
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: catalog_reader
+  login: true
+  connectionLimit: 5
+  inRoles:
+    - analysts
+  comment: read-only access to catalog
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: ledger-owner
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: ledger_owner
+  login: true
+  createdb: true
+  connectionLimit: 20
+  passwordSecret:
+    name: ledger-owner-password
+  comment: owns the ledger database
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: ledger-reader
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: ledger_reader
+  login: true
+  connectionLimit: 5
+  inRoles:
+    - analysts
+  comment: read-only access to ledger
+---
+
+# ----------------------------------------------------------- databases
+#
+# Three, each owned by its own role. databaseReclaimPolicy retain is the
+# dev-safe choice: deleting the Kubernetes object leaves the PostgreSQL
+# database alone rather than dropping it.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: billing
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: billing
+  owner: billing_owner
+  encoding: UTF8
+  databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: catalog
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: catalog
+  owner: catalog_owner
+  encoding: UTF8
+  databaseReclaimPolicy: retain
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: ledger
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  name: ledger
+  owner: ledger_owner
+  encoding: UTF8
+  databaseReclaimPolicy: retain

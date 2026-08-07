@@ -1,0 +1,321 @@
+{{- /*
+  Cluster overview. One screen, in the order a reader asks the
+  questions: the verdict first, then the shape, then the facts. The
+  status board and its conditions answer "is it healthy"; the children
+  drawing answers "what is attached"; the tables answer "what exactly".
+  Splitting the verdict from the shape across two screens made a reader
+  navigate to correlate two halves of one answer.
+
+  Every section states its own freshness in its footer beside the
+  attribution, because the sources are separate watches and one line
+  over the screen would be a claim none of them supports.
+*/ -}}
+{{template "page-head" "cluster overview"}}
+{{template "shell-open" .Shell}}
+    {{- if .Cluster}}
+    {{- with .Cluster}}
+    <div class="statusboard">
+      <div class="statusboard-main">
+        <span class="label">Cluster</span>
+        {{- if .Absent}}
+        <p class="headline" data-state="degraded">Not in the namespace</p>
+        <p class="sub">The API server confirmed no cluster named {{$.ClusterName}} exists here.</p>
+        {{- else}}
+        <p class="headline" data-state="{{$.Summary.HeadlineState}}">{{$.Summary.Headline}}</p>
+        <p class="sub">Reported phase: {{.Phase}}{{if .PhaseReason}} — {{.PhaseReason}}{{end}}.</p>
+        {{- end}}
+      </div>
+      {{- if not .Absent}}
+      <dl class="statusboard-side">
+        <dt>Primary</dt><dd>{{.CurrentPrimary}}</dd>
+        <dt>Instances</dt><dd>{{.Instances}}</dd>
+        <dt>Timeline</dt><dd>{{.Timeline}}</dd>
+        <dt>PostgreSQL</dt><dd>{{.PostgresVersion}}</dd>
+      </dl>
+      {{- end}}
+    </div>
+    {{- end}}
+    {{- with .Pods}}
+    {{- if .Rows}}
+    {{- with $.ClusterOverview.Children}}
+    {{template "topology" .}}
+    {{- end}}
+    <h2 class="section-title">Topology</h2>
+    {{- with .Disagreement}}
+    <div class="finding">
+      <p class="state">disagreement on the primary instance</p>
+      <p>{{.OperatorClaim}} <span class="origin">({{.OperatorOrigin.Label}})</span></p>
+      <p>{{.ObservedClaim}} <span class="origin">({{.ObservedOrigin.Label}})</span></p>
+    </div>
+    {{- end}}
+    <div class="topology">
+      {{- range .Rows}}
+      <div class="instance{{if eq .Role "primary"}} is-primary{{end}}">
+        <span class="role">{{.Role}}</span>
+        <span class="name">{{.Name}}</span>
+        <span class="line" data-state="{{if eq .Ready "true"}}current{{else if eq .Ready "false"}}degraded{{else}}unknown{{end}}">{{.Phase}} — {{if eq .Ready "true"}}ready{{else if eq .Ready "false"}}not ready{{else}}readiness {{.Ready}}{{end}}</span>
+        <span class="line muted">{{.Node}} · {{.Restarts}} restarts</span>
+      </div>
+      {{- end}}
+    </div>
+    {{- end}}
+    {{- end}}
+    <h2 class="section-title">Details</h2>
+    {{- with .Cluster}}
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Cluster status</h2>
+      </div>
+      <div class="panel-body">
+      {{- if .Absent}}
+      <p class="state" data-state="degraded">absent: cluster not found in the namespace</p>
+      {{- else}}
+      <dl class="facts">
+        <dt>Phase</dt><dd>{{.Phase}}{{if .PhaseReason}} — {{.PhaseReason}}{{end}}</dd>
+        <dt>Current primary</dt><dd>{{.CurrentPrimary}}</dd>
+        <dt>Target primary</dt><dd>{{.TargetPrimary}}</dd>
+        <dt>Instances</dt><dd>{{.Instances}}</dd>
+        <dt>Timeline</dt><dd>{{.Timeline}}</dd>
+        <dt>PostgreSQL major</dt><dd>{{.PostgresVersion}}</dd>
+        <dt>Image</dt><dd>{{.Image}}</dd>
+      </dl>
+      {{- if .Conditions}}
+      <div class="table-scroll">
+      <table class="conditions">
+        <caption>Conditions</caption>
+        <thead><tr><th>Type</th><th>Status</th><th>Reason</th><th>Message</th></tr></thead>
+        <tbody>
+          {{- range .Conditions}}
+          <tr><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.Reason}}</td><td>{{.Message}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- end}}
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- end}}
+    {{- else}}
+    <section class="panel">
+      <h2>Cluster status</h2>
+      <div class="empty"><strong>No cluster snapshot yet</strong>Nothing has been observed for this cluster, so the console cannot show its status.</div>
+      <p class="origin">source: operator-reported</p>
+    </section>
+    {{- end}}
+    {{- with .Quorum}}
+    
+    {{- end}}
+    {{- with .ImageCatalog}}
+    
+    {{- end}}
+
+    {{- if .ClusterOverview}}
+    {{- with .ClusterOverview}}
+    {{- if .Placement}}
+    <h2 class="section-title">Scheduling</h2>
+    <section class="panel">
+      <h2>Observed placement</h2>
+      <div class="table-scroll">
+      <table>
+        <caption>Instance placement</caption>
+        <thead><tr><th>Instance</th><th>Role</th><th>Node</th></tr></thead>
+        <tbody>
+        {{- range .Placement}}
+        <tr><td>{{.Name}}</td><td>{{.Role}}</td><td>{{.Node}}</td></tr>
+        {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- if .PlacementNote}}
+      {{- if .PlacementWarn}}
+      <div class="finding"><p class="state">{{.PlacementNote}}</p></div>
+      {{- else}}
+      <p class="state">{{.PlacementNote}}</p>
+      {{- end}}
+      {{- end}}
+      <p class="origin">source: Kubernetes-reported pod placement</p>
+    </section>
+    {{- end}}
+    {{- end}}
+    {{- else}}
+    <section class="panel">
+      <h2>Cluster overview</h2>
+      <div class="empty"><strong>No cluster snapshot yet</strong>Nothing has been observed for this cluster, so the console cannot draw its wiring.</div>
+      <p class="origin">source: Kubernetes-observed pods, operator-reported status</p>
+    </section>
+    {{- end}}
+    {{- with .Infrastructure}}
+    <h2 class="section-title">Storage</h2>
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Volume claims</h2>
+      </div>
+      <div class="panel-body">
+      {{- if .Volumes}}
+      <div class="table-scroll">
+      <table>
+        <caption>PersistentVolumeClaims of this cluster</caption>
+        <thead><tr><th>Claim</th><th>Instance</th><th>Purpose</th><th>Phase</th><th>Capacity</th><th>Storage class</th><th>Volume</th></tr></thead>
+        <tbody>
+        {{- range .Volumes}}
+        <tr>
+          <td>{{.Name}}</td><td>{{.Instance}}</td><td>{{if .Purpose}}{{.Purpose}}{{else}}—{{end}}</td>
+          <td data-state="{{.PhaseState}}">{{.Phase}}</td>
+          <td>{{.Capacity}}</td><td>{{.StorageClass}}</td><td>{{.VolumeName}}</td>
+        </tr>
+        {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <p class="state">no volume claims observed for this cluster</p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}} — <span data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
+      </div>
+    </section>
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Volume snapshots</h2>
+      </div>
+      <div class="panel-body">
+      {{- if not .SnapshotsObservable}}
+      <div class="empty"><strong>Snapshot API not read</strong>This cluster does not serve the <code>VolumeSnapshot</code> API, or the console was not granted it. Either way the console has not read snapshots — this is not a claim that none exist.</div>
+      {{- else if .Snapshots}}
+      <div class="table-scroll">
+      <table>
+        <caption>VolumeSnapshots of this cluster</caption>
+        <thead><tr><th>Name</th><th>Source claim</th><th>Ready</th><th>Restore size</th><th>Age</th></tr></thead>
+        <tbody>
+        {{- range .Snapshots}}
+        <tr><td>{{.Name}}</td><td>{{.SourceClaim}}</td><td>{{.Ready}}</td><td>{{.RestoreSize}}</td><td>{{.Age}}</td></tr>
+        {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <p class="state">the snapshot API was read and reported no snapshots for this cluster</p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    <h2 class="section-title">Endpoints</h2>
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Services</h2>
+      </div>
+      <div class="panel-body">
+      {{- if .Services}}
+      <div class="table-scroll">
+      <table>
+        <caption>Services fronting this cluster</caption>
+        <thead><tr><th>Service</th><th>Routes to</th><th>Type</th><th>Address</th><th>Port</th><th>Selector</th></tr></thead>
+        <tbody>
+        {{- range .Services}}
+        <tr>
+          <td>{{.Name}}</td><td>{{if .Role}}{{.Role}}{{else}}—{{end}}</td><td>{{.Type}}</td>
+          <td>{{.Address}}</td><td>{{if .Port}}{{.Port}}{{else}}—{{end}}</td>
+          <td>{{range $i, $s := .Selector}}{{if $i}}, {{end}}{{$s}}{{end}}</td>
+        </tr>
+        {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <p class="state">no services observed for this cluster</p>
+      {{- end}}
+      {{- if .Truncated}}
+      <p class="state">truncated: more objects matched than the display bound</p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- end}}
+    {{- with .Quorum}}
+    <h2 class="section-title">Replication</h2>
+    <section class="panel">
+      <h2>Failover quorum</h2>
+      {{- if .Configured}}
+      <dl class="facts">
+        <dt>Method</dt><dd>{{.Method}}</dd>
+        <dt>Reported by</dt><dd>{{.Primary}}</dd>
+        <dt>Standbys awaited</dt><dd>{{.StandbyNumber}}</dd>
+        <dt>Potentially synchronous</dt><dd>{{if .Standbys}}{{range $i, $s := .Standbys}}{{if $i}}, {{end}}{{$s}}{{end}}{{else}}none reported{{end}}</dd>
+      </dl>
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">More standbys were reported than the display bound; the list above is cut.</p>
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>Not configured</strong>The operator reports no failover quorum for this cluster, so a transaction does not wait on a synchronous standby before it is acknowledged.</div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}} — <span data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
+    </section>
+    {{- end}}
+    {{- with .Backups}}
+    <h2 class="section-title">Backup path</h2>
+    <section class="panel">
+      <h2>Configured backups</h2>
+      <dl class="facts">
+        <dt>Most recent completed</dt><dd>{{.LastCompletedAge}}</dd>
+        {{- with $.ObjectStoreDetail}}
+        <dt>Object store</dt><dd>{{.Name}}{{if not .Observed}} — referenced, not read{{end}}</dd>
+        {{- if .Destination}}<dt>Destination</dt><dd>{{.Destination}}</dd>{{end}}
+        {{- if .Endpoint}}<dt>Endpoint</dt><dd>{{.Endpoint}}</dd>{{end}}
+        {{- if .Retention}}<dt>Retention</dt><dd>{{.Retention}}</dd>{{end}}
+        {{- end}}
+      </dl>
+      {{- if .ScheduledRows}}
+      <div class="table-scroll">
+      <table>
+        <caption>ScheduledBackup resources</caption>
+        <thead><tr><th>Name</th><th>Method</th><th>Schedule</th><th>Suspended</th></tr></thead>
+        <tbody>
+        {{- range .ScheduledRows}}
+        <tr><td>{{.Name}}</td><td>{{.Method}}</td><td>{{.Schedule}}</td><td>{{.Suspended}}</td></tr>
+        {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <div class="empty"><strong>No schedule</strong>No <code>ScheduledBackup</code> targets this cluster, so backups only happen when someone asks for one.</div>
+      {{- end}}
+      {{- with .EvidenceLink}}
+      <p><a href="{{.URL}}">{{.Label}}</a></p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}} — <span data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
+    </section>
+    {{- end}}
+<section class="panel">
+      <h2>Image catalog</h2>
+      {{- if .Referenced}}
+      <dl class="facts">
+        <dt>Reference</dt><dd>{{.Kind}}/{{.Name}}</dd>
+        <dt>Major version drawn</dt><dd>{{.Major}}</dd>
+      </dl>
+      {{- if not .Observable}}
+      <div class="empty"><strong>Content not claimed</strong>The cluster draws its image from a <code>ClusterImageCatalog</code>, which lives outside this console&#39;s namespace. {{.Unobservable}}, so the reference is shown and its content is not claimed. This is not a statement that the catalog is missing.</div>
+      {{- else if not .Found}}
+      <div class="empty"><strong>Catalog not found</strong>The cluster names this catalog, but the API server reports no such catalog exists.</div>
+      {{- else}}
+      <div class="table-scroll">
+      <table class="catalog-images">
+        <caption>Images offered</caption>
+        <thead><tr><th>Major</th><th>Image</th></tr></thead>
+        <tbody>
+          {{- range .Images}}
+          <tr{{if .Current}} class="current"{{end}}><td>{{.Major}}{{if .Current}} — drawn{{end}}</td><td>{{.Image}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- if .Truncated}}
+      <p class="state" data-state="degraded">The catalog carried more images than the display bound; the list above is cut.</p>
+      {{- end}}
+      {{- end}}
+      {{- else}}
+      <div class="empty"><strong>No catalog</strong>The cluster names its image directly rather than drawing it from an <code>ImageCatalog</code>.</div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}} — <span data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
+    </section>
+{{template "shell-close"}}

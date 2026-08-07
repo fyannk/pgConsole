@@ -37,10 +37,15 @@ health, data integrity, or backup usability. A `Backup` in phase
   multi-namespace views are not a roadmap item; they are non-goals. A
   console watches exactly one `Cluster` in one namespace, and the
   configuration cannot express more.
-- **Not a dashboard, installer, or fleet manager.** pgConsole does not
-  install CloudNativePG, does not manage clusters across a fleet, and is not
-  a general Kubernetes dashboard. It stores nothing — no logs, no metrics,
-  no history; every page is a live render of the current snapshots.
+- **Not an installer or fleet manager.** pgConsole does not install
+  CloudNativePG, does not manage clusters across a fleet, and is not a general
+  Kubernetes dashboard. It never stores log content. It retains exactly two
+  bounded data sets, both in-memory by default: a scrubbed object-definition
+  history captured from the existing watches, durable only through an explicit
+  single-replica journal mount; and a fixed-catalog window of the metrics this
+  cluster's own instance exporters report, which is not a monitoring system —
+  it has no alerting, no query language, and no history beyond its retention.
+  Monitoring depth stays a link-out to the tool that owns it.
 
 ## The pgtoolbox family
 

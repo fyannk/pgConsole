@@ -102,7 +102,19 @@ node_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{
 node_port=$(kubectl -n payments get svc pgconsole-e2e-access -o jsonpath='{.spec.ports[0].nodePort}')
 base="http://${node_ip}:${node_port}"
 
-page() { curl -fsS --max-time 5 "$base/" 2>/dev/null || true; }
+# Every screen is admitted by the forwarded level, so the journey states
+# an identity on every fetch; the ungated case is asserted on its own in
+# the admission section below. poweruser is the level that reaches every
+# read screen and no more — the operations and review panels are dba and
+# are exercised with their own headers.
+ID_USER="X-Forwarded-User: fanch"
+ID_LEVEL="X-PgToolBox-Level: poweruser"
+
+# The demonstrations read the cluster overview, not the index: the
+# overview is the screen carrying the cluster verdict together with the
+# per-section freshness the demonstrations turn stale and recover.
+page() { curl -fsS --max-time 5 -H "$ID_USER" -H "$ID_LEVEL" "$base/cluster/overview" 2>/dev/null || true; }
+page_at() { curl -fsS --max-time 5 -H "$ID_USER" -H "$ID_LEVEL" "$base$1" 2>/dev/null || true; }
 
 i=0
 until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
@@ -132,6 +144,21 @@ wait_page_contains() {
   done
 }
 
+wait_path_contains() {
+  path="$1"; needle="$2"; timeout="$3"; artifact="$4"
+  i=0
+  while :; do
+    body=$(page_at "$path")
+    if echo "$body" | grep -qF "$needle"; then
+      echo "$body" > "$OUT/$artifact"
+      return 0
+    fi
+    i=$((i + 2))
+    [ "$i" -le "$timeout" ] || { echo "$body" > "$OUT/$artifact"; log "timed out waiting for $path to contain: $needle"; return 1; }
+    sleep 2
+  done
+}
+
 log "creating a Backup resource (operator will report its phase)"
 cat <<'YAML' | kubectl apply -f - > /dev/null
 apiVersion: postgresql.cnpg.io/v1
@@ -146,23 +173,26 @@ YAML
 
 log "baseline: real operator-reported state renders"
 wait_page_contains "Cluster in healthy state" 120 baseline.html
-# The milestone demands every section render real rows: status,
-# conditions, pods, events, and backups.
-for needle in \
-  "orders-1" \
-  "current — age" \
-  "manual-1" \
-  "Conditions" \
-  "<td>Ready</td>" \
-  "source: operator-reported" \
-  "source: kubernetes-observed"; do
-  grep -qF "$needle" "$OUT/baseline.html" || { log "baseline misses: $needle"; exit 1; }
-done
-grep -qF "no events in the window" "$OUT/baseline.html" && { log "no event row rendered for the live cluster"; exit 1; }
-grep -qF "Pod/orders-1" "$OUT/baseline.html" || { log "member pod event not rendered"; exit 1; }
+# The overview and the section screens together must render real rows. Wait
+# independently for each snapshot: cluster health can already be present when
+# the Backup is created, and the overview intentionally summarizes rather than
+# repeating the section tables.
+wait_path_contains "/cluster/pods" "orders-1" 120 baseline-pods.html
+wait_path_contains "/backups/objects" "manual-1" 120 baseline-backups.html
+# The overview absorbed the conditions table the separate status screen
+# used to carry, and the Events screen was removed outright, so both are
+# read here rather than on screens that no longer exist.
+grep -qF "orders-1" "$OUT/baseline.html" || { log "overview misses: orders-1"; exit 1; }
+grep -qF "Conditions" "$OUT/baseline.html" || { log "overview misses the conditions table"; exit 1; }
+grep -qF "<td>Ready</td>" "$OUT/baseline.html" || { log "overview misses the Ready condition"; exit 1; }
+grep -qF "source: operator-reported" "$OUT/baseline.html" || { log "overview misses operator attribution"; exit 1; }
+grep -qF "current — age" "$OUT/baseline-pods.html" || { log "pods screen misses current snapshot age"; exit 1; }
+grep -qF "source: kubernetes-observed" "$OUT/baseline-pods.html" || { log "pods screen misses Kubernetes attribution"; exit 1; }
+grep -qF "manual-1" "$OUT/baseline-backups.html" || { log "backup objects screen misses: manual-1"; exit 1; }
+grep -qF "source: operator-reported" "$OUT/baseline-backups.html" || { log "backup objects screen misses operator attribution"; exit 1; }
 grep -qF 'href="https://viewer.example.com/repo"' "$OUT/baseline.html" || { log "configured evidence link-out not rendered"; exit 1; }
 grep -qE 'verified|restorable' "$OUT/baseline.html" && { log "prohibited language rendered"; exit 1; }
-log "baseline ok (status, conditions, pods, events, backups, link-out all render)"
+log "baseline ok (verdict, conditions, pods, backups, link-out all render)"
 
 log "log tail: poweruser-gated, bounded, live fetch for a verified member"
 # The tail sits above the baseline: a view-level user is refused.
@@ -225,11 +255,21 @@ readyz_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$base/ready
 [ "$readyz_status" = "200" ] || { log "readyz = $readyz_status after recovery"; exit 1; }
 
 log "route admission: the proxy-asserted level decides, the console probes nothing"
-# The baseline is ungated: any request the proxy admits sees read-only
-# status, even with no level asserted.
+# There is no ungated baseline. Reaching the console is not authorization:
+# with no level forwarded every screen refuses, including the index, and
+# what is served is the denial page rather than a thinner console.
 base_status=$(curl -s -o "$OUT/admission-baseline.html" -w '%{http_code}' --max-time 10 "$base/")
-[ "$base_status" = "200" ] || { log "ungated baseline = $base_status, want 200"; exit 1; }
-grep -qF "Cluster in healthy state" "$OUT/admission-baseline.html" || { log "ungated baseline misses cluster state"; exit 1; }
+[ "$base_status" = "403" ] || { log "ungated index = $base_status, want 403"; exit 1; }
+grep -qF "identity required" "$OUT/admission-baseline.html" || { log "ungated index denial misses its message"; exit 1; }
+grep -qF "Cluster in healthy state" "$OUT/admission-baseline.html" && { log "ungated index leaked cluster state"; exit 1; }
+
+# The lowest usable level reaches the overviews, and nothing above them.
+view_index=$(curl -s -o "$OUT/admission-view.html" -w '%{http_code}' --max-time 10 \
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: view" "$base/")
+[ "$view_index" = "200" ] || { log "view-level index = $view_index, want 200"; exit 1; }
+view_pods=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: view" "$base/cluster/pods")
+[ "$view_pods" = "403" ] || { log "view-level pod roster = $view_pods, want 403"; exit 1; }
 
 # The identity line reflects the proxy-asserted user and level verbatim,
 # never the user's own RBAC.
@@ -250,11 +290,16 @@ low=$(curl -s -o "$OUT/admission-low.html" -w '%{http_code}' --max-time 10 \
 [ "$low" = "403" ] || { log "view-level gated route = $low, want 403"; exit 1; }
 grep -qF "not authorized" "$OUT/admission-low.html" || { log "insufficient-level denial misses its message"; exit 1; }
 
-# An unrecognized level parses to none and stays at the baseline.
+# An unrecognized level parses to none, which now reaches nothing: it is
+# refused on the index exactly as it is on a gated route, rather than
+# falling back to a readable baseline.
 junk=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
   -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: superuser" "$base/logs/orders-1")
 [ "$junk" = "403" ] || { log "unknown-level gated route = $junk, want 403"; exit 1; }
-log "route admission ok (baseline ungated, identity proxy-asserted, gated route needs identity + level, unknown level stays baseline)"
+junk_index=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: superuser" "$base/")
+[ "$junk_index" = "403" ] || { log "unknown-level index = $junk_index, want 403"; exit 1; }
+log "route admission ok (nothing ungated, identity proxy-asserted, view reaches overviews only, unknown level reaches nothing)"
 
 log "day-2 operations: level-gated, confirmed, audited, RBAC-bounded"
 # Enable operations; the operations Role is deliberately not applied yet,
@@ -266,34 +311,38 @@ until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
   i=$((i + 2)); [ "$i" -le 60 ] || { log "console unreachable after enabling operations"; exit 1; }; sleep 2
 done
 
-# Operations require the poweruser level: a view-level user is refused.
+# Operations require the dba level: view is refused, and so is poweruser,
+# which reaches every read screen and stops short of the day-2 surface.
 ops_view=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
   -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: view" "$base/operations")
 [ "$ops_view" = "403" ] || { log "view-level operations index = $ops_view, want 403"; exit 1; }
-
-# The operations index exists now for the poweruser.
-ops_status=$(curl -s -o "$OUT/operations.html" -w '%{http_code}' --max-time 10 \
+ops_power=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
   -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: poweruser" "$base/operations")
+[ "$ops_power" = "403" ] || { log "poweruser operations index = $ops_power, want 403"; exit 1; }
+
+# The operations index exists now for the dba.
+ops_status=$(curl -s -o "$OUT/operations.html" -w '%{http_code}' --max-time 10 \
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" "$base/operations")
 [ "$ops_status" = "200" ] || { log "operations index = $ops_status, want 200"; exit 1; }
 grep -qF "Restart cluster" "$OUT/operations.html" || { log "operations index misses an operation"; exit 1; }
 
-# Fetch the confirmation form and its CSRF token as the poweruser.
+# Fetch the confirmation form and its CSRF token as the dba.
 curl -s -c "$OUT/cookies" -o "$OUT/confirm.html" --max-time 10 \
-  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: poweruser" "$base/operations/reload" > /dev/null
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" "$base/operations/reload" > /dev/null
 token=$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$OUT/confirm.html")
 [ -n "$token" ] || { log "no CSRF token in the confirmation form"; exit 1; }
 
 # A POST with the level met but no token is refused: CSRF is independent
 # of the level gate.
 noconf=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: poweruser" -X POST "$base/operations/reload")
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" -X POST "$base/operations/reload")
 [ "$noconf" = "403" ] || { log "tokenless POST = $noconf, want 403"; exit 1; }
 
 # With the token, the operation is attempted — but RBAC has no write
 # rule yet, so the operator rejects it: fire-and-observe surfaces the
 # not-accepted outcome, and nothing was changed.
 rbac_blocked=$(curl -s -o "$OUT/op-rbacblocked.html" -w '%{http_code}' --max-time 10 \
-  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: poweruser" \
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" \
   -X POST --data "csrf=${token}" "$base/operations/reload")
 grep -qF "not accepted" "$OUT/op-rbacblocked.html" || { log "RBAC-blocked op did not surface refusal (status $rbac_blocked)"; exit 1; }
 log "operations: level met and confirmed, but RBAC alone blocks the mutation"
@@ -303,10 +352,10 @@ kubectl apply -f deploy/operations-role.yaml > /dev/null
 i=0
 while :; do
   curl -s -o "$OUT/confirm2.html" --max-time 10 \
-    -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: poweruser" "$base/operations/reload" > /dev/null
+    -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" "$base/operations/reload" > /dev/null
   token=$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "$OUT/confirm2.html")
   accepted=$(curl -s -o "$OUT/op-accepted.html" -w '%{http_code}' --max-time 10 \
-    -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: poweruser" \
+    -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" \
     -X POST --data "csrf=${token}" "$base/operations/reload")
   if [ "$accepted" = "200" ] && grep -qF "accepted" "$OUT/op-accepted.html"; then
     break

@@ -35,9 +35,57 @@ rules:
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["backups", "scheduledbackups"]
     verbs: ["get", "list", "watch"]
+  # Poolers: namespace-scoped, selected by spec.cluster.name in the
+  # application. Missing permission degrades the section to unknown and
+  # retains the last-good set rather than failing the page.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["poolers"]
+    verbs: ["get", "list", "watch"]
+  # Declared database objects: namespace-scoped, each selected by its
+  # spec.cluster.name. Only the declaration and the operator's
+  # reconciliation report are read; the console never connects to
+  # PostgreSQL and never reads the Secrets a role declaration may name.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["databases", "databaseroles", "publications", "subscriptions"]
+    verbs: ["get", "list", "watch"]
+  # Pooler pod ownership. A pooler pod is not owned by its Pooler the
+  # way an instance pod is owned by its Cluster: CloudNativePG runs
+  # poolers as a Deployment, so proving membership means walking
+  # Pod -> ReplicaSet -> Deployment -> Pooler. Labels select; this walk
+  # is what decides. Get only, and nothing is read from these objects
+  # but their owner reference.
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "deployments"]
+    verbs: ["get"]
+  # Failover quorum: one object named after the cluster, so the get is
+  # pinned the same way the Cluster's is. RBAC cannot pin a watch by
+  # name; the application uses a metadata.name field selector.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["failoverquorums"]
+    verbs: ["get"]
+    resourceNames: ["orders"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["failoverquorums"]
+    verbs: ["watch"]
+  # Image catalogs: namespace-shared infrastructure that clusters
+  # reference, so there is no per-cluster ownership to select on. The
+  # console renders only the catalog spec.imageCatalogRef names.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["imagecatalogs"]
+    verbs: ["get", "list", "watch"]
   # Instance pods: selected by the cluster's labels.
   - apiGroups: [""]
     resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # The cluster's own services, so the console states the addresses
+  # clients actually dial instead of assuming the standard names.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  # The claims each instance keeps its data on: capacity, class and
+  # binding, none of which is inferable from the Cluster alone.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
   # Bounded log tail: only pods proven to belong to the cluster. Omit
   # this rule when deploying with ALLOW_LOGS=false.
@@ -53,6 +101,30 @@ rules:
   - apiGroups: ["barmancloud.cnpg.io"]
     resources: ["objectstores"]
     verbs: ["get"]
+  # Optional, for the cluster-overview children drawing: the further
+  # objects the Cluster owns, kept only when their controller owner
+  # reference names it. Each rule can be omitted on its own; the
+  # console then states the kind as not granted rather than absent.
+  #
+  # Deliberately absent: any grant on the secret resource. The console's
+  # read-only guarantee includes "nothing on secrets", and this example
+  # keeps it. The children drawing can show the cluster's Secrets as
+  # metadata — name, type, key count, never a value — but only if you
+  # add that grant yourself, accepting that RBAC cannot express
+  # "metadata only"; without it the drawing states the kind as not
+  # granted.
+  - apiGroups: [""]
+    resources: ["configmaps", "serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -185,3 +257,56 @@ spec:
                     - path: namespace
                       fieldRef:
                         fieldPath: metadata.namespace
+---
+# Optional: a durable history journal.
+#
+# By default the object-definition history is in-memory and the console
+# stays a stateless process: history restarts empty, honestly, with the
+# pod. Mounting a journal makes history survive restarts — the first
+# seeds of a new process life reconcile against the previous one, so a
+# change made while the console was down appears as an explicit
+# after-gap revision instead of vanishing.
+#
+# The trade is stated: this Deployment then owns a PersistentVolumeClaim
+# and must keep replicas at 1 (the journal file takes an exclusive
+# lock; a second replica fails fast at startup). The container filesystem
+# stays read-only — only this mount is writable. A hard kill loses at
+# most the last couple of seconds of history, never the file's
+# integrity.
+#
+# The metrics window can share the same volume: METRICS_PATH points a
+# periodic snapshot (one atomic rewrite per minute, one at shutdown) at
+# a file beside the journal, so the charts survive restarts too. A hard
+# kill loses at most the last minute of samples, which then reads as a
+# gap like any other unswept span.
+#
+# To enable, create the claim and add to the Deployment above:
+#
+#   env:
+#     - name: HISTORY_PATH
+#       value: /var/lib/pgconsole/history.db
+#     - name: METRICS_PATH
+#       value: /var/lib/pgconsole/metrics.snapshot
+#   volumeMounts:
+#     - name: history
+#       mountPath: /var/lib/pgconsole
+#   volumes:
+#     - name: history
+#       persistentVolumeClaim:
+#         claimName: pgconsole-orders-history
+#
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: pgconsole-orders-history
+#   namespace: payments
+#   labels:
+#     app.kubernetes.io/name: pgconsole
+#     app.kubernetes.io/instance: orders
+# spec:
+#   accessModes: ["ReadWriteOnce"]
+#   resources:
+#     requests:
+#       # Comfortably above HISTORY_MAX_BYTES (default 16Mi): the journal
+#       # holds the bounded timeline plus bbolt's structural overhead.
+#       storage: 256Mi

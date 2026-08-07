@@ -3,21 +3,14 @@
   enumerated day-2 operations. Each links to its confirmation form; no
   operation acts from this page.
 */ -}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pgConsole — operations {{.ClusterName}}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
+{{template "page-head" "operations"}}
+{{template "shell-open" .Shell}}
   <header>
-    <h1>pgConsole — operations</h1>
+    <div class="header-bar">
+      <h1>pgConsole — operations</h1>
     <dl class="target"><dt>Cluster</dt><dd>{{.ClusterName}}</dd></dl>
-    <nav class="links"><a href="/">back to the console</a></nav>
+    </div>
   </header>
-  <main>
     <section class="panel">
       <h2>Day-2 operations</h2>
       <ul>
@@ -26,6 +19,4 @@
         {{- end}}
       </ul>
     </section>
-  </main>
-</body>
-</html>
+{{template "shell-close"}}

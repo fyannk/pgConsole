@@ -1,0 +1,193 @@
+{{- /*
+  Metrics. One tab holds every instance's lines together; the rest hold
+  one instance each. On every tab the facts are the text —
+  latest, min, max and average per instance for a series, the latest
+  claim and its age for a tile — and the chart is an enhancement drawn
+  from a same-origin fetch of the same window.
+
+  Every instrument's explanation is a native popover: the trigger is a
+  button carrying popovertarget, which the browser wires up on its own.
+  No script is involved, so the explanations are reachable with
+  scripting off, and the panel is light-dismissed by Escape or a click
+  outside without this file owning any of that behaviour.
+
+  The origin is stated once, in the page footer, rather than under each
+  of the seventy-odd panels: every claim on this screen has the same
+  one, and repeating it that many times makes it furniture instead of
+  attribution.
+
+  Every value is a claim the instance's exporter made; the console only
+  recorded it, and a sweep that failed is a hole in the line, never an
+  interpolation.
+*/ -}}
+{{- /*
+  metric-note renders one instrument's explanation as a native popover.
+  The argument is anything carrying Title, Summary, Note and Scope, which
+  is both the tile view and the series view.
+
+  popovertarget is the whole mechanism: the browser opens, closes,
+  light-dismisses and focus-manages the panel, and does it with
+  scripting off. That is why this is a popover rather than the dialog
+  element the raw-definition screens use — <dialog> needs showModal(),
+  and an explanation should not be one of the things that stops working
+  without JavaScript.
+*/ -}}
+{{- define "metric-note" -}}
+<button type="button" class="metric-note-open" popovertarget="{{.Note.ID}}">What this means, and why it matters</button>
+<div class="metric-note" id="{{.Note.ID}}" popover>
+  <div class="metric-note-head">
+    <h4>{{.Title}}{{if .Unit}} <span class="origin">({{.Unit}})</span>{{end}}</h4>
+    <button type="button" class="dialog-close" popovertarget="{{.Note.ID}}" popovertargetaction="hide" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"></use></svg></button>
+  </div>
+  <p class="metric-note-lead">{{.Summary}}</p>
+  <dl class="facts">
+    <dt>What it is</dt><dd>{{.Note.Means}}</dd>
+    <dt>Why it matters</dt><dd>{{.Note.Why}}</dd>
+    <dt>What to watch for</dt><dd>{{.Note.Watch}}</dd>
+    {{- if .Scope}}
+    <dt>Where it is reported</dt><dd>{{.Scope}}</dd>
+    {{- end}}
+  </dl>
+</div>
+{{- end -}}
+
+{{template "page-head" .PageTitle}}
+{{template "shell-open" .Shell}}
+  <header>
+    <div class="header-bar">
+      <h1>{{.Title}}</h1>
+      <dl class="target"><dt>Scraped every</dt><dd>{{.Interval}}</dd><dt>Raw window</dt><dd>{{.RawWindow}}</dd><dt>Rollups kept</dt><dd>{{.Retention}}</dd></dl>
+    </div>
+  </header>
+
+  {{- /* Stated before the data, not after it: someone who reads only the
+         first thing on this screen must still come away knowing that
+         nothing here is watching on their behalf. */}}
+  <aside class="callout callout-bad" role="note">
+    <p class="callout-lead">This is not a monitoring system.</p>
+    <p>These panels are here to give you insight into what {{.Producer}} are reporting right now and over a short retained window — nothing more. Nothing on this screen watches anything on your behalf: there is no alerting, no notification, no escalation, no query language, no long-term history, and no evaluation of any threshold. The console never looks at these numbers; it only records and draws what the exporters claimed.</p>
+    <p>It <strong>cannot and must not</strong> replace real monitoring, alerting, supervision or observability. If a problem here would matter at three in the morning, something other than this page has to be the thing that notices it. Use the monitoring link-out in the sidebar for the tool that actually does that job.</p>
+  </aside>
+  {{- if not .HasSamples}}
+  <section class="panel">
+    <h2>{{.Title}}</h2>
+    <div class="empty"><strong>No samples yet</strong>No metrics endpoint has answered a sweep so far. The first samples appear within one scrape interval of an instance becoming reachable; if none ever do, check that the network policy allows this console to reach the pods&#39; metrics port.</div>
+    <p class="origin">source: instance-reported metrics</p>
+  </section>
+  {{- end}}
+  {{- if .HasSamples}}
+  <div class="tabs" role="tablist" aria-label="Metrics scope">
+    {{- range .Tabs}}
+    <button type="button" role="tab" data-tab="{{.ID}}" aria-selected="{{if .Selected}}true{{else}}false{{end}}" aria-controls="{{.ID}}">{{.Label}}</button>
+    {{- end}}
+  </div>
+  <div class="metrics-window" data-metrics-window hidden aria-hidden="true">
+    <label for="metrics-window">Window</label>
+    <select id="metrics-window" data-metrics-window-select>
+      <option value="raw">Live — the scrape window</option>
+      <option value="retention">Full retention</option>
+    </select>
+    {{- /* Text, not datetime-local: Chromium renders that control in the
+           browser's own UI locale and honours neither the document's
+           lang nor the element's, so it read 12-hour on an
+           English-language browser beside a page that states every other
+           time as 2026-08-06 10:37:01. A text box in the console's own
+           format is the only way to keep the two agreeing. */}}
+    <span class="metrics-range">
+      <label for="metrics-from">Zoom</label>
+      <input type="text" id="metrics-from" data-metrics-from inputmode="numeric" size="16"
+             placeholder="YYYY-MM-DD HH:MM" aria-label="Zoom from, as YYYY-MM-DD HH:MM">
+      <span aria-hidden="true">→</span>
+      <input type="text" id="metrics-to" data-metrics-to inputmode="numeric" size="16"
+             placeholder="YYYY-MM-DD HH:MM" aria-label="Zoom to, as YYYY-MM-DD HH:MM">
+      <button type="button" data-metrics-apply>Apply</button>
+      <button type="button" data-metrics-reset>Reset zoom</button>
+    </span>
+    <span class="metrics-hint">or drag across a chart</span>
+  </div>
+  {{- end}}
+
+  {{- range .Tabs}}
+  <div class="metrics-tab" id="{{.ID}}" role="tabpanel" aria-label="{{.Label}}" data-metrics-instance="{{.Instance}}" data-metrics-series="{{$.SeriesURL}}">
+    {{- if .Blurb}}
+    <p class="metrics-scope">{{.Blurb}}</p>
+    {{- end}}
+    {{- range .Groups}}
+    {{- if or .Tiles .Panels}}
+    <section class="metrics-group" aria-label="{{.Title}}">
+      <div class="metrics-group-head">
+        <h2>{{.Title}}</h2>
+        <p>{{.Blurb}}</p>
+      </div>
+
+      {{- if .Tiles}}
+      <div class="tiles">
+        {{- range .Tiles}}
+        {{- /* Same order as the chart panels beside them: name, gloss,
+               explanation, then the reading, then when it was claimed.
+               A tile and a panel are the same thing said two ways, so
+               the eye should not have to re-learn where to look. */}}
+        <div class="tile">
+          <h3>{{.Title}}{{if .Unit}} <span class="origin">({{.Unit}})</span>{{end}}</h3>
+          <p class="metric-summary">{{.Summary}}</p>
+          {{template "metric-note" .}}
+          <dl class="tile-readings">
+            {{- range .Readings}}
+            <dt>{{.Instance}}</dt>
+            <dd>
+              {{- if .ValueStamp}}
+              <span class="tile-value"><time datetime="{{.ValueStamp}}" data-local>{{.Value}}</time></span>
+              {{- else}}
+              <span class="tile-value">{{.Value}}</span>
+              {{- end}}
+              {{- if not .Reported}}
+              <span class="tile-age">not reported by this instance</span>
+              {{- else if .Stamp}}
+              <span class="tile-age">observed <time datetime="{{.Stamp}}" data-local>{{.StampText}}</time> — {{.Age}} ago</span>
+              {{- end}}
+            </dd>
+            {{- end}}
+          </dl>
+          {{- if .Stamp}}
+          <p class="tile-observed">observed <time datetime="{{.Stamp}}" data-local>{{.StampText}}</time> — {{.Age}} ago</p>
+          {{- end}}
+        </div>
+        {{- end}}
+      </div>
+      {{- end}}
+
+      {{- range .Panels}}
+      <section class="panel metric-panel">
+        <h2>{{.Title}}{{if .Unit}} <span class="origin">({{.Unit}})</span>{{end}}</h2>
+        <p class="metric-summary">{{.Summary}}</p>
+        {{template "metric-note" .}}
+        {{- if .Rows}}
+        <div class="metric-chart" data-metric-chart data-metric-key="{{.Key}}" data-metric-instance="{{.Instance}}" hidden aria-hidden="true"></div>
+        <div class="table-scroll">
+        <table>
+          <caption>Window summary per instance</caption>
+          <thead><tr><th>Instance</th><th>Latest</th><th>Min</th><th>Max</th><th>Avg</th></tr></thead>
+          <tbody>
+          {{- range .Rows}}
+          <tr><td>{{.Instance}}</td><td>{{.Latest}}</td><td>{{.Min}}</td><td>{{.Max}}</td><td>{{.Avg}}</td></tr>
+          {{- end}}
+          </tbody>
+        </table>
+        </div>
+        {{- else}}
+        <p class="state">no samples for this series in the retained window</p>
+        {{- end}}
+      </section>
+      {{- end}}
+    </section>
+    {{- end}}
+    {{- end}}
+  </div>
+  {{- end}}
+
+  {{- if .HasSamples}}
+  <footer class="metrics-origin">
+    <p class="origin">{{.Origin}}</p>
+  </footer>
+  {{- end}}
+{{template "shell-close"}}

@@ -3,24 +3,17 @@
   verified member pod's PostgreSQL container, kubernetes-observed. The
   content renders as escaped text only; it is never cached or persisted.
 */ -}}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pgConsole — logs {{.Pod}}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
+{{template "page-head" "log tail"}}
+{{template "shell-open" .Shell}}
   <header>
-    <h1>pgConsole — log tail</h1>
+    <div class="header-bar">
+      <h1>pgConsole — log tail</h1>
     <dl class="target">
       <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
       <dt>Pod</dt><dd>{{.Pod}}</dd>
     </dl>
-    <nav class="links"><a href="/">back to the console</a></nav>
+    </div>
   </header>
-  <main>
     <section class="panel">
       <h2>PostgreSQL container logs</h2>
       {{- if .State}}
@@ -34,6 +27,4 @@
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
     </section>
-  </main>
-</body>
-</html>
+{{template "shell-close"}}

@@ -1,43 +1,1820 @@
 /* Embedded stylesheet. Status is conveyed through text and structure;
-   color is never the only signal. */
-:root { color-scheme: light dark; }
+   color is never the only signal — every state that carries a hue also
+   carries the word, and a shape mark for the achromatic case.
+
+   No web font is loaded: the Content-Security-Policy declares no
+   font-src, so font-src falls back to default-src 'none'. The type
+   system is therefore built from the two stacks a browser always has —
+   a UI sans for chrome and a monospace for machine-reported data.
+   Identifiers, phases, timestamps, ages and counts are data; headings
+   and prose are chrome.
+
+   Color tokens are declared for light and overridden under
+   prefers-color-scheme: dark rather than through light-dark(), so the
+   sheet degrades on an older engine instead of losing its palette. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Type */
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius: 0.375rem;
+  --radius-sm: 0.25rem;
+  --measure: 78rem;
+
+  /* Surfaces and text */
+  --bg: oklch(98.5% 0.003 255);
+  --surface: oklch(100% 0 0);
+  --surface-2: oklch(96.8% 0.004 255);
+  --text: oklch(24% 0.012 260);
+  --text-muted: oklch(50% 0.012 260);
+  --text-faint: oklch(62% 0.010 260);
+  --border: oklch(90% 0.006 260);
+  --border-strong: oklch(80% 0.008 260);
+
+  --accent: oklch(50% 0.15 252);
+  --accent-weak: oklch(94.5% 0.038 248);
+  --logo-blue: oklch(76% 0.11 232);
+  /* Storage identity: the wiring drawing's storage frames and boxes.
+     A domain colour, not a status — nothing purple is ever a verdict. */
+  --storage: oklch(45% 0.11 305);
+
+  /* Navy Chrome: the topbar takes the mark's outline navy, so the logo sits
+     on its own colour while the content area stays light. */
+  --topbar-bg: oklch(32% 0.10 258);
+  --topbar-border: oklch(28% 0.09 258);
+  --topbar-text: oklch(97% 0.01 250);
+  --topbar-muted: oklch(78% 0.05 248);
+
+  /* Status. Each pairs with a word in the markup and a mark in ::before. */
+  --ok: oklch(47% 0.12 152);
+  --warn: oklch(54% 0.12 72);
+  --warn-weak: oklch(95.5% 0.045 82);
+  --bad: oklch(51% 0.18 27);
+  --bad-weak: oklch(95.5% 0.03 27);
+  /* Not --text-faint: an unknown state is a claim about the cluster and
+     must clear 4.5:1, which --text-faint does not at the sizes used. */
+  --unknown: var(--text-muted);
+}
+
+/* The two retained directions are the only themes: Navy Chrome above,
+   Midnight Console here. With no data-theme the OS preference decides;
+   data-theme on <html> pins one, so both sets are also declared under
+   their own attribute scope. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: only dark;
+    --bg: oklch(19% 0.030 258);
+    --surface: oklch(23% 0.032 258);
+    --surface-2: oklch(27% 0.034 258);
+    --text: oklch(93% 0.012 250);
+    --text-muted: oklch(72% 0.025 250);
+    --text-faint: oklch(60% 0.025 252);
+    --border: oklch(32% 0.035 258);
+    --border-strong: oklch(44% 0.045 255);
+
+    --accent: oklch(74% 0.115 240);
+    --accent-weak: oklch(31% 0.06 250);
+    --storage: oklch(74% 0.10 305);
+
+    --topbar-bg: var(--surface);
+    --topbar-border: var(--border);
+    --topbar-text: var(--text);
+    --topbar-muted: var(--text-muted);
+
+    --ok: oklch(76% 0.14 155);
+    --warn: oklch(80% 0.12 80);
+    --warn-weak: oklch(30% 0.05 80);
+    --bad: oklch(73% 0.15 25);
+    --bad-weak: oklch(30% 0.07 25);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: only dark;
+  --bg: oklch(19% 0.030 258);
+  --surface: oklch(23% 0.032 258);
+  --surface-2: oklch(27% 0.034 258);
+  --text: oklch(93% 0.012 250);
+  --text-muted: oklch(72% 0.025 250);
+  --text-faint: oklch(60% 0.025 252);
+  --border: oklch(32% 0.035 258);
+  --border-strong: oklch(44% 0.045 255);
+
+  --accent: oklch(74% 0.115 240);
+  --accent-weak: oklch(31% 0.06 250);
+  --storage: oklch(74% 0.10 305);
+
+  --topbar-bg: var(--surface);
+  --topbar-border: var(--border);
+  --topbar-text: var(--text);
+  --topbar-muted: var(--text-muted);
+
+  --ok: oklch(76% 0.14 155);
+  --warn: oklch(80% 0.12 80);
+  --warn-weak: oklch(30% 0.05 80);
+  --bad: oklch(73% 0.15 25);
+  --bad-weak: oklch(30% 0.07 25);
+}
+
+:root[data-theme="light"] {
+  color-scheme: only light;
+  --bg: oklch(98.5% 0.003 255);
+  --surface: oklch(100% 0 0);
+  --surface-2: oklch(96.8% 0.004 255);
+  --text: oklch(24% 0.012 260);
+  --text-muted: oklch(50% 0.012 260);
+  --text-faint: oklch(62% 0.010 260);
+  --border: oklch(90% 0.006 260);
+  --border-strong: oklch(80% 0.008 260);
+
+  --accent: oklch(50% 0.15 252);
+  --accent-weak: oklch(94.5% 0.038 248);
+  --storage: oklch(45% 0.11 305);
+
+  --topbar-bg: oklch(32% 0.10 258);
+  --topbar-border: oklch(28% 0.09 258);
+  --topbar-text: oklch(97% 0.01 250);
+  --topbar-muted: oklch(78% 0.05 248);
+
+  --ok: oklch(47% 0.12 152);
+  --warn: oklch(54% 0.12 72);
+  --warn-weak: oklch(95.5% 0.045 82);
+  --bad: oklch(51% 0.18 27);
+  --bad-weak: oklch(95.5% 0.03 27);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
 body {
-  font-family: system-ui, sans-serif;
-  margin: 2rem auto;
-  max-width: 60rem;
-  padding: 0 1rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
   line-height: 1.5;
+  margin: 0;
+  max-width: none;
+  padding: 0;
+  -webkit-text-size-adjust: 100%;
 }
-header h1 { margin-bottom: 0.25rem; }
-dl.target { display: flex; gap: 0.5rem 1.5rem; flex-wrap: wrap; }
-dl.target dt { font-weight: 600; }
-dl.target dt::after { content: ":"; }
-dl.target dd { margin: 0; }
+
+/* Hidden until Alpine initialises, so an enhancement-only control never
+   flashes in and never lingers when the script fails to load. */
+[x-cloak] { display: none !important; }
+
+.refresh-error { color: var(--bad); }
+
+.history-visual {
+  overflow-x: auto;
+  margin: .75rem 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.history-visual svg { display: block; width: 100%; min-width: 620px; height: auto; }
+.history-axis { stroke: var(--border-strong); stroke-width: 2; }
+.history-point circle { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.history-point-deleted circle,
+.history-point-deleted-unobserved circle { fill: var(--bad); }
+.history-point-spec-changed circle { fill: var(--warn); }
+.history-point text,
+.history-visual-label { fill: var(--text-muted); font-size: 11px; }
+.manifest { max-height: 34rem; overflow: auto; }
+
+/* A pod detail is reached from the roster and has no other entry point,
+   so it says where it sits and offers the way back. The separator is
+   decorative and hidden from the accessibility tree; the trail's last
+   step is the current page and is not a link to itself. */
+.breadcrumb {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+.breadcrumb a { color: var(--accent); font-weight: 600; }
+.breadcrumb [aria-current] { color: var(--text); }
+/* Manifest syntax colours, assigned by role rather than by taste: keys
+   carry the structure so they take the accent, values are the payload
+   and stay in the reading colour, and the three literals share the one
+   hue that means "not a string" — so a null is never mistaken for the
+   word null in quotes. Every hue is a variable the theme already
+   defines, so the highlighting follows light and dark without a second
+   palette to keep in step. */
+.manifest .j-key { color: var(--accent); font-weight: 600; }
+.manifest .j-str { color: var(--text); }
+.manifest .j-num,
+.manifest .j-bool,
+.manifest .j-null { color: var(--storage); font-weight: 600; }
+
+.metric-chart { margin: var(--space-3) 0 var(--space-2); overflow-x: auto; }
+.metrics-window { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0 0; }
+/* The cursor readout. Positioned by transform inside uPlot's own over
+   box, and pointer-events:none so it can never sit between the pointer
+   and the plot it is reporting on. */
+.metric-tip {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px oklch(0% 0 0 / 0.18);
+  font-size: var(--text-xs);
+  left: 0;
+  padding: var(--space-2);
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+  z-index: 2;
+}
+.metric-tip-time { color: var(--text-muted); margin-bottom: var(--space-1); }
+.metric-tip-row { align-items: center; display: flex; gap: var(--space-2); }
+.metric-tip-key { border-radius: 2px; display: inline-block; height: 0.5rem; width: 0.5rem; }
+.metric-tip-name { color: var(--text-muted); }
+.metric-tip-val { font-family: var(--font-mono); font-weight: 600; margin-left: auto; }
+.metrics-window label { color: var(--text-muted); font-size: var(--text-sm); }
+.metrics-hint { color: var(--text-faint); font-size: var(--text-xs); margin-left: var(--space-3); }
+.metrics-range { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin-left: var(--space-4); }
+@media (max-width: 40rem) { .metrics-range { margin-left: 0; } .metrics-hint { margin-left: 0; } }
+.metrics-range label { color: var(--text-muted); font-size: var(--text-sm); }
+.metrics-range input { font-family: var(--font-mono); font-size: var(--text-xs); }
+/* A rejected range says so on the box rather than leaving Apply looking
+   broken. The message is the border plus the aria state, and the
+   placeholder beside it already states the shape expected. */
+.metrics-range input[aria-invalid="true"] { border-color: var(--bad); color: var(--bad); }
+.metric-chart .u-legend { color: var(--text-muted); font-size: var(--text-xs); }
+
+/* --- The metrics screen's own layout.
+
+   Order of the page is the argument it makes: the reading comes first,
+   its one-line gloss second, and the full explanation only when asked
+   for. The <details> is closed by default and is ordinary markup, so a
+   reader without script opens it exactly the same way, and print shows
+   the summary line either way. */
+
+.metrics-scope {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-4);
+  max-width: 90ch;
+}
+
+.metrics-group { margin: 0 0 var(--space-6); }
+.metrics-group-head { border-bottom: 1px solid var(--border); margin-bottom: var(--space-4); }
+.metrics-group-head h2 { font-size: var(--text-lg); margin: 0 0 var(--space-1); }
+.metrics-group-head p {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-3);
+  max-width: 90ch;
+}
+
+/* Two panels abreast where there is room. Forty charts stacked one per
+   row is a scroll nobody finishes; below the breakpoint they stack
+   anyway, which is the right shape for a phone. */
+.metrics-group { align-items: start; display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(min(30rem, 100%), 1fr)); }
+.metrics-group-head { grid-column: 1 / -1; }
+.metrics-group .tiles { grid-column: 1 / -1; }
+.metric-panel { margin: 0; }
+/* The global table floor exists so a wide table scrolls rather than
+   shredding its words. This one is five short columns of numbers, and
+   in a half-width panel the floor triggers a scrollbar under a table
+   that fits. */
+.metric-panel .table-scroll > table { min-width: 0; }
+
+/* Tiles: one point-in-time claim, or one per instance on the tab that
+   covers them all. No colour carries meaning here — every reading is a
+   word or a number, because a tile that said "green" would be the
+   console judging rather than reporting. */
+/* Between one and five across, never more. auto-fill alone packs as
+   many tracks as the floor allows, which on a wide screen made twelve
+   columns barely wider than the words in them — every reading broke
+   across two or three lines. Giving the track a floor of one fifth of
+   the row caps the count at five and lets each tile take the slack,
+   and the min(100%, …) keeps a single tile from overflowing a narrow
+   screen. The subtraction is the four gaps between five tracks.
+
+   Rows are 1fr so every tile is the same height, whatever the length
+   of its summary. */
+.tiles {
+  display: grid;
+  gap: var(--space-3);
+  grid-auto-rows: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, max(15rem, (100% - 4 * var(--space-3)) / 5)), 1fr));
+}
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-3);
+}
+.tile h3 { font-size: var(--text-sm); font-weight: 600; margin: 0 0 var(--space-2); }
+.tile-readings { display: grid; gap: var(--space-1) var(--space-3); grid-template-columns: max-content 1fr; margin: 0; }
+.tile-readings dt { color: var(--text-muted); font-size: var(--text-xs); padding-top: 0.15rem; }
+.tile-readings dd { display: flex; flex-direction: column; margin: 0; }
+/* One step down from the panel scale: at five tiles across, --text-base
+   in a monospace face broke a timestamp across two lines, and a date
+   that wraps mid-value is harder to read than a slightly smaller one
+   that does not. */
+.tile-value { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; }
+.tile-age { color: var(--text-faint); font-size: var(--text-xs); }
+/* One sweep produced every reading in the tile, so the time it was
+   claimed is stated once for the tile rather than once per line. */
+.tile-observed { color: var(--text-faint); font-size: var(--text-xs); margin: 0; }
+/* One instance on a pod tab: the reading is the tile, so the instance
+   name beside it is noise. */
+.tile-readings:has(dt:only-of-type) dt { display: none; }
+.tile-readings:has(dt:only-of-type) { grid-template-columns: 1fr; }
+/* The reading is the tile's payload, so it sits on the floor with the
+   observation line under it. That keeps the readings of a row aligned
+   however much gloss each tile carries above them, and it puts the
+   "observed" line where the chart panels put their own footer. */
+.tile-readings { margin-top: auto; padding-top: var(--space-3); }
+.tile-observed { margin-top: var(--space-2); }
+
+.metric-summary { color: var(--text-muted); font-size: var(--text-sm); margin: 0 0 var(--space-2); max-width: 80ch; }
+
+/* The explanation is a popover, not a disclosure: opening one used to
+   push everything below it down the page, which on a screen of seventy
+   panels loses the reader's place. The browser owns the open, the
+   close, the light dismiss and the focus; this only says what it looks
+   like. With no anchor positioning it lands centred, which is
+   predictable in a way a cursor-tracked tooltip is not — and it is
+   readable at a length no tooltip could carry. */
+.metric-note-open {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  padding: var(--space-1) 0;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+}
+.metric-note-open::before { content: "\24D8"; font-size: 1.1em; margin-right: var(--space-2); text-decoration: none; }
+.metric-note-open:hover { color: var(--accent); }
+
+.metric-note[popover] {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px oklch(0% 0 0 / 0.28);
+  color: var(--text);
+  max-height: 82vh;
+  max-width: min(44rem, 92vw);
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+/* Light: the explanation is read against the reading it explains, so
+   the page behind it should stay legible rather than be dismissed. */
+.metric-note[popover]::backdrop { background: oklch(0% 0 0 / 0.25); }
+.metric-note-head { align-items: flex-start; display: flex; gap: var(--space-3); }
+.metric-note-head h4 { font-size: var(--text-lg); margin: 0; }
+.metric-note-lead { color: var(--text-muted); font-size: var(--text-sm); margin: var(--space-2) 0 0; }
+.metric-note dl.facts { margin: var(--space-3) 0 0; }
+.metric-note dl.facts dd { font-family: var(--font-ui); max-width: 80ch; }
+@media (max-width: 40rem) {
+  .metric-note dl.facts { grid-template-columns: 1fr; }
+  .metric-note dl.facts dt { border-top: 1px solid var(--border); padding-bottom: 0; }
+  .metric-note dl.facts dd { border-top: 0; padding-top: 0; }
+}
+
+/* --- The denial page. It is the whole screen for a reader with no
+   level, so it carries the ladder rather than a bare refusal. */
+.panel.denied { max-width: 60rem; }
+.denied-reason { font-size: var(--text-lg); margin: 0 0 var(--space-3); }
+.denied-level { color: var(--text-muted); margin: 0 0 var(--space-4); }
+.denied dl.facts dd { font-family: var(--font-ui); max-width: 80ch; }
+.denied .origin { margin-top: var(--space-4); }
+
+/* ---------------------------------------------------------- Callouts
+
+   A standing statement about the screen itself, not about the cluster —
+   which is why it carries no [data-state] and no snapshot: it would say
+   the same thing about an empty console.
+
+   The rule is the same one the state tokens follow: colour is never the
+   only signal. The lead sentence says what this is in words, so the red
+   is emphasis on a message that is already legible in monochrome. Only
+   the border and the lead take the hue; the body stays body text,
+   because a paragraph of saturated red is a paragraph people skip. */
+.callout {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+}
+/* No measure cap: this one is a standing warning about the screen,
+   not body copy to be read at leisure, and it should occupy the
+   width it is given rather than trail off two thirds across. */
+.callout p { margin: 0 0 var(--space-2); }
+.callout p:last-child { margin-bottom: 0; }
+.callout-lead { font-weight: 700; }
+.callout-bad { border-color: color-mix(in oklab, var(--bad) 40%, var(--border)); border-left-color: var(--bad); }
+.callout-bad .callout-lead { color: var(--bad); }
+.callout-bad .callout-lead::before { content: "\26A0"; margin-right: var(--space-2); }
+.callout-bad strong { color: var(--bad); }
+
+/* One origin for the whole screen, stated once at its foot. Every claim
+   above it comes from the same place, and seventy repetitions of that
+   sentence read as furniture rather than as attribution. */
+.metrics-origin { border-top: 1px solid var(--border); margin-top: var(--space-6); padding-top: var(--space-3); }
+.metrics-origin .origin { margin: 0; max-width: 100ch; }
+
+/* ------------------------------------------------------------- Tabs
+
+   The panels are all served; the tablist only shows one at a time. With
+   no script every panel stays visible, so nothing is hidden behind JS. */
+
+/* The metrics tablist is one tab per instance, so its width follows the
+   cluster's size rather than the design's. It scrolls inside itself on a
+   narrow screen instead of pushing the document sideways. */
+/* overflow-y: hidden because the buttons hang 1px below the container
+   to sit their underline on its border, and a bare overflow-x makes a
+   scroll container in both axes — which put a stub vertical scrollbar
+   beside the tabs for that one pixel. */
+.tabs {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-4);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  margin-bottom: -1px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); }
+
+/* --- A pod row opens its detail screen. The name is a real link, so the
+   row click is an enhancement and keyboard use never depends on it. */
+table.pods tbody tr[data-href] { cursor: pointer; }
+table.pods tbody tr[data-href]:hover { background: var(--surface-2); }
+table.pods td a { color: var(--accent); font-weight: 600; }
+
+dialog.raw {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  max-height: 82vh;
+  max-width: min(60rem, 92vw);
+  padding: 0;
+  width: 100%;
+}
+
+dialog.raw::backdrop { background: oklch(0% 0 0 / 0.5); }
+dialog.raw .panel-head { border-radius: var(--radius) var(--radius) 0 0; }
+
+.dialog-close {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  height: 1.75rem;
+  margin-left: auto;
+  padding: 0;
+  place-items: center;
+  place-content: center;
+  width: 1.75rem;
+}
+
+.dialog-close:hover { background: var(--surface); color: var(--text); }
+/* Stroke and fill are set here too: the symbol's own presentation
+   attributes lose to any inherited paint, so state them at the host. */
+.dialog-close svg { fill: none; height: 1.125rem; stroke: currentColor; stroke-linecap: round; stroke-width: 1.75; width: 1.125rem; }
+dialog.raw .panel-body { padding: var(--space-4); }
+
+.link-button {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-3);
+}
+
+.link-button:hover { border-color: var(--accent); color: var(--accent); }
+/* The footer restates the snapshot, so its state hue must not pick up the
+   bolder weight the standalone state tokens use. */
+.origin [data-state] { font-weight: 400; }
+
+/* ------------------------------------------------- Timelines (history)
+
+   Three renderings, all static markup so they need no script:
+   .timeline        vertical, newest first — object revisions and events
+   .role-timeline   horizontal, one lane per pod — role over a window
+   Every colour is paired with the word in the markup. */
+
+.timeline { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; }
+
+.timeline > li {
+  display: grid;
+  gap: 0 var(--space-4);
+  grid-template-columns: 8.5rem 1rem 1fr;
+  padding-bottom: var(--space-4);
+  position: relative;
+}
+
+.timeline > li:last-child { padding-bottom: 0; }
+
+.timeline .when {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  padding-top: 0.15rem;
+  text-align: right;
+}
+
+.timeline .when b { color: var(--text); display: block; font-weight: 600; }
+
+/* The rail is drawn by the marker cell so it cannot drift from the dot. */
+.timeline .rail { display: flex; justify-content: center; position: relative; }
+.timeline .rail::before {
+  background: var(--border-strong);
+  bottom: -0.35rem;
+  content: "";
+  left: calc(50% - 0.5px);
+  position: absolute;
+  top: 1.2rem;
+  width: 1px;
+}
+.timeline > li:last-child .rail::before { display: none; }
+.timeline .rail::after {
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--accent);
+  content: "";
+  height: 0.625rem;
+  margin-top: 0.4rem;
+  width: 0.625rem;
+}
+.timeline > li[data-kind="created"] .rail::after { background: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
+.timeline > li[data-kind="warning"] .rail::after,
+.timeline > li[data-kind="deleted"] .rail::after { background: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.timeline > li[data-kind="changed"] .rail::after { background: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+.timeline > li[data-kind="normal"] .rail::after { background: var(--surface); box-shadow: 0 0 0 1px var(--border-strong); }
+
+.timeline .entry {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+.timeline .entry .head { align-items: baseline; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.timeline .entry .title { font-weight: 620; }
+.timeline .entry .object { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-sm); }
+.timeline .entry p { color: var(--text-muted); font-size: var(--text-sm); margin: 0; text-wrap: pretty; }
+.timeline .entry dl.facts-inline { color: var(--text-muted); display: flex; flex-wrap: wrap; font-size: var(--text-xs); gap: 0 var(--space-4); margin: var(--space-1) 0 0; }
+.timeline .entry dl.facts-inline dt { font-weight: 600; }
+.timeline .entry dl.facts-inline dd { font-family: var(--font-mono); margin: 0 0 0 var(--space-1); }
+
+.tag {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.45rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.tag[data-kind="created"] { border-color: var(--ok); color: var(--ok); }
+.tag[data-kind="changed"] { border-color: var(--warn); color: var(--warn); }
+.tag[data-kind="warning"], .tag[data-kind="deleted"] { border-color: var(--bad); color: var(--bad); }
+
+/* --- Horizontal role timeline. Lane widths are percentages of the window,
+   declared inline per segment; the colour restates the role name. */
+
+/* The top row keeps room for its own hover card, which is drawn above the
+   lane and would otherwise be clipped by the panel edge. */
+.role-timeline { display: grid; gap: var(--space-2) var(--space-4); grid-template-columns: 6rem 1fr; margin: 0; padding-top: 2rem; }
+.role-timeline .lane-label { align-self: center; font-family: var(--font-mono); font-size: var(--text-sm); }
+.role-timeline .lane-label .meta { display: block; font-family: var(--font-ui); font-size: var(--text-xs); }
+.role-timeline .lane { display: flex; }
+.role-timeline .seg:first-child { border-bottom-left-radius: var(--radius-sm); border-top-left-radius: var(--radius-sm); }
+.role-timeline .seg:last-child { border-bottom-right-radius: var(--radius-sm); border-top-right-radius: var(--radius-sm); }
+.role-timeline .seg {
+  align-items: center;
+  border-right: 1px solid var(--surface);
+  color: var(--surface);
+  display: flex;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  height: 1.75rem;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  /* Positioned so the hover card resolves against the segment, and NOT
+     clipped: the label truncation is done by the label, not the box. */
+  position: relative;
+  white-space: nowrap;
+}
+.role-timeline .seg:last-child { border-right: 0; }
+/* A lane shorter than its label drops the text; the lane's aria-label and
+   the change table below still carry the words. */
+.role-timeline .seg[data-narrow] { padding: 0; }
+.role-timeline .seg[data-narrow] span { clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+.role-timeline .seg[data-role="primary"] { background: var(--ok); }
+.role-timeline .seg[data-role="replica"] { background: var(--border-strong); color: var(--text); }
+.role-timeline .seg[data-role="absent"] { background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--border) 5px 10px); color: var(--text-muted); }
+.role-timeline .seg[data-role="failed"] { background: var(--bad); }
+/* The interval a segment covers is a fact of the segment, so it is read
+   from the segment itself on hover or focus rather than a title tooltip. */
+
+.role-timeline .seg[data-detail] { outline-offset: -2px; }
+.role-timeline .seg[data-detail]::after {
+  bottom: calc(100% + 0.35rem);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 16px oklch(0% 0 0 / 0.22);
+  color: var(--text);
+  content: attr(data-detail);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  left: 0;
+  opacity: 0;
+  padding: 0.3rem 0.5rem;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 0.12s ease;
+  white-space: nowrap;
+  z-index: 5;
+}
+.role-timeline .seg[data-detail]:hover::after,
+.role-timeline .seg[data-detail]:focus-visible::after { opacity: 1; }
+/* The last segment's card would overflow the panel, so it hangs left. */
+.role-timeline .seg[data-detail]:last-child::after { left: auto; right: 0; }
+
+.role-timeline .axis { color: var(--text-muted); display: flex; font-family: var(--font-mono); font-size: var(--text-xs); grid-column: 2; justify-content: space-between; }
+.role-timeline .axis span:first-child { text-align: left; }
+.role-timeline .axis span:last-child { text-align: right; }
+
+.legend { color: var(--text-muted); display: flex; flex-wrap: wrap; font-size: var(--text-xs); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.legend span { align-items: center; display: flex; gap: var(--space-2); }
+.legend i { border-radius: 2px; display: inline-block; height: 0.7rem; width: 1.1rem; }
+.legend i[data-role="primary"] { background: var(--ok); }
+.legend i[data-role="replica"] { background: var(--border-strong); }
+.legend i[data-role="failed"] { background: var(--bad); }
+.legend i[data-role="absent"] { background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--border) 4px 8px); }
+
+@media (max-width: 48rem) {
+  .timeline > li { grid-template-columns: 1rem 1fr; }
+  .timeline .when { grid-column: 2; padding-top: 0; text-align: left; }
+  .timeline .when b { display: inline; margin-right: var(--space-2); }
+  .timeline .entry { grid-column: 2; }
+  .role-timeline { grid-template-columns: 1fr; }
+  .role-timeline .axis { grid-column: 1; }
+}
+
+@media print { .timeline .entry, .role-timeline .lane { break-inside: avoid; } }
+
+/* The inline icon sprite defines <symbol>s for <use>; it must render
+   nothing and take no flow space, or its line box pushes the shell down
+   below the fixed top bar. Kept referenceable (not display:none) so the
+   symbols still resolve. */
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* -------------------------------------------------------------- Shell */
+
+/* The bar is fixed and the shell is padded down by its height, so the
+   shell's own box must be the viewport minus that bar — otherwise every
+   page is one bar taller than the window and the document scrolls. */
+.shell { align-items: flex-start; box-sizing: content-box; display: flex; min-height: calc(100vh - var(--header-h)); }
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-6) var(--space-5) var(--space-7);
+}
+
+/* ------------------------------------------------------------ Sidebar */
+
+/* Expanded is the served state: with no script the full labelled nav is
+   present and usable, and collapsing is purely additive. */
+.sidebar {
+  align-self: stretch;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-3);
+  position: sticky;
+  top: 0;
+  width: 15rem;
+}
+
+.sidebar[data-collapsed="true"] { padding-inline: var(--space-2); width: 3.5rem; }
+.sidebar[data-collapsed="true"] .sidebar-label,
+.sidebar[data-collapsed="true"] .sidebar-group > .sidebar-group-label span,
+.sidebar[data-collapsed="true"] .sidebar-heading { display: none; }
+.sidebar[data-collapsed="true"] .sidebar-sub { padding-left: 0; }
+.sidebar[data-collapsed="true"] .sidebar-link { justify-content: center; padding-inline: 0; }
+
+.sidebar-top { align-items: center; display: flex; gap: var(--space-2); justify-content: space-between; }
+/* A second top-level section heading sits away from the list above it; when
+   the rail is collapsed the heading is hidden, so a hairline keeps the two
+   sections legible as separate. */
+.sidebar-heading.is-section { margin-top: var(--space-3); }
+.sidebar[data-collapsed="true"] .sidebar-nav.is-external { border-top: 1px solid var(--border); padding-top: var(--space-2); }
+
+.sidebar-heading {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sidebar-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: grid;
+  flex: 0 0 auto;
+  height: 1.75rem;
+  padding: 0;
+  place-items: center;
+  width: 1.75rem;
+}
+
+.sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+.sidebar-nav { display: flex; flex-direction: column; gap: 1px; }
+.sidebar-group { display: flex; flex-direction: column; gap: 1px; }
+.sidebar-sub { display: flex; flex-direction: column; gap: 1px; padding-left: var(--space-5); }
+
+.sidebar-link {
+  align-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  display: flex;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sidebar-link:hover { background: var(--accent-weak); color: var(--accent); }
+/* Stroke properties are inherited, so setting them here reaches the
+   symbol content <use> clones into its shadow tree. */
+.sidebar-link svg {
+  fill: none;
+  flex: 0 0 auto;
+  height: 1rem;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  width: 1rem;
+}
+/* Hierarchy comes from weight and indent, not from dimming. Every entry
+   in the map is a destination this reader may open — muting them made
+   the whole column read as unavailable, which is exactly what the
+   disabled treatment below is for. */
+.sidebar-group-label { color: var(--text); font-weight: 650; }
+.sidebar-sub .sidebar-link { color: var(--text); }
+.sidebar-sub .sidebar-link:hover { color: var(--accent); }
+
+/* A destination this snapshot does not carry is shown, not hidden, so
+   the map of the console stays complete — but it is never a link. */
+.sidebar-link[aria-disabled="true"] { color: var(--text-faint); cursor: default; }
+.sidebar-link[aria-disabled="true"]:hover { background: transparent; color: var(--text-faint); }
+
+/* --------------------------------------------------------------- Header */
+
+header {
+  border-bottom: 2px solid var(--border-strong);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+}
+
+header h1 {
+  font-size: var(--text-2xl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+/* Title and target identity share one baseline-aligned row: the page
+   name on the left, what it is looking at on the right. */
+.header-bar {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  justify-content: space-between;
+}
+
+/* One type treatment throughout — same family, size and weight as the
+   surrounding chrome. Only colour separates a term from its value. */
+dl.target {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+dl.target dt:not(:first-of-type) { margin-left: var(--space-4); }
+
+dl.target dt {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+dl.target dd {
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  margin: 0;
+}
+
+/* The snapshot value keeps its state hue and mark, but not the bolder
+   weight the standalone state tokens use, so the row stays uniform. The
+   hues are restated here because `dl.target dd` outranks the bare
+   [data-state] tokens on specificity and would otherwise flatten them to
+   --text: the mark survived, the colour did not. */
+dl.target dd[data-state] { font-weight: 400; }
+dl.target dd[data-state="current"] { color: var(--ok); }
+dl.target dd[data-state="stale"] { color: var(--warn); }
+dl.target dd[data-state="degraded"] { color: var(--bad); }
+dl.target dd[data-state="unknown"] { color: var(--unknown); }
+
+/* Link-outs and the refresh control share one row, pushed apart, so
+   the control has a deliberate home instead of trailing under the nav. */
+.header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  justify-content: space-between;
+  margin-top: var(--space-4);
+}
+
+nav.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+nav.links a {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-3);
+  text-decoration: none;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+nav.links a:hover {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- Links */
+
+a { color: var(--accent); text-underline-offset: 0.2em; }
+a:hover { text-decoration-thickness: 2px; }
+
+:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------- Panels */
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* A plain panel carries its own padding. A sectioned panel delegates it
+   to .panel-head and .panel-body, which is opt-in through a class
+   rather than inferred with :has(), so layout never depends on selector
+   support the way the decorative state tint below does. */
 section.panel {
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 0.5rem;
-  margin: 1rem 0;
-  padding: 0.5rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0;
+  overflow: hidden;
+  padding: var(--space-4);
 }
-section.panel h2 { margin: 0.25rem 0; font-size: 1.1rem; }
-p.state { margin: 0.25rem 0; }
-p.meta { margin: 0.25rem 0; font-size: 0.85rem; opacity: 0.75; }
-p.origin, span.origin { margin: 0.25rem 0; font-size: 0.85rem; opacity: 0.75; }
+
+/* Every sectioned panel is one shape: a head band with the title and
+   its snapshot meta line, then a body. Nothing to collapse. */
+section.panel.sectioned { padding: 0; }
+
+section.panel:not(.sectioned) > h2 {
+  font-size: var(--text-lg);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-3);
+}
+
+section.panel:not(.sectioned) > :last-child { margin-bottom: 0; }
+
+.panel-head {
+  align-items: baseline;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+section.panel h2 {
+  font-size: var(--text-lg);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  margin: 0 auto 0 0;
+}
+
+/* The head carries the snapshot meta line, so its state colouring must
+   not inherit the bold weight the standalone state tokens use. */
+.panel-head p.meta {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  margin: 0;
+}
+
+.panel-body { padding: var(--space-4); }
+.panel-body > :first-child { margin-top: 0; }
+.panel-body > :last-child { margin-bottom: 0; }
+
+/* The inventory nests one block per object kind inside a group's body,
+   because each kind states its own watch's freshness and must read as
+   its own claim. A left rule was not enough to separate them: a card
+   with its own surface and border closes each kind, so two adjacent
+   freshness lines can never be read as one. The surface is the recessed
+   one in both themes — lighter than the panel in light mode, darker in
+   dark — so the division survives the theme rather than depending on a
+   border colour that all but vanishes in one of them. */
+.objects-kind {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+}
+.objects-kind:first-of-type { margin-top: var(--space-3); }
+.objects-kind:last-child { margin-bottom: 0; }
+.objects-kind h3 {
+  align-items: baseline;
+  display: flex;
+  font-size: var(--text-sm);
+  font-weight: 620;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+/* The count rides the heading so a kind states its size before the eye
+   reaches the table, and an empty kind is visibly empty. */
+.objects-count {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: 0 var(--space-2);
+}
+/* The kind's own table sits on the page surface, so the card reads as
+   the frame around it rather than as another row of it. */
+.objects-kind .table-scroll { background: var(--surface); }
+.objects-kind > p.state { font-size: var(--text-sm); }
+.objects-kind > p.origin:last-child { margin-bottom: 0; }
+/* The inventory's table hugs its content instead of filling the card.
+   Stretched to full width it gave the detail column seven hundred
+   pixels it had no use for, which stranded each row's definition link
+   an inch from the row it belongs to and squeezed longer names into two
+   lines. Cells stay on one line and the card scrolls when a detail is
+   genuinely long — the same bargain every other table here makes.
+
+   Every kind's table is laid out identically, so the columns line up
+   down the whole screen instead of each card finding its own widths.
+   The measures are in ch, which ties them to the text they hold rather
+   than to a guess in pixels. Content longer than its column ends in an
+   ellipsis and carries the full text as a tooltip — but the measures
+   are set past the longest thing the screen actually holds, so that is
+   a safety net rather than a routine outcome: a truncated value is
+   useless, and the card is allowed to scroll instead. */
+.objects-kind table.objects {
+  min-width: 0;
+  table-layout: fixed;
+  width: 143ch;
+}
+.objects-kind table.objects th,
+.objects-kind table.objects td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.objects-kind table.objects th:nth-child(1),
+.objects-kind table.objects td:nth-child(1) { width: 60ch; }
+.objects-kind table.objects th:nth-child(2),
+.objects-kind table.objects td:nth-child(2) { color: var(--text-muted); width: 70ch; }
+.objects-raw-col { text-align: left; width: 13ch; }
+/* The state dot is an inline-block ::before, and inside a tr the browser
+   wraps it in an anonymous cell — which shifted every column one place
+   right on exactly the kinds that report a state. It belongs on the name
+   cell, where it marks the object it describes. */
+.objects-kind table.objects td[data-state] { font-weight: 500; }
+.objects-raw { color: var(--accent); font-weight: 600; }
+
+/* ------------------------------------------------------ Text primitives */
+
+p.state { margin: var(--space-2) 0; }
+
+p.meta, p.origin, span.origin {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0;
+}
+
+span.origin { font-size: var(--text-xs); }
+
+/* Attribution is a footer rule, visually separated from the claims it
+   qualifies so a reader never mistakes it for another fact. */
+/* Attribution stays at --text-muted, not --text-faint: at 11px the
+   faint token measures 3.64:1 on light and 4.36:1 on dark, and claim
+   attribution is not decoration — it must clear 4.5:1. --text-faint is
+   reserved for the sort glyph, which is a non-text affordance held to
+   3:1. */
+.panel-body > p.origin:last-child {
+  border-top: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin-bottom: 0;
+  margin-top: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+code { font-family: var(--font-mono); font-size: 0.9em; }
+
+/* ----------------------------------------------------------- Fact lists */
+
+dl.facts {
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(9rem, max-content) 1fr;
+  margin: var(--space-3) 0;
+}
+
+dl.facts dt {
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-4) var(--space-2) 0;
+}
+
+dl.facts dd {
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: var(--space-2) 0;
+}
+
+dl.facts > dt:first-child, dl.facts > dt:first-child + dd { border-top: 0; }
+
+/* ------------------------------------------------------------- Findings */
+
 div.finding {
-  border-left: 3px solid currentColor;
-  margin: 0.5rem 0;
-  padding: 0.25rem 0.75rem;
+  background: var(--bad-weak);
+  border: 1px solid var(--bad);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  margin: var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
 }
-table { border-collapse: collapse; margin: 0.5rem 0; width: 100%; }
+
+div.finding > p:first-child { margin-top: 0; }
+div.finding > p:last-child { margin-bottom: 0; }
+div.finding > p.state { font-weight: 600; }
+div.finding > p.state::before { color: var(--bad); content: "\25C6\00A0"; }
+
+/* --------------------------------------------------------------- Tables */
+
+.table-scroll {
+  -webkit-overflow-scrolling: touch;
+  margin: var(--space-3) 0;
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  width: 100%;
+}
+
+/* Not uppercased: captions name Kubernetes kinds, and folding the case
+   turns "ScheduledBackup resources" into "SCHEDULEDBACKUP RESOURCES",
+   which destroys the word boundary the camel case carries. Column
+   headers are single plain words, so they still uppercase safely. */
+caption {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  padding-bottom: var(--space-2);
+  text-align: left;
+}
+
+thead tr { border-bottom: 2px solid var(--border-strong); }
+
+th {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+th, td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+
+th:first-child, td:first-child { padding-left: 0; }
+th:last-child, td:last-child { padding-right: 0; }
+
+/* Machine-reported cells are monospace; that is what makes a column of
+   names, phases or timestamps scannable.
+
+   break-word, never anywhere: `anywhere` lets the min-content width of
+   a cell fall to a single character, so table auto-layout collapses
+   every column and shreds values mid-word ("volumeSnapsho t"). With
+   break-word the longest word sets the floor, and a table that still
+   does not fit scrolls inside .table-scroll instead. */
+td { font-family: var(--font-mono); overflow-wrap: break-word; }
+
+/* Below this the columns stop being readable, so the table scrolls
+   rather than compressing further. The scroll is contained, so the
+   page body itself never scrolls sideways. */
+.table-scroll > table { min-width: 38rem; }
+
+tbody tr { border-top: 1px solid var(--border); }
+tbody tr:first-child { border-top: 0; }
+tbody tr:hover { background: var(--surface-2); }
+
+tbody tr.finding {
+  background: var(--bad-weak);
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+
+tbody tr.finding:hover { background: var(--bad-weak); }
+
+/* Sort affordances appear only once the enhancement layer marks a
+   header sortable; without the script every th stays inert. */
+th[data-sortable] { cursor: pointer; user-select: none; }
+th[data-sortable]:hover { color: var(--accent); }
+
+th[data-sortable]::after {
+  color: var(--text-faint);
+  content: "\2195";
+  font-size: 0.9em;
+  margin-left: var(--space-1);
+}
+
+th[data-sort="asc"], th[data-sort="desc"] { color: var(--accent); }
+th[data-sort="asc"]::after { color: var(--accent); content: "\2191"; }
+th[data-sort="desc"]::after { color: var(--accent); content: "\2193"; }
+
+/* ------------------------------------------------------ State treatment */
+
+/* Every element carrying data-state also carries the state word in its
+   text. Hue and mark are redundant reinforcement, never the sole
+   carrier of meaning. */
+[data-state] { font-weight: 600; }
+
+[data-state]::before {
+  display: inline-block;
+  font-weight: 700;
+  margin-right: 0.4em;
+  width: 0.75em;
+}
+
+[data-state="current"] { color: var(--ok); }
+[data-state="current"]::before { content: "\25CF"; }
+
+[data-state="stale"] { color: var(--warn); }
+[data-state="stale"]::before { content: "\25D0"; }
+
+[data-state="degraded"] { color: var(--bad); }
+[data-state="degraded"]::before { content: "\25C6"; }
+
+[data-state="unknown"] { color: var(--unknown); }
+[data-state="unknown"]::before { content: "\25CB"; }
+
+/* A suspect section is tinted at its edge so the whole panel reads as
+   qualified, not just its meta line. */
+section.panel:has(.panel-head [data-state="stale"]) { border-color: var(--warn); }
+section.panel:has(.panel-head [data-state="degraded"]) { border-color: var(--bad); }
+section.panel:has(.panel-head [data-state="stale"]) > .panel-head { background: var(--warn-weak); }
+section.panel:has(.panel-head [data-state="degraded"]) > .panel-head { background: var(--bad-weak); }
+
+/* ----------------------------------------------------------- Log output */
+
+/* A followed tail fills the screen below the chrome: the panel head, the
+   tab row and the tools line are subtracted so the pane itself scrolls. */
+/* The tail is sized from its own position at runtime (see console.js), so
+   it ends exactly at the viewport floor: the pane scrolls, the page does
+   not. The fallback height keeps it usable without script. */
+pre.logs[data-log-tail] { height: calc(100vh - var(--header-h) - 18rem); margin-top: 0; max-height: none; }
+
+.log-tools { align-items: center; color: var(--text-muted); display: flex; font-size: var(--text-xs); gap: var(--space-3); margin: 0 0 var(--space-2); }
+.log-tools label { align-items: center; cursor: pointer; display: flex; font-size: var(--text-sm); gap: var(--space-1); }
+.log-tools .live { align-items: center; display: flex; font-family: var(--font-mono); gap: var(--space-1); margin-left: auto; }
+.log-tools .live::before { background: var(--ok); border-radius: 50%; content: ""; height: 0.5rem; width: 0.5rem; }
+.log-tools .live[data-paused]::before { background: var(--text-faint); }
+
 pre.logs {
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 0.5rem;
-  font-size: 0.8rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  margin: var(--space-3) 0;
   max-height: 70vh;
   overflow: auto;
-  padding: 0.75rem;
+  padding: var(--space-3);
+  tab-size: 4;
   white-space: pre-wrap;
   word-break: break-all;
 }
-th, td { text-align: left; padding: 0.25rem 0.5rem; }
-thead tr { border-bottom: 1px solid color-mix(in srgb, currentColor 40%, transparent); }
+
+/* ----------------------------------------------------- Enhancement bars */
+
+.table-tools, .refresh {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: var(--space-2) var(--space-3);
+}
+
+.table-tools { margin: var(--space-3) 0 0; }
+
+.table-tools input[type="search"] {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  min-width: 12rem;
+  padding: var(--space-1) var(--space-2);
+}
+
+.table-tools .count {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin-left: auto;
+}
+
+.refresh label { align-items: center; cursor: pointer; display: flex; gap: var(--space-1); }
+.refresh .countdown { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- Forms */
+
+form { margin: var(--space-3) 0; }
+
+label { align-items: center; display: inline-flex; gap: var(--space-2); }
+
+input[type="text"], select {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+button, input[type="submit"] {
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  padding: var(--space-2) var(--space-4);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+button:hover, input[type="submit"]:hover {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A state-changing submit is marked class="danger" in the markup; the
+   word on the button still says what it does. */
+button.danger, input[type="submit"].danger { border-color: var(--bad); color: var(--bad); }
+button.danger:hover, input[type="submit"].danger:hover { background: var(--bad-weak); }
+
+/* ----------------------------------------------------------- Responsive */
+
+@media (max-width: 48rem) {
+  .content { padding: var(--space-4) var(--space-3) var(--space-6); }
+  .sidebar { padding-inline: var(--space-2); width: 3.5rem; }
+  .sidebar .sidebar-label, .sidebar .sidebar-heading,
+  .sidebar .sidebar-group > .sidebar-group-label span { display: none; }
+  .sidebar .sidebar-sub { padding-left: 0; }
+  .sidebar .sidebar-nav.is-external { border-top: 1px solid var(--border); padding-top: var(--space-2); }
+  .sidebar .sidebar-link { justify-content: center; padding-inline: 0; }
+  header h1 { font-size: var(--text-xl); }
+  dl.facts { grid-template-columns: 1fr; }
+  dl.facts dt { border-top: 1px solid var(--border); padding-bottom: 0; }
+  dl.facts dd { border-top: 0; padding-top: 0; }
+  .refresh { margin-left: 0; }
+}
+
+/* --------------------------------------------------------------- Motion */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------- Print */
+
+@media print {
+  :root {
+    --bg: #fff; --surface: #fff; --surface-2: #fff;
+    --text: #000; --text-muted: #333; --text-faint: #555;
+    --border: #bbb; --border-strong: #666;
+  }
+  body { max-width: none; padding: 0; }
+  .table-tools, .refresh, nav.links, .sidebar { display: none !important; }
+  .content { padding: 0; }
+  section.panel { break-inside: avoid; }
+  pre.logs { max-height: none; }
+}
+
+/* ================================================== Console shell v2 ==
+   The header is fixed: cluster identity and the refresh control must
+   stay reachable no matter how far a table has been scrolled. Its
+   height is a token so the shell and the sidebar can offset by it. */
+:root { --header-h: 3.25rem; }
+
+header.topbar {
+  align-items: center;
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--topbar-border);
+  color: var(--topbar-text);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-4);
+  height: var(--header-h);
+  left: 0;
+  margin: 0;
+  padding: 0 var(--space-4);
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 20;
+}
+
+header.topbar .brand { align-items: center; display: inline-flex; flex: 0 0 auto; gap: var(--space-2); }
+header.topbar h1 .console { color: var(--logo-blue); }
+header.topbar h1 { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.02em; margin: 0; }
+/* The bar is a fixed 3.25rem, so its target row must stay on one line and
+   truncate rather than wrap — a wrapped row would spill over the shell. */
+header.topbar dl.target { align-items: baseline; flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; overflow: hidden; white-space: nowrap; }
+/* Pairs keep their intrinsic width so the first ones stay legible; the row
+   clips at the bar's edge instead of squeezing every value to two letters. */
+header.topbar dl.target dt, header.topbar dl.target dd { flex: 0 0 auto; }
+/* Any residual clipping fades out, so a cut edge never reads as a word. */
+header.topbar dl.target { mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent); }
+header.topbar .refresh { color: var(--topbar-muted); flex: 0 0 auto; margin-left: auto; }
+header.topbar dl.target dt { color: var(--topbar-muted); }
+header.topbar dl.target dd { color: var(--topbar-text); }
+
+/* Theme switch. Both glyphs ship; the inactive one is hidden per theme so
+   the button always shows the theme it would move to. */
+.theme-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--topbar-text) 32%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--topbar-text);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  height: 1.75rem;
+  justify-content: center;
+  margin-left: var(--space-3);
+  padding: 0;
+  width: 1.75rem;
+}
+.theme-toggle:hover { background: color-mix(in oklab, var(--topbar-text) 12%, transparent); }
+.theme-toggle svg { height: 1rem; width: 1rem; }
+.theme-toggle .i-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .i-moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .i-sun { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-toggle .i-moon { display: none; }
+  :root:not([data-theme="light"]) .theme-toggle .i-sun { display: block; }
+}
+@media print { .theme-toggle { display: none !important; } }
+
+/* Time-zone switch. It carries a label rather than only an icon,
+   because the whole point is to state which zone the page is in — an
+   unlabelled clock glyph would leave that ambiguous, which is the
+   condition it exists to remove. Hidden in the served markup and
+   revealed by console.js: with no script every time on the page is the
+   UTC the server wrote, and a control that could not change that would
+   be a lie. */
+.tz-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--topbar-text) 32%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--topbar-text);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  gap: var(--space-2);
+  height: 1.75rem;
+  margin-left: var(--space-3);
+  padding: 0 var(--space-2);
+}
+.tz-toggle[hidden] { display: none; }
+.tz-toggle:hover { background: color-mix(in oklab, var(--topbar-text) 12%, transparent); }
+.tz-toggle svg { height: 1rem; width: 1rem; }
+.tz-label { font-variant-numeric: tabular-nums; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media print { .tz-toggle { display: none !important; } }
+@media (max-width: 60rem) { .tz-label { display: none; } }
+
+.shell { padding-top: var(--header-h); }
+.sidebar { max-height: calc(100vh - var(--header-h)); top: var(--header-h); }
+
+.sidebar-link[aria-current="page"] { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+
+/* ------------------------------------------------------ Overview page */
+
+h2.section-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: -0.01em; margin: var(--space-5) 0 var(--space-3); }
+
+.verdict {
+  align-items: baseline;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ok);
+  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-4);
+}
+
+.verdict .headline { font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.02em; margin: 0; }
+.verdict p.sub { color: var(--text-muted); margin: 0; max-width: 46rem; text-wrap: pretty; }
+
+.cards { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 0; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+}
+
+.card .label { color: var(--text-muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.card .value { font-size: var(--text-xl); font-weight: 620; letter-spacing: -0.02em; }
+.card .value[data-state] { font-weight: 620; }
+.card .note { color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty; }
+
+.empty {
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  padding: var(--space-5);
+  text-align: center;
+}
+
+.empty strong { color: var(--text); display: block; font-size: var(--text-lg); font-weight: 620; margin-bottom: var(--space-2); }
+
+/* The bar cannot fit a third pair below this width, so the third and any
+   later pair is dropped whole rather than clipped mid-word; the value is
+   restated on the page it describes. */
+@media (max-width: 78rem) {
+  header.topbar dl.target dt:nth-of-type(n+3), header.topbar dl.target dd:nth-of-type(n+3) { display: none; }
+}
+
+@media (max-width: 48rem) {
+  header.topbar { gap: var(--space-3); padding-inline: var(--space-3); }
+  header.topbar dl.target { display: none; }
+}
+
+@media print {
+  header.topbar { position: static; }
+  .shell { padding-top: 0; }
+}
+
+/* --------------------------------------------------- Cluster status ==
+   The verdict is the page's first object: one word at display size,
+   with the four identifying facts beside it, so the answer is legible
+   before any table is read. */
+.statusboard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ok);
+  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-6);
+  justify-content: space-between;
+  padding: var(--space-5);
+}
+
+.statusboard-main { flex: 1 1 22rem; min-width: 0; }
+.statusboard-main .label { color: var(--text-muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.statusboard-main .headline { font-size: var(--text-2xl); font-weight: 650; letter-spacing: -0.02em; margin: var(--space-1) 0 var(--space-2); }
+.statusboard-main .sub { color: var(--text-muted); margin: 0; max-width: 44rem; text-wrap: pretty; }
+
+.statusboard-side {
+  align-content: start;
+  display: grid;
+  gap: var(--space-1) var(--space-4);
+  grid-template-columns: max-content max-content;
+  margin: 0;
+}
+
+.statusboard-side dt { color: var(--text-muted); font-size: var(--text-sm); }
+.statusboard-side dd { font-family: var(--font-mono); font-size: var(--text-sm); margin: 0; }
+
+.topology { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+
+.instance {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+}
+
+/* The primary is the one instance whose identity changes behaviour, so
+   it is the only card that carries emphasis. */
+.instance.is-primary { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.instance .role { color: var(--text-muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.instance.is-primary .role { color: var(--accent); }
+.instance .name { font-family: var(--font-mono); font-size: var(--text-lg); font-weight: 600; }
+.instance .line { font-size: var(--text-sm); }
+.instance .line.muted { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); }
+
+/* --------------------------------------------------- Wiring diagram ==
+   One inline SVG on the Overview, drawn from a server-computed geometry.
+   Boxes read left to right; the primary is distinguished by a heavier
+   border (weight, not colour), while each server's border colour carries
+   its health — so neither the role nor the health depends on colour
+   alone. On a narrow screen the diagram scrolls rather than shrinking
+   below legibility. */
+.topo-title { font-size: var(--text-lg); font-weight: 620; letter-spacing: -0.01em; margin: 0 0 var(--space-3); }
+.topo-scroll { -webkit-overflow-scrolling: touch; overflow-x: auto; }
+/* The viewBox is the server's fixed geometry until the enhancement layer
+   refits it to the settled layout, so the drawing adapts to any width it
+   is given. The floor exists only to stop the type going illegible on a
+   phone, where the scroll shell then earns its keep; the ceiling stops a
+   wide screen inflating the box labels to headline size. Once capped the
+   drawing centres in the panel rather than hugging the left edge. */
+svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; min-width: 420px; width: 100%; }
+/* The grouped drawing carries five columns and three frames, so the
+   58rem ceiling that suits the four-tier drawing would shrink its type
+   past reading. It takes the panel's full width instead; its height
+   follows from the taller viewBox. */
+/* A framed drawing renders at the size its layout computed, and
+   shrinks to fit a narrower panel — it is never enlarged past it.
+   width:100% did the enlarging; width:auto lets the element's own
+   width attribute stand. */
+.topo-panel-grouped svg.topo { max-width: 100%; width: auto; }
+
+.topo text { font-family: var(--font-ui); }
+.topo-label { fill: var(--text); font-size: 13px; font-weight: 600; }
+.topo-sub { fill: var(--text-muted); font-size: 11px; }
+.topo-disk { fill: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
+.topo-elabel { fill: var(--text-muted); font-size: 10.5px; }
+
+/* The grouped drawing's dotted category frames, drawn under everything
+   else, and the tee dots marking where a trunk splits. */
+.topo-frame rect { fill: none; stroke: var(--border-strong); stroke-dasharray: 2 5; stroke-width: 1.2; }
+.topo-frame-label { fill: var(--text-muted); font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+/* Each category frame takes its domain's colour — client blue for the
+   poolers and the backup path, green for the cluster, storage purple
+   for both storage frames — so a reader can follow one domain from its
+   frame to its boxes to its wires. */
+.topo-frame-pool rect, .topo-frame-backup rect { stroke: var(--accent); }
+.topo-frame-pool .topo-frame-label, .topo-frame-backup .topo-frame-label { fill: var(--accent); }
+.topo-frame-cluster rect { stroke: var(--ok); }
+.topo-frame-cluster .topo-frame-label { fill: var(--ok); }
+.topo-frame-store rect { stroke: var(--storage); }
+.topo-frame-store .topo-frame-label { fill: var(--storage); }
+/* The object storage frame's endpoint: a fact about the region, so it
+   rides the frame label — in mono, and never shouted into uppercase. */
+.topo-frame-note { fill: var(--text-muted); font-family: var(--font-mono); font-weight: 450; letter-spacing: 0; text-transform: none; }
+.topo-dot { stroke: var(--surface); stroke-width: 1; }
+.topo-dot-write, .topo-dot-archive, .topo-dot-wal { fill: var(--accent); }
+.topo-dot-read { fill: var(--text-muted); }
+.topo-dot-replicate { fill: var(--ok); }
+.topo-dot-disk { fill: var(--text-muted); }
+
+.topo-node rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.5; }
+.topo-apps rect, .topo-endpoint rect { fill: var(--surface-2); stroke: var(--border); }
+.topo-storage rect { fill: var(--accent-weak); stroke: var(--accent); }
+.topo-snapshot rect { fill: var(--surface-2); stroke: var(--border-strong); }
+/* A claim is infrastructure the instance rests on, quieter than the
+   instance itself. */
+.topo-pvc rect { fill: var(--surface-2); stroke: var(--border); }
+/* A pooler is infrastructure the cluster does not own, so it reads as a
+   neighbour of the endpoints rather than one of the servers. */
+.topo-pooler rect { fill: var(--surface-2); stroke: var(--border-strong); }
+/* A ScheduledBackup box: the head of the backup path, in its blue. */
+.topo-backup rect { fill: var(--accent-weak); stroke: var(--accent); }
+/* A Secret box: metadata only, and visibly its own kind. */
+.topo-secret rect { fill: var(--warn-weak); stroke: var(--warn); }
+
+/* Domain tints, grouped drawing only: the boxes inside a coloured frame
+   answer it. Declared before the data-state rules so an actual health
+   verdict always outranks a domain colour. */
+.topo-panel-grouped .topo-pooler rect { stroke: var(--accent); }
+.topo-panel-grouped .topo-endpoint rect { stroke: var(--ok); }
+.topo-panel-grouped .topo-pvc rect,
+.topo-panel-grouped .topo-snapshot rect { stroke: var(--storage); }
+.topo-panel-grouped .topo-storage rect { fill: var(--surface-2); stroke: var(--storage); }
+
+/* The declared-objects drawing gives each kind its own fill, so a band
+   is identifiable before its label is read. The border stays the
+   reconciliation verdict — applied or failed — because that is the
+   thing worth noticing, and it must not be repainted by the kind. The
+   verdict is in each box's text either way; the colour only repeats
+   it. */
+.topo-database rect { fill: color-mix(in oklab, var(--ok) 9%, var(--surface)); }
+.topo-publication rect { fill: color-mix(in oklab, var(--accent) 11%, var(--surface)); }
+.topo-subscription rect { fill: color-mix(in oklab, var(--storage) 11%, var(--surface)); }
+.topo-role rect { fill: color-mix(in oklab, var(--warn) 11%, var(--surface)); }
+/* The client path gives its two bands the same treatment: the pooler
+   and the pods that run it are different things, and the drawing now
+   places them in different columns. */
+.topo-pooler rect { fill: color-mix(in oklab, var(--accent) 11%, var(--surface)); }
+.topo-poolerpod rect { fill: color-mix(in oklab, var(--storage) 10%, var(--surface)); }
+.topo-frame-pooler rect { stroke: var(--accent); }
+.topo-frame-pooler .topo-frame-label { fill: var(--accent); }
+.topo-frame-poolerpod rect { stroke: var(--storage); }
+.topo-frame-poolerpod .topo-frame-label { fill: var(--storage); }
+/* Health by border colour; the state word rides in the diagram's labels
+   and on the Cluster status screen, so colour is reinforcement. */
+.topo-node[data-state="current"] rect { stroke: var(--ok); }
+.topo-node[data-state="degraded"] rect { fill: var(--bad-weak); stroke: var(--bad); }
+.topo-node[data-state="unknown"] rect { stroke: var(--border-strong); }
+/* The primary is the one server whose identity changes behaviour: heavier
+   border, independent of the health colour above. */
+.topo-primary rect { stroke-width: 3; }
+
+/* Elbowed edges: rounded joins so a corner reads as one line, and the
+   labels carry a halo of the surface colour so a label that lands on a
+   line is still legible. */
+.topo-edge { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.topo-elabel { paint-order: stroke; stroke: var(--surface); stroke-linejoin: round; stroke-width: 3px; }
+/* A wire's word takes its wire's colour, so a label can never be read
+   against the wrong line. */
+.topo-elabel-replicate, .topo-elabel-wal { fill: var(--ok); }
+.topo-elabel-archive { fill: var(--accent); }
+.topo-edge-write { stroke: var(--accent); }
+.topo-edge-read { stroke: var(--text-muted); }
+.topo-edge-replicate { stroke: var(--ok); stroke-dasharray: 5 4; }
+/* The two object-store flows, told apart by the dash telling the truth
+   about cadence: WAL shipping is continuous, so its wire is unbroken;
+   base backups arrive in periodic bursts, so theirs stays dotted.
+   WAL takes the cluster's own colour rather than the backup blue: it is
+   the same write-ahead log the replicas consume, shipped to a second
+   consumer, so it belongs with replication and not with the schedules.
+   That leaves blue meaning one thing on this drawing — backup. */
+.topo-edge-wal { stroke: var(--ok); }
+.topo-edge-archive { stroke: var(--accent); stroke-dasharray: 2 4; }
+/* The volume wire ties an instance to the claim it writes; dotted so a
+   mount never reads as a data flow. */
+.topo-edge-disk { stroke: var(--text-muted); stroke-dasharray: 1.5 3.5; }
+/* The children drawing's two relations: ownership solid, reference
+   dashed. Each wire carries its own word, so there is no legend. */
+.topo-edge-owns { stroke: var(--ok); }
+/* The declared owner of a database. Distinct from .topo-edge-owns
+   so the two relations on the declared-objects diagram — who owns
+   a database, and what lives in it — never read as one. */
+.topo-edge-owner { stroke: var(--storage); stroke-dasharray: 4 3; }
+.topo-edge-refs { stroke: var(--accent); stroke-dasharray: 5 4; }
+/* The head belongs to its wire, so it takes the referencing path's own
+   stroke. The flat fallback comes first for anything that does not know
+   context-stroke, which then keeps the previous neutral head rather
+   than losing the arrow altogether. */
+#topo-arrow path { fill: var(--border-strong); fill: context-stroke; }
+
+/* The legend keys the line styles the router took off the wires; the
+   swatches reuse the edge classes, so a style can never drift from the
+   line it names. */
+/* The Cytoscape panel's canvas. Cytoscape measures this box and draws
+   into it, so it needs a height of its own — the drawing has no
+   intrinsic one the way the served SVG's viewBox does. The positioning
+   is stated here rather than left to Cytoscape, which would inject a
+   <style> element the served Content-Security-Policy blocks. */
+.topo-cyto { block-size: 26rem; inline-size: 100%; position: relative; }
+
+.topo-legend { color: var(--text-muted); display: flex; flex-wrap: wrap; font-size: var(--text-xs); gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; }
+.topo-legend span { align-items: center; display: flex; gap: var(--space-2); }
+.topo-legend svg { display: block; height: 8px; width: 26px; }
+.topo-legend svg path { fill: none; stroke-width: 1.5; }

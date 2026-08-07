@@ -98,13 +98,38 @@ Consequences that constrain every design decision here:
    (`none < view < poweruser < dba`) to decide which routes above the
    read-only baseline a request may reach. This gating never widens what the
    ServiceAccount can do. The console performs **no capability probing of
-   its own**: there is no SubjectAccessReview, no cluster-scoped grant, and
-   nothing cached — the level is trustworthy only because the deployment
-   confines the console's ingress to that proxy. A missing, empty, or
-   unrecognized level reaches only the baseline; `ALLOW_OPERATIONS=false`
-   removes the write surface regardless of any asserted level; the Role
-   stays fully namespaced in every mode. Two audiences needing different
+   its own**: there is no SubjectAccessReview and nothing cached — the
+   level is trustworthy only because the deployment confines the console's
+   ingress to that proxy.
+
+   **There is no ungated baseline.** Reaching the console is not
+   authorization: every screen is admitted by the forwarded level, and a
+   missing, empty, or unrecognized one reaches nothing but the denial
+   page, the readiness endpoints and the embedded assets. The ladder is:
+   `view` sees the overviews and the two metrics screens; `poweruser`
+   adds every other read screen — inventories, rosters, pod detail,
+   history, evidence and the bounded log tails; `dba` adds the four
+   day-2 operations, the access-request review panel, and the pgAdmin
+   link-out, which is a SQL console onto the data and so reaches past
+   anything this console shows below that level. `ALLOW_OPERATIONS=false`
+   removes the write surface regardless of any asserted level.
+
+   A consequence worth stating: setting `TRUSTED_LEVEL_HEADER` empty does
+   not open the console, it closes it — with no level to read, nothing is
+   admitted, and the denial page says the deployment is at fault rather
+   than the reader. Two audiences needing different
    Role-level authority means two deployments with different Roles.
+
+   The Role is namespaced in every mode but one, and that exception is
+   deliberately narrow. `ALLOW_CLUSTER_CATALOGS=true` plus the separate
+   `deploy/cluster-catalog-role.yaml` grants `get` — never `list`, never
+   `watch` — on `clusterimagecatalogs`, because a Cluster may draw its
+   image from a cluster-scoped catalog and the console can otherwise see
+   the reference but not its content. Declining the grant costs nothing:
+   the panel reports that the content was not read, and never that the
+   catalog is absent. `hack/check-readonly.sh` enforces that no other
+   manifest contains a ClusterRole and that this one grants nothing
+   beyond that get. Any further cluster-scoped authority is a non-goal.
 
 ## Hard rules (violating any of these is a bug)
 
@@ -121,7 +146,10 @@ Consequences that constrain every design decision here:
    nothing displayed may require secret material.
 4. **One cluster, one namespace, one trust domain.** The target cluster name
    and namespace are fixed configuration. Every list/watch is
-   namespace-scoped and filtered to that cluster's objects. Note that RBAC
+   namespace-scoped and filtered to that cluster's objects; the single
+   exception is the opt-in `clusterimagecatalogs` **get** described above,
+   which is a get precisely so that nothing cluster-wide is ever
+   enumerated. Note that RBAC
    cannot pin `list`/`watch` by `resourceNames`, so the namespace boundary
    plus application-side selection is the honest scope for listing — and pod
    labels are a *selection* mechanism, never a security boundary.
@@ -138,6 +166,81 @@ Consequences that constrain every design decision here:
    Kubernetes-reported and application-derived state, and never blends the
    vocabularies. In particular, an operator's backup claim is never
    presented as repository evidence — that is ObjectStoreViewer's word.
+
+   **One carve-out: the overview summary.** The plain-language block that
+   opens the console page may speak across the three vocabularies, because
+   an operator arriving at an incident needs one sentence before they need
+   three taxonomies. It earns that only under all four of these, and a
+   reviewer should reject it if any is missing:
+
+   1. **Derived, never sourced.** `buildSummary` takes the assembled
+      `Page` and nothing else. It cannot reach a snapshot, so it has no
+      way to state a fact the attributed sections below do not already
+      carry. `TestSummaryRestatesOnlyWhatThePageCarries` holds this.
+   2. **Paraphrase anchored to quotation.** The headline may paraphrase;
+      the sub-line quotes the underlying claim verbatim beneath it.
+   3. **Every card names one origin.** The blend exists at the level of
+      the block, never inside a single card.
+   4. **No claim the sources do not make.** The summary restates; it does
+      not conclude. It never asserts recoverability — that a backup can
+      be restored is not something either the operator or the repository
+      scan reports, so the console does not say it.
+
+## Object definition history
+
+`internal/history` retains a bounded, in-memory revision timeline of the
+watched object definitions — what changed, when it was observed, and by
+which field manager. Capture rides the existing watches: `internal/kube`
+taps each pump after it accepts an event and hands each complete listing
+over as a seed, so membership filtering stays single-sourced and no
+second watch connection exists. Its invariants:
+
+- **In-memory and bounded; durable only by explicit mount.** Retention
+  is bounded on three axes (global revisions, global manifest bytes,
+  revisions per object) from validated configuration, and the in-memory
+  store is always authoritative; `HISTORY_ENABLED=false` means no
+  recorder is constructed and no tap wraps any pump. By default history
+  lives and dies with the process — the stateless-process rule stands.
+  `HISTORY_PATH` opts into a bbolt journal (`internal/history/bolt`)
+  that mirrors mutations write-behind and reloads them at boot; it
+  implies a PVC and a single replica, an unusable journal fails before
+  listen, and a hard kill loses at most the flush interval of history,
+  never the file's integrity. On boot the first seeds reconcile against
+  the journal's state, so a change made while the process was down is an
+  explicit after-gap revision, not a silent first observation.
+- **Scrubbed at the boundary.** A stored manifest never contains managed
+  fields, the resource version, the last-applied annotation, or an
+  inline container environment value; env names and secret *references*
+  survive. The scrub is structural, not path-based, and its totality is
+  a tested negative case.
+- **Kubernetes-reported, and it says so.** A revision records what the
+  API server delivered and when this process observed it. Actor
+  attribution is the manager name from `managedFields` — self-declared,
+  never an authenticated identity — and observation times are this
+  process's clock, never server timestamps.
+- **Gaps are explicit.** A change or deletion discovered by a re-seed
+  after contact loss is recorded as having happened inside a named
+  unobserved window, never as if it happened at observation time. Only a
+  complete, fully-converted listing may claim seed semantics; a
+  truncated one degrades to per-item observations, which imply nothing
+  about what was not seen.
+- **Logs stay out.** Rule 6 is untouched: history stores object
+  definitions, never log content, and Kubernetes Events are excluded —
+  they are already a timeline of their own.
+
+The read side is `Snapshot` for the metadata timeline, `Revision` for
+one manifest, and `Diff` for the changed paths between a revision and
+the previous retained definition of the same object. Diffs are computed
+on demand and never stored; named Kubernetes lists compare by their
+`name` merge key, so a reorder is not a change; the entry list and every
+rendered value are bounded. Each diff entry may attribute its path to
+the field manager that owned it — from `managedFields` ownership
+captured (bounded) at the boundary — and attributes to nobody when no
+manager, or more than one, plausibly owns the path: a guessed
+attribution is worse than an absent one. A revision whose baseline was
+evicted or never observed reports `HasBase` false rather than diffing
+against the wrong thing. The rendering screen arrives with the design
+work and is not wired yet.
 
 ## Engineering conventions
 
@@ -166,8 +269,54 @@ scans, and the tests. In short:
   e2e checks covering watch-break, forbidden-RBAC, operations-disabled and
   redaction negative cases.
 - Makefile targets `build`, `test`, `test-race`, `test-integration`,
-  `test-scale`, `test-container`, `test-multiarch`, `test-e2e`, `lint`,
-  `check`, `docker-build`, `supply-chain`, and `release-check`.
+  `test-scale`, `test-container`, `test-multiarch`, `test-ui`, `test-e2e`,
+  `lint`, `check`, `docker-build`, `supply-chain`, and `release-check`.
+- The two wiring drawings use no layout engine: placement is a set of
+  stated rules — pinned columns and rows, trunk buses in the alleys
+  between dotted category frames, kind frames flowing into fixed
+  columns — computed as arithmetic, deterministic by construction, so
+  each drawing is safe to screenshot and cheap to test. The Overview
+  serves the grouped wiring (poolers, cluster, backup schedules,
+  storage); the cluster overview serves the children inventory (the
+  Cluster, the objects it owns via controller owner reference, and the
+  objects referencing it). Earlier engine-backed drawings — Graphviz in
+  WebAssembly, a Cytoscape panel, an ELK panel — were retired with the
+  fourth iteration; only their orthogonal-route renderer
+  (`toporoute.go`) survives.
+- The console UI is server-rendered `html/template` plus one embedded
+  stylesheet and three narrowly separated, vendored enhancement layers:
+  htmx 2.x owns same-origin HTML navigation and atomic screen refresh;
+  the Alpine CSP build owns local component state (never the standard
+  Alpine build, which would require `script-src 'unsafe-eval'`); uPlot
+  draws the metrics charts from a same-origin JSON fetch of the series
+  endpoint, lazily, as each panel approaches the viewport on the visible
+  tab. That fetch replaced an inlined payload once the screen grew to a
+  full catalog on a tab per instance: inlining put every instrument's
+  whole raw window into the document several times over, nearly all of
+  it for tabs nobody opened. The no-script contract is unchanged and is
+  met the same way — the window summary is served as text beside every
+  chart, on every tab. No layer draws the diagram of record: that
+  ships finished, so a reader without scripting sees the finished
+  drawing and never an empty frame. All are served from the binary,
+  htmx evaluation and browser history caching are disabled, and no
+  layer decides authorization or interprets cluster state. Content is
+  never gated behind scripting: the document is complete before any
+  script runs, enhancement-only controls carry `x-cloak`, a chart's
+  window summary is stated in text beside it, and no state word is ever
+  replaced by a colour or a mark. `make test-ui` enforces all of that
+  in a browser.
+- **Absolute times are rendered in UTC and restated, never replaced.**
+  Every absolute moment the server renders goes through the `Stamp`
+  view type and the `stamp` template: the UTC text is the claim, and it
+  is what a reader with no script and every printed page sees. The
+  RFC3339 twin beside it exists only so `console.js` may restate that
+  same instant in the reader's own zone, which the top bar's toggle
+  switches and persists. The rewrite is opt-in per element
+  (`data-local`), because the console also renders relative ages inside
+  `<time datetime>` — "4m ago" has no zone, and converting it would
+  change what the cell says rather than how it is spelled.
+- Every vendored browser asset is MIT-licensed and never patched:
+  replacing one means taking a new upstream release whole.
 
 ## Naming — settled, use exactly these
 

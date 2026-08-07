@@ -1,0 +1,131 @@
+{{- /*
+  Pod detail: one instance pod's observed status, its merged timeline
+  (Kubernetes events plus retained definition revisions, each in its
+  source's words), and — above the same gates the standalone routes
+  enforce — the bounded log tail and the retained raw definition. With
+  no script every tab panel is visible in order; the tablist only picks
+  one at a time.
+*/ -}}
+{{template "page-head" "pod detail"}}
+{{template "shell-open" .Shell}}
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="{{.RosterURL}}">{{.RosterLabel}}</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">{{.Name}}</span>
+  </nav>
+  <header>
+    <div class="header-bar">
+      <h1>{{.Name}}</h1>
+      <dl class="target"><dt>Cluster</dt><dd>{{.Shell.ClusterName}}</dd><dt>{{.RoleLabel}}</dt><dd>{{.Role}}</dd></dl>
+    </div>
+  </header>
+  <div class="tabs" role="tablist" aria-label="Pod detail sections">
+    <button type="button" role="tab" data-tab="pod-status" aria-selected="true" aria-controls="pod-status">Status</button>
+    <button type="button" role="tab" data-tab="pod-history" aria-selected="false" aria-controls="pod-history">History</button>
+    {{- if .CanTailLogs}}
+    <button type="button" role="tab" data-tab="pod-logs" aria-selected="false" aria-controls="pod-logs">Logs</button>
+    {{- end}}
+  </div>
+
+  <section class="panel sectioned" id="pod-status" role="tabpanel" aria-label="Status">
+    <div class="panel-head">
+      <h2>Current status</h2>
+      {{- if .Raw}}
+      <button type="button" class="link-button" data-dialog="pod-raw">Raw definition</button>
+      {{- end}}
+    </div>
+    <div class="panel-body">
+      <dl class="facts">
+        <dt>Phase</dt><dd data-state="{{.PhaseState}}">{{.Phase}}</dd>
+        <dt>{{.RoleLabel}}</dt><dd>{{.Role}}</dd>
+        <dt>Ready</dt><dd>{{.Ready}}</dd>
+        <dt>Restarts</dt><dd>{{.Restarts}}</dd>
+        <dt>Node</dt><dd>{{.Node}}</dd>
+        <dt>Pod IP</dt><dd>{{.IP}}</dd>
+        <dt>Started</dt><dd>{{template "stamp" .Started}}</dd>
+        <dt>Image</dt><dd>{{.Image}}</dd>
+        {{- if .IsPrimary}}
+        <dt>Write endpoint</dt><dd>{{.WriteEndpoint}}</dd>
+        <dt>Timeline</dt><dd>{{.Timeline}}</dd>
+        {{- end}}
+      </dl>
+      <p class="origin">source: Pod/{{.Name}} (Kubernetes-observed){{if .IsPrimary}}; write endpoint and timeline are operator-reported{{end}}, snapshot: <span data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
+    </div>
+  </section>
+
+  <section class="panel sectioned" id="pod-history" role="tabpanel" aria-label="History">
+    <div class="panel-head">
+      <h2>Pod history</h2>
+    </div>
+    <div class="panel-body">
+      {{- if .History}}
+      <ol class="timeline">
+        {{- $canInspect := .CanInspect}}
+        {{- range .History}}
+        <li data-kind="{{.Kind}}">
+          <div class="when"><b>{{.Age}} ago</b><time datetime="{{.StampISO}}" data-local>{{.Stamp}}</time></div>
+          <div class="rail"></div>
+          <div class="entry">
+            <div class="head"><span class="title">{{.Title}}</span><span class="tag" data-kind="{{.Kind}}">{{.Tag}}</span><span class="object">{{.Object}}</span></div>
+            {{- if .Body}}
+            <p>{{.Body}}</p>
+            {{- end}}
+            {{- if .Seq}}
+            {{- if $canInspect}}
+            <dl class="facts-inline"><dt>Definition</dt><dd><a href="/history/revisions/{{.Seq}}">revision {{.Seq}}</a></dd></dl>
+            {{- else}}
+            <dl class="facts-inline"><dt>Definition</dt><dd>revision {{.Seq}} — details require the poweruser or dba level</dd></dl>
+            {{- end}}
+            {{- end}}
+          </div>
+        </li>
+        {{- end}}
+      </ol>
+      {{- else}}
+      <p class="state">nothing observed for this pod in the retained windows</p>
+      {{- end}}
+      <p class="origin">source: Kubernetes-observed events{{if .HistoryAvailable}} and retained object definitions{{end}}; times are when this pgConsole process observed them</p>
+    </div>
+  </section>
+
+  {{- if .CanTailLogs}}
+  {{- with .Logs}}
+  <section class="panel sectioned" id="pod-logs" role="tabpanel" aria-label="Logs">
+    <div class="panel-head">
+      <h2>Container logs</h2>
+    </div>
+    <div class="panel-body">
+      {{- if .State}}
+      <p class="state">{{.State}}</p>
+      {{- else}}
+      <div class="log-tools"><label><input type="checkbox" data-log-follow checked> Follow</label><span>{{.Bounds}}, bounded at the capture boundary</span><span class="live" data-log-state>following</span></div>
+      {{- if .Truncated}}
+      <p class="state">truncated: the byte ceiling cut the oldest lines</p>
+      {{- end}}
+      <pre class="logs" data-log-tail data-log-src="{{.RawURL}}" tabindex="0">{{.Content}}</pre>
+      {{- end}}
+      <p class="origin">source: Pod/{{$.Name}} logs (Kubernetes-observed), fetched on demand and never persisted</p>
+    </div>
+  </section>
+  {{- end}}
+  {{- else}}
+  <section class="panel" id="pod-logs-gate">
+    <h2>Container logs</h2>
+    <p class="state">{{.LogsGate}}</p>
+    <p class="origin">source: Kubernetes-observed, on demand</p>
+  </section>
+  {{- end}}
+
+  {{- if .Raw}}
+  <dialog class="raw" id="pod-raw" aria-label="Raw pod definition">
+    <div class="panel-head">
+      <h2>Pod/{{.Name}} — raw definition</h2>
+      <button type="button" class="dialog-close" data-dialog-close aria-label="Close"><svg aria-hidden="true"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="panel-body">
+      <pre class="manifest"><code>{{.Raw}}</code></pre>
+      <p class="origin">source: retained revision {{.RawSeq}}, scrubbed at the capture boundary — <a href="/history/revisions/{{.RawSeq}}">full revision</a></p>
+    </div>
+  </dialog>
+  {{- end}}
+{{template "shell-close"}}

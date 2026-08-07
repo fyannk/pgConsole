@@ -131,7 +131,7 @@ func TestOperationsModeRegistersRoutes(t *testing.T) {
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("X-Forwarded-User", "operator")
-	req.Header.Set("X-PgToolBox-Level", "poweruser")
+	req.Header.Set("X-PgToolBox-Level", "dba")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET /operations: %v", err)

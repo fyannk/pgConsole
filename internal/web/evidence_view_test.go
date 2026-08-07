@@ -40,8 +40,8 @@ func (f fakeEvidence) CurrentEvidence() evidence.Status { return f.status }
 func newEvidenceHandler(t *testing.T, snapshots allSources, status evidence.Status) *Handler {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
-	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Evidence: fakeEvidence{status: status}},
+	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, LevelHeader: "X-PgToolBox-Level", AllowLogs: true},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots, Evidence: fakeEvidence{status: status}},
 		kube.FakeProber{}, fakeTailer{}, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -113,7 +113,7 @@ func observedCluster(stale bool) staticSnapshots {
 	}
 }
 
-func TestHandlerIndexRendersRepositoryEvidence(t *testing.T) {
+func TestHandlerBackupEvidenceRendersRepositoryEvidence(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{
 		HasReport: true,
@@ -124,7 +124,7 @@ func TestHandlerIndexRendersRepositoryEvidence(t *testing.T) {
 		},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	for _, want := range []string{
 		"Repository evidence",
 		"sha256:" + strings.Repeat("ab", 32),
@@ -147,19 +147,22 @@ func TestHandlerIndexRendersRepositoryEvidence(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositoryUnknownWithoutContact(t *testing.T) {
+func TestHandlerBackupEvidenceUnknownWithoutContact(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{Failure: evidence.FailureUnavailable}
 	h := newEvidenceHandler(t, observedCluster(false), status)
 
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "Repository evidence") {
 		t.Error("enabled consumer without contact renders no repository panel")
 	}
 	if !strings.Contains(body, "no successful sidecar contact yet (unavailable)") {
 		t.Error("panel does not carry the failure kind")
 	}
-	if !strings.Contains(body, "Cluster in healthy state") {
+	// The independence of the two sources is the point: a silent sidecar
+	// must not take the operator-reported cluster section down with it,
+	// and that section is now its own screen.
+	if cluster := get(t, h, http.MethodGet, "/cluster/overview").Body.String(); !strings.Contains(cluster, "Cluster in healthy state") {
 		t.Error("sidecar absence degraded the cluster section")
 	}
 	if rec := get(t, h, http.MethodGet, "/readyz"); rec.Code != http.StatusOK {
@@ -167,7 +170,7 @@ func TestHandlerIndexRepositoryUnknownWithoutContact(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositoryStaleRetentionVisible(t *testing.T) {
+func TestHandlerBackupEvidenceStaleRetentionVisible(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{
 		HasReport: true,
@@ -181,7 +184,7 @@ func TestHandlerIndexRepositoryStaleRetentionVisible(t *testing.T) {
 		},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "sidecar contact: stale") || !strings.Contains(body, "timeout") {
 		t.Error("stale contact line missing its state or failure kind")
 	}
@@ -190,7 +193,7 @@ func TestHandlerIndexRepositoryStaleRetentionVisible(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositorySidecarStalenessIsDistinct(t *testing.T) {
+func TestHandlerBackupEvidenceSidecarStalenessIsDistinct(t *testing.T) {
 	t.Parallel()
 	report := completeReport()
 	report.SourceStale = true
@@ -204,7 +207,7 @@ func TestHandlerIndexRepositorySidecarStalenessIsDistinct(t *testing.T) {
 		},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "sidecar contact: current") {
 		t.Error("console contact staleness blended with the sidecar's")
 	}
@@ -213,7 +216,7 @@ func TestHandlerIndexRepositorySidecarStalenessIsDistinct(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRepositoryIdentityLines(t *testing.T) {
+func TestHandlerBackupEvidenceIdentityLines(t *testing.T) {
 	t.Parallel()
 	status := evidence.Status{
 		HasReport: true,
@@ -221,24 +224,24 @@ func TestHandlerIndexRepositoryIdentityLines(t *testing.T) {
 	}
 
 	noCluster := newEvidenceHandler(t, staticSnapshots{}, status)
-	if body := get(t, noCluster, http.MethodGet, "/").Body.String(); !strings.Contains(body, "no observed cluster identity to compare against") {
+	if body := get(t, noCluster, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "no observed cluster identity to compare against") {
 		t.Error("missing-observation identity line absent")
 	}
 
 	staleCluster := newEvidenceHandler(t, observedCluster(true), status)
-	if body := get(t, staleCluster, http.MethodGet, "/").Body.String(); !strings.Contains(body, "matches a stale cluster observation — not current agreement") {
+	if body := get(t, staleCluster, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "matches a stale cluster observation — not current agreement") {
 		t.Error("stale-observation identity line absent")
 	}
 
 	other := observedCluster(false)
 	other.snap.Cluster.UID = "uid-9999"
 	mismatch := newEvidenceHandler(t, other, status)
-	if body := get(t, mismatch, http.MethodGet, "/").Body.String(); !strings.Contains(body, "bound to a different cluster incarnation") {
+	if body := get(t, mismatch, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "bound to a different cluster incarnation") {
 		t.Error("mismatch identity line absent")
 	}
 }
 
-func TestHandlerIndexRepositoryUnknownVariantExplicit(t *testing.T) {
+func TestHandlerBackupEvidenceUnknownVariantExplicit(t *testing.T) {
 	t.Parallel()
 	report := completeReport()
 	report.Barman = nil
@@ -248,7 +251,7 @@ func TestHandlerIndexRepositoryUnknownVariantExplicit(t *testing.T) {
 		Snapshot:  evidence.Snapshot{Generation: 1, ObservedAt: testNow, Report: report},
 	}
 	h := newEvidenceHandler(t, observedCluster(false), status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 	if !strings.Contains(body, "format details unknown: unrecognized variant pgbackrest/v9") {
 		t.Error("unknown variant not rendered explicitly")
 	}
@@ -262,5 +265,67 @@ func TestHandlerIndexRepositoryAbsentWhenDisabled(t *testing.T) {
 	h, _ := newTestHandler(t, observedCluster(false), kube.FakeProber{}, Links{})
 	if body := get(t, h, http.MethodGet, "/").Body.String(); strings.Contains(body, "Repository evidence") {
 		t.Error("disabled consumer still renders a repository section")
+	}
+}
+
+// TestEvidenceScreenNamesItsProducer proves the repository section says
+// whose report it is. The console renders ObjectStoreViewer's evidence
+// in full, but named the source nowhere — so the only place the product
+// appeared in the navigation was a link pointing away from the data,
+// and the screen read as if the data lived somewhere else.
+func TestEvidenceScreenNamesItsProducer(t *testing.T) {
+	t.Parallel()
+
+	// A populated report names the producer and points at the sibling
+	// tool for the objects themselves.
+	h := newEvidenceHandler(t, observedCluster(false), evidence.Status{
+		HasReport: true,
+		Snapshot:  evidence.Snapshot{Generation: 2, ObservedAt: testNow.Add(-time.Minute), Report: completeReport()},
+	})
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
+	if !strings.Contains(body, "ObjectStoreViewer") {
+		t.Error("the evidence screen does not say whose report it is")
+	}
+	if !strings.Contains(body, "never reads object storage") {
+		t.Error("the screen does not say why the console is not the source")
+	}
+
+	// A silent sidecar still names it, so a reader who never sees a
+	// report learns where one would come from.
+	h = newEvidenceHandler(t, observedCluster(false), evidence.Status{Failure: evidence.FailureUnavailable})
+	if body := get(t, h, http.MethodGet, "/backups/evidence").Body.String(); !strings.Contains(body, "ObjectStoreViewer has not answered") {
+		t.Error("the silent-sidecar card does not name the producer")
+	}
+}
+
+// TestSilentSidecarIsExplainedEvenWhenTheCrossCheckRenders proves the
+// repository section states its own absence independently of whether a
+// cross-check appeared below it.
+//
+// The two are different things: one is ObjectStoreViewer's report, the
+// other is a correlation between that report and the operator's catalog.
+// Guarding the explanation on the cross-check being absent meant that in
+// the ordinary case — backups observed, sidecar quiet — the page said
+// only "correlation unknown" and never named the reason or the producer.
+func TestSilentSidecarIsExplainedEvenWhenTheCrossCheckRenders(t *testing.T) {
+	t.Parallel()
+	src := observedCluster(false)
+	src.backups = observe.BackupsSnapshot{
+		Generation: 4, ObservedAt: testNow.Add(-time.Second),
+		Backups: []observe.BackupFacts{{Name: "plugin-backup", Phase: "completed", Method: "plugin"}},
+	}
+	src.backupsOK = true
+
+	h := newEvidenceHandler(t, src, evidence.Status{Failure: evidence.FailureUnavailable})
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
+
+	if !strings.Contains(body, "Backup cross-check") {
+		t.Fatal("the cross-check did not render, so this test proves nothing")
+	}
+	if !strings.Contains(body, "ObjectStoreViewer has not answered") {
+		t.Error("a silent sidecar is not explained when a cross-check renders beside it")
+	}
+	if !strings.Contains(body, "no successful sidecar contact yet (unavailable)") {
+		t.Error("the failure kind is not carried")
 	}
 }

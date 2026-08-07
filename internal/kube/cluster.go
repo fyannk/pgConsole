@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
 )
@@ -50,6 +51,15 @@ type Options struct {
 	LogTailLines int
 	// LogTailMaxBytes bounds the bytes of one log tail.
 	LogTailMaxBytes int64
+	// AllowClusterCatalogs permits the one cluster-scoped read this
+	// console can be granted: the ClusterImageCatalog its Cluster
+	// references. False means the lookup is never attempted.
+	AllowClusterCatalogs bool
+	// Recorder receives the history capture of every accepted
+	// observation. Nil disables capture entirely: no tap wraps any pump
+	// and no seed is collected, so the disabled path holds no capture
+	// code at all.
+	Recorder history.Recorder
 }
 
 // Client accesses the one target cluster through the Kubernetes API.
@@ -96,6 +106,9 @@ func (c *Client) Fetch(ctx context.Context) (observe.ClusterState, error) {
 	defer cancel()
 	obj, err := c.dyn.Resource(clusterGVR).Namespace(c.opts.Namespace).Get(ctx, c.opts.ClusterName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		// An empty seed is itself a complete observation: a cluster known
+		// to history and absent here was deleted while unobserved.
+		c.seedRecord(scopeCluster).commit(true)
 		return observe.ClusterState{Facts: observe.ClusterFacts{Present: false}}, nil
 	}
 	if err != nil {
@@ -105,6 +118,9 @@ func (c *Client) Fetch(ctx context.Context) (observe.ClusterState, error) {
 	if err != nil {
 		return observe.ClusterState{}, err
 	}
+	seed := c.seedRecord(scopeCluster)
+	seed.add(obj.Object)
+	seed.commit(true)
 	return observe.ClusterState{Facts: facts, ResourceVersion: obj.GetResourceVersion()}, nil
 }
 
@@ -120,60 +136,39 @@ func (c *Client) Watch(ctx context.Context, fromResourceVersion string) (observe
 	if err != nil {
 		return nil, categorize("cluster watch", err)
 	}
-	cw := &clusterWatch{
-		inner:   w,
-		results: make(chan observe.ClusterState),
-	}
-	go cw.pump()
-	return cw, nil
+	items, stop := fanIn(ctx,
+		[]watch.Interface{w},
+		[]pump[observe.ClusterState]{tap(c, scopeCluster, pumpCluster)})
+	return resultStream[observe.ClusterState]{stream[observe.ClusterState]{items: items, stop: stop}}, nil
 }
 
-// clusterWatch adapts a Kubernetes watch to observe.Watch, converting
-// each event to source-neutral facts.
-type clusterWatch struct {
-	inner   watch.Interface
-	results chan observe.ClusterState
-}
-
-// Results streams converted observations until the watch ends.
-func (w *clusterWatch) Results() <-chan observe.ClusterState {
-	return w.results
-}
-
-// Stop releases the underlying watch. The pump goroutine then observes
-// the closed event channel and exits.
-func (w *clusterWatch) Stop() {
-	w.inner.Stop()
-}
-
-// pump converts events until the underlying channel closes. A malformed
-// or error event ends the watch: the collector re-seeds with a fresh
-// fetch, which is the safe interpretation of an undecodable stream.
-func (w *clusterWatch) pump() {
-	defer close(w.results)
-	for ev := range w.inner.ResultChan() {
-		switch ev.Type {
-		case watch.Added, watch.Modified:
-			obj, ok := ev.Object.(interface{ UnstructuredContent() map[string]any })
-			if !ok {
-				return
-			}
-			facts, err := convertCluster(obj.UnstructuredContent())
-			if err != nil {
-				return
-			}
-			rv := ""
-			if meta, ok := ev.Object.(metav1.Object); ok {
-				rv = meta.GetResourceVersion()
-			}
-			w.results <- observe.ClusterState{Facts: facts, ResourceVersion: rv}
-		case watch.Deleted:
-			w.results <- observe.ClusterState{Facts: observe.ClusterFacts{Present: false}}
-		case watch.Bookmark:
-			continue
-		case watch.Error:
-			return
+// pumpCluster converts one Cluster watch event. A malformed or error
+// event ends the watch: the collector then re-seeds with a fresh get,
+// which is the safe interpretation of an undecodable stream. A deletion
+// is a complete observation in its own right — absence is a fact the
+// console renders, not an error.
+func pumpCluster(event watch.Event) (observe.ClusterState, bool, bool) {
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
+		if !ok {
+			return observe.ClusterState{}, false, true
 		}
+		facts, err := convertCluster(obj.UnstructuredContent())
+		if err != nil {
+			return observe.ClusterState{}, false, true
+		}
+		rv := ""
+		if meta, ok := event.Object.(metav1.Object); ok {
+			rv = meta.GetResourceVersion()
+		}
+		return observe.ClusterState{Facts: facts, ResourceVersion: rv}, true, false
+	case watch.Deleted:
+		return observe.ClusterState{Facts: observe.ClusterFacts{Present: false}}, true, false
+	case watch.Bookmark:
+		return observe.ClusterState{}, false, false
+	default:
+		return observe.ClusterState{}, false, true
 	}
 }
 

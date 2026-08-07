@@ -1,0 +1,140 @@
+{{- /*
+  Backups — evidence. The repository-evidence section (the independent
+  observer's re-rendered, redacted projection) and the backup cross-check
+  that correlates the operator's catalog with that evidence by exact
+  backup ID. The two vocabularies stay separate; a completed operator
+  backup is never presented as repository proof.
+*/ -}}
+{{template "page-head" "repository evidence"}}
+{{template "shell-open" .Shell}}
+    {{- with .Repository}}
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Repository evidence</h2>
+        <p class="meta" data-state="{{stateToken .Meta.State}}">sidecar contact: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}}){{if .ContactFailure}} — {{.ContactFailure}}{{end}}</p>
+      </div>
+      <div class="panel-body">
+      <p class="state">This section is <strong>ObjectStoreViewer&#39;s</strong> report, read over the sidecar API — not the operator&#39;s account of the same backups. pgConsole never reads object storage itself, so everything below is the independent observer&#39;s word about what the repository actually holds.{{if $.ViewerLinked}} To browse the objects themselves, open ObjectStoreViewer from the sidebar.{{end}}</p>
+      {{- if .SourceStale}}
+      <p class="state" data-state="stale">stale: the sidecar reports its evidence no longer reflects the latest refresh attempt</p>
+      {{- end}}
+      <dl class="facts">
+        <dt>Repository</dt><dd>{{.Repository}}</dd>
+        <dt>Scope</dt><dd>{{.Scope}}</dd>
+        <dt>Destination fingerprint</dt><dd>{{.Fingerprint}}</dd>
+        <dt>Cluster identity</dt><dd>{{.ClusterIdentity}}</dd>
+        <dt>Producer version</dt><dd>{{.ProducerVersion}}</dd>
+        <dt>Overall</dt><dd>{{.Overall.Display}}</dd>
+        <dt>Completeness</dt><dd>{{.Completeness}}</dd>
+        <dt>Evidence generation</dt><dd>{{.EvidenceGeneration}} (revision {{.Revision}})</dd>
+        <dt>Scan completed</dt><dd>{{template "stamp" .ScanCompleted}}</dd>
+        <dt>Last attempt</dt><dd>{{template "stamp" .LastAttempt}}</dd>
+        <dt>Inventory</dt><dd>{{.Inventory}}{{if .InventoryFailure}} — last attempt failed: {{.InventoryFailure}}{{end}}</dd>
+      </dl>
+      {{- if .DetailsUnknown}}
+      <p class="state">format details unknown: unrecognized variant {{.DetailsType}}</p>
+      {{- end}}
+      {{- with .Barman}}
+      <dl class="facts">
+        <dt>Backups (structural)</dt><dd>{{.Backups}}{{if .BackupStates}} — {{.BackupStates}}{{end}}</dd>
+        <dt>WAL continuity</dt><dd>{{.WAL.Display}}{{if .WALCounts}} — {{.WALCounts}}{{end}}</dd>
+        <dt>Timeline history</dt><dd>{{.Timeline.Display}}</dd>
+        <dt>Recovery coverage</dt><dd>{{.Coverage.Display}}</dd>
+        <dt>Retention</dt><dd>{{.Retention.Display}} — {{.RetentionBackups}} — {{.RetentionMinimum}}</dd>
+        <dt>Completion window</dt><dd>{{template "stamp" .RetentionOldest}} to {{template "stamp" .RetentionNewest}}</dd>
+        <dt>Latest archive receipt age</dt><dd>{{.LatestArchiveAge}}</dd>
+      </dl>
+      {{- if .Truncated}}
+      <p class="state">truncated: the sidecar reached a safety ceiling; affected conclusions are unknown</p>
+      {{- end}}
+      {{- end}}
+      {{- if .Capabilities}}
+      <div class="table-scroll">
+      <table class="capabilities">
+        <caption>Evidence capabilities</caption>
+        <thead><tr><th>Capability</th><th>Support</th><th>State</th></tr></thead>
+        <tbody>
+          {{- range .Capabilities}}
+          <tr><td>{{.ID}}</td><td>{{.Support}}</td><td>{{.State}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+      </div>
+    </section>
+    {{- else}}
+    <section class="panel">
+      <h2>Repository evidence</h2>
+      {{- with .RepositoryUnavailable}}
+      <p class="state" data-state="{{stateToken .State}}">{{.Detail}}</p>
+      <div class="empty"><strong>ObjectStoreViewer has not answered</strong>The sidecar is wired into this deployment but has produced no report yet, so the console has no independent view of what the repository holds. This is not a statement that the repository is empty or unreachable — only that the console has not heard from ObjectStoreViewer.</div>
+      <p class="origin">source: {{.Origin.Label}}</p>
+      {{- else}}
+      <div class="empty"><strong>ObjectStoreViewer is not wired into this deployment</strong>Without its evidence sidecar the console has no independent view of what the backup repository actually holds, and every backup claim on these screens is the operator&#39;s alone. pgConsole never reads object storage itself: that is ObjectStoreViewer&#39;s job, by design.</div>
+      <p class="origin">source: repository-evidence</p>
+      {{- end}}
+    </section>
+    {{- end}}
+    {{- with .CrossCheck}}
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Backup cross-check</h2>
+      </div>
+      <div class="panel-body">
+      {{- if .Degraded}}
+      <p class="state" data-state="degraded">correlation unknown: {{.Degraded}}</p>
+      {{- end}}
+      {{- if .FindingCount}}
+      <div class="finding">
+        <p class="state">{{.FindingCount}} cross-check finding(s) below</p>
+      </div>
+      {{- end}}
+      {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter cross-check" aria-label="Filter cross-check">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
+      <table class="cross-check">
+        <caption>Backup resources beside repository evidence</caption>
+        <thead><tr><th>Backup</th><th>Operator claim</th><th>Backup ID</th><th>Repository evidence</th><th>Outcome</th></tr></thead>
+        <tbody>
+          {{- $operator := .OperatorOrigin}}{{- $repository := .RepositoryOrigin}}
+          {{- range .Rows}}
+          <tr{{if .Finding}} class="finding"{{end}}><td>{{.Name}}</td><td>{{.OperatorClaim}} <span class="origin">({{$operator.Label}})</span></td><td>{{.BackupID}}</td><td>{{.RepositoryClaim}} <span class="origin">({{$repository.Label}})</span></td><td>{{.Outcome}} — {{.Detail}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+        </div>
+      </div>
+      {{- else}}
+      <p class="state">no Backup resources to cross-check</p>
+      {{- end}}
+      {{- if .OrphansUnknown}}
+      <p class="state">repository orphans unknown: {{.OrphansUnknown}}</p>
+      {{- else if .Orphans}}
+      <div class="table-scroll">
+      <table class="orphans">
+        <caption>Repository backups no resource accounts for</caption>
+        <thead><tr><th>Backup ID</th><th>Repository evidence</th><th>Completed (UTC)</th></tr></thead>
+        <tbody>
+          {{- range .Orphans}}
+          <tr class="finding"><td>{{.BackupID}}</td><td>{{.RepositoryClaim}}</td><td>{{.Completed}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- if .OrphansTruncated}}
+      <p class="state">truncated: more orphaned repository backups than the display bound</p>
+      {{- end}}
+      {{- else}}
+      <p class="state">no repository backups outside the operator's catalog</p>
+      {{- end}}
+      <p class="origin">sources: {{.OperatorOrigin.Label}} and {{.RepositoryOrigin.Label}}, correlated by exact backup ID</p>
+      </div>
+    </section>
+    {{- end}}
+{{template "shell-close"}}

@@ -78,60 +78,33 @@ func (c *Client) WatchEvents(ctx context.Context, fromResourceVersion string) (o
 	if err != nil {
 		return nil, categorize("events watch", err)
 	}
-	ew := &eventWatch{
-		client:  c,
-		inner:   w,
-		changes: make(chan observe.EventChange),
+	items, stop := fanIn(ctx,
+		[]watch.Interface{w},
+		[]pump[observe.EventChange]{c.pumpEvent})
+	return changeStream[observe.EventChange]{stream[observe.EventChange]{items: items, stop: stop}}, nil
+}
+
+// pumpEvent converts one event watch event. Unlike the single-object
+// cluster watch, one malformed event object is dropped rather than
+// ending the stream: the surrounding events remain honest on their own.
+func (c *Client) pumpEvent(event watch.Event) (observe.EventChange, bool, bool) {
+	obj, ok := event.Object.(interface{ UnstructuredContent() map[string]any })
+	if !ok {
+		return observe.EventChange{}, false, event.Type == watch.Error
 	}
-	go ew.pump()
-	return ew, nil
-}
-
-// eventWatch adapts a Kubernetes event watch to observe.EventWatch.
-type eventWatch struct {
-	client  *Client
-	inner   watch.Interface
-	changes chan observe.EventChange
-}
-
-// Changes streams converted candidate changes until the watch ends.
-func (w *eventWatch) Changes() <-chan observe.EventChange {
-	return w.changes
-}
-
-// Stop releases the underlying watch.
-func (w *eventWatch) Stop() {
-	w.inner.Stop()
-}
-
-// pump converts events until the underlying channel closes. Unlike the
-// single-object cluster watch, one malformed event object is dropped
-// rather than ending the stream: the surrounding events remain honest
-// on their own.
-func (w *eventWatch) pump() {
-	defer close(w.changes)
-	for ev := range w.inner.ResultChan() {
-		obj, ok := ev.Object.(interface{ UnstructuredContent() map[string]any })
-		if !ok {
-			if ev.Type == watch.Error {
-				return
-			}
-			continue
-		}
-		facts, candidate := w.client.convertEvent(obj.UnstructuredContent())
-		if !candidate {
-			continue
-		}
-		switch ev.Type {
-		case watch.Added, watch.Modified:
-			w.changes <- observe.EventChange{Put: &facts}
-		case watch.Deleted:
-			w.changes <- observe.EventChange{Delete: &observe.EventDeletion{Name: facts.Name, UID: facts.UID}}
-		case watch.Bookmark:
-			continue
-		case watch.Error:
-			return
-		}
+	facts, candidate := c.convertEvent(obj.UnstructuredContent())
+	if !candidate {
+		return observe.EventChange{}, false, false
+	}
+	switch event.Type {
+	case watch.Added, watch.Modified:
+		return observe.EventChange{Put: &facts}, true, false
+	case watch.Deleted:
+		return observe.EventChange{Delete: &observe.EventDeletion{Name: facts.Name, UID: facts.UID}}, true, false
+	case watch.Bookmark:
+		return observe.EventChange{}, false, false
+	default:
+		return observe.EventChange{}, false, true
 	}
 }
 

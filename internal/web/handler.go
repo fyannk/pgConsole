@@ -32,7 +32,9 @@ import (
 
 	"github.com/fyannk/pgConsole/internal/authz"
 	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
 	reviewpkg "github.com/fyannk/pgConsole/internal/review"
@@ -73,10 +75,61 @@ type BackupsSource interface {
 	CurrentBackups() (observe.BackupsSnapshot, bool)
 }
 
+// PoolersSource supplies the current Pooler snapshot.
+type PoolersSource interface {
+	// CurrentPoolers returns the snapshot and whether one exists.
+	CurrentPoolers() (observe.PoolersSnapshot, bool)
+}
+
+// PoolerPodsSource supplies the current pooler pod snapshot.
+type PoolerPodsSource interface {
+	// CurrentPoolerPods returns the snapshot and whether one exists.
+	CurrentPoolerPods() (observe.PodsSnapshot, bool)
+}
+
+// FailoverQuorumSource supplies the current failover-quorum snapshot.
+type FailoverQuorumSource interface {
+	// CurrentFailoverQuorum returns the snapshot and whether one exists.
+	CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool)
+}
+
+// ImageCatalogsSource supplies the current ImageCatalog snapshot.
+type ImageCatalogsSource interface {
+	// CurrentImageCatalogs returns the snapshot and whether one exists.
+	CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool)
+}
+
+// DatabaseObjectsSource supplies the current declarative-object
+// snapshot.
+type DatabaseObjectsSource interface {
+	// CurrentDatabaseObjects returns the snapshot and whether one
+	// exists.
+	CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool)
+}
+
+// InfrastructureSource supplies the cluster's observed services,
+// volume claims and volume snapshots.
+type InfrastructureSource interface {
+	// CurrentInfrastructure returns the snapshot and whether one exists.
+	CurrentInfrastructure() (observe.InfrastructureSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
 	CurrentEvidence() evidence.Status
+}
+
+// HistorySource supplies the bounded object-definition timeline and its
+// on-demand revision details. Reads are in-memory snapshots; they never call
+// Kubernetes and never create another watch.
+type HistorySource interface {
+	// Snapshot returns the retained manifest-free timeline.
+	Snapshot() (history.Snapshot, bool)
+	// Revision resolves one retained, scrubbed definition.
+	Revision(seq uint64) (history.Revision, bool)
+	// Diff compares a revision with its previous retained definition.
+	Diff(seq uint64) (history.Diff, bool)
 }
 
 // Sources bundles the snapshot suppliers of the page.
@@ -89,17 +142,64 @@ type Sources struct {
 	Events EventsSource
 	// Backups supplies the Backup and ScheduledBackup snapshot.
 	Backups BackupsSource
+	// Poolers supplies the Pooler snapshot.
+	Poolers PoolersSource
+	// PoolerPods supplies the pooler pod snapshot.
+	PoolerPods PoolerPodsSource
+	// FailoverQuorum supplies the failover-quorum snapshot.
+	FailoverQuorum FailoverQuorumSource
+	// ImageCatalogs supplies the ImageCatalog snapshot.
+	ImageCatalogs ImageCatalogsSource
+	// DatabaseObjects supplies the declarative-object snapshot.
+	DatabaseObjects DatabaseObjectsSource
+	// Infrastructure supplies the services, volume claims and volume
+	// snapshots. Nil means they were never observed.
+	Infrastructure InfrastructureSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
 	// AccessReview supplies the access-request review snapshot. Nil means
 	// the review panel is disabled: no source, no route, no writer.
 	AccessReview AccessReviewSource
+	// History supplies the object-definition timeline. Nil means history is
+	// disabled and no history route is registered.
+	History HistorySource
+	// Metrics supplies the bounded instance-metrics window. Nil means
+	// metrics are disabled and no metrics route is registered.
+	Metrics MetricsSource
+	// PoolerMetrics supplies the same for the poolers' own exporter.
+	// Nil means no pooler-metrics route.
+	PoolerMetrics MetricsSource
+}
+
+// MetricsSource supplies the bounded instance-metrics window the
+// scraper fills. Implemented by *metrics.Store.
+type MetricsSource interface {
+	// Instances lists the tracked instance names, sorted.
+	Instances() []string
+	// Range reads one series at one tier as aligned columns.
+	Range(key string, tier metrics.Tier) (times []int64, byInstance map[string][]*float64)
+	// SeriesStats summarises one series per instance.
+	SeriesStats(key string) map[string]metrics.Stats
+	// InstantReadings returns every instance's latest point-in-time
+	// claims, keyed by instance then by Instants key.
+	InstantReadings() map[string]map[string]metrics.Instant
+	// Catalog is the surface this window holds. The instances and the
+	// poolers run different software, so the screen renders whichever
+	// catalog its source was built for rather than one fixed set.
+	Catalog() metrics.Catalog
+	// Interval is the scrape cadence, for the pages to state.
+	Interval() time.Duration
+	// Retention is the rollup window, for the pages to state.
+	Retention() time.Duration
 }
 
 // LogTailer performs one bounded, on-demand log fetch for a verified
 // member pod. It is one of the closed request-time API exceptions.
 type LogTailer interface {
+	// TailPoolerLogs performs the same bounded fetch for a pod proven to
+	// belong to one of the cluster's connection poolers.
+	TailPoolerLogs(ctx context.Context, pod string) (observe.LogTail, error)
 	// TailLogs fetches the bounded tail; a non-member pod is not found.
 	TailLogs(ctx context.Context, pod string) (observe.LogTail, error)
 }
@@ -159,7 +259,7 @@ type Handler struct {
 // reviewer only in access-review mode; their absence is what makes the
 // corresponding assembly graph writer-free.
 func New(cfg Config, sources Sources, prober ReadinessProber, tailer LogTailer, auth Auth, executor OpsExecutor, reviewer ReviewExecutor, now func() time.Time, logger *slog.Logger) (*Handler, error) {
-	tpl, err := template.ParseFS(assets, "templates/*.tmpl")
+	tpl, err := template.New("pgconsole").Funcs(templateFuncs).ParseFS(assets, "templates/*.tmpl")
 	if err != nil {
 		return nil, redact.NewError("template parse", redact.CategoryInternal, err)
 	}
@@ -185,23 +285,76 @@ func New(cfg Config, sources Sources, prober ReadinessProber, tailer LogTailer, 
 // probes and stylesheets carry no cluster state.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
-	// The read-only status baseline is ungated: reaching the console means
-	// the proxy already authenticated the request, and the deployment
-	// confines ingress to that proxy.
-	mux.HandleFunc("GET /{$}", h.handleIndex)
+	// Every screen is gated. Reaching the console is not authorization:
+	// the proxy authenticates, and the level it forwards decides which
+	// screens the request may reach. With no usable level nothing is
+	// served but the denial page, the readiness endpoints and the
+	// embedded assets.
+	//
+	// The ladder, in one place so it can be read as a whole:
+	//
+	//   view       the overviews and the two metrics screens
+	//   poweruser  + every other read screen: inventories, rosters, pod
+	//              detail, history, evidence and the log tails
+	//   dba        + the day-2 operations and the review panel
+	//
+	// Nothing here widens what the ServiceAccount may do. It decides
+	// which of the console's own screens a request reaches, and the
+	// deployed Role remains the enforcement boundary underneath.
+	view := func(next http.HandlerFunc) http.HandlerFunc {
+		return h.requireLevel(authz.TierView, requireViewLevel, next)
+	}
+	power := func(next http.HandlerFunc) http.HandlerFunc {
+		return h.requireLevel(authz.TierPowerUser, requirePowerLevel, next)
+	}
+	mux.HandleFunc("GET /{$}", view(h.handleIndex))
+	mux.HandleFunc("GET /cluster/overview", view(h.handleClusterOverview))
+	mux.HandleFunc("GET /backups", view(h.handleBackupsOverview))
+	mux.HandleFunc("GET /databases", view(h.handleDatabases("databases-overview")))
+	mux.HandleFunc("GET /poolers", view(h.handlePoolers("poolers-overview")))
+
+	mux.HandleFunc("GET /objects", power(h.handleObjects))
+	mux.HandleFunc("GET /cluster/pods", power(h.handleClusterPods))
+	mux.HandleFunc("GET /cluster/pods/{pod}", power(h.handlePodDetail))
+	mux.HandleFunc("GET /backups/objects", power(h.handleBackupsObjects))
+	mux.HandleFunc("GET /backups/evidence", power(h.handleBackupsEvidence))
+	mux.HandleFunc("GET /databases/roles", power(h.handleDatabases("databases-roles")))
+	mux.HandleFunc("GET /databases/publications", power(h.handleDatabases("databases-publications")))
+	mux.HandleFunc("GET /databases/subscriptions", power(h.handleDatabases("databases-subscriptions")))
+	mux.HandleFunc("GET /poolers/pods", power(h.handlePoolers("poolers-pods")))
+	mux.HandleFunc("GET /poolers/pods/{pod}", power(h.handlePoolerPodDetail))
+	if h.sources.PoolerMetrics != nil {
+		mux.HandleFunc("GET /poolers/metrics", view(h.handlePoolerMetrics))
+		mux.HandleFunc("GET /poolers/metrics/series", view(h.handlePoolerMetricsSeries))
+	}
+	// The timeline is manifest-free metadata and stays at the baseline;
+	// the revision detail is the object's definition verbatim minus the
+	// scrub — more revealing than any other screen — so it sits behind
+	// the same gate as the log tail, and the timeline hides the links
+	// below that level.
+	if h.sources.Metrics != nil {
+		mux.HandleFunc("GET /cluster/metrics", view(h.handleClusterMetrics))
+		mux.HandleFunc("GET /cluster/metrics/series", view(h.handleMetricsSeries))
+	}
+	if h.sources.History != nil {
+		mux.HandleFunc("GET /history", power(h.handleHistory))
+		mux.HandleFunc("GET /history/revisions/{seq}", h.requireLevel(authz.TierPowerUser,
+			"revision details require the poweruser or dba level", h.handleHistoryRevision))
+	}
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
 	mux.HandleFunc("GET /readyz", h.handleReadyz)
 	// The instance log tail sits above the baseline: it requires the
 	// poweruser level or above, and the affordance is hidden below it.
 	if h.cfg.AllowLogs {
-		mux.HandleFunc("GET /logs/{pod}", h.requireLevel(authz.TierPowerUser, "log access requires the poweruser or dba level", h.handleLogs))
+		mux.HandleFunc("GET /logs/{pod}", h.requireLevel(authz.TierPowerUser, requirePowerLevel, h.handleLogs))
+		mux.HandleFunc("GET /poolers/logs/{pod}", h.requireLevel(authz.TierPowerUser, requirePowerLevel, h.handlePoolerLogs))
 	}
 	// Operation routes exist only in operations mode with a wired
 	// executor: disabled mode registers no route to abuse. They require
 	// the poweruser level or above.
 	if h.cfg.AllowOperations && h.executor != nil {
 		operate := func(next http.HandlerFunc) http.HandlerFunc {
-			return h.requireLevel(authz.TierPowerUser, "operations require the poweruser or dba level", next)
+			return h.requireLevel(authz.TierDBA, "the day-2 operations require the dba level", next)
 		}
 		mux.HandleFunc("GET /operations", operate(h.handleOperationsIndex))
 		mux.HandleFunc("GET /operations/{op}", operate(h.handleOperationConfirm))
@@ -228,8 +381,16 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
 		header.Set("Cache-Control", "no-store")
+		// script-src is 'self' only: the enhancement layer is embedded and
+		// served from this binary, never fetched. 'unsafe-eval' is
+		// deliberately absent — the vendored Alpine is the CSP build,
+		// which parses its own restricted expression grammar instead of
+		// calling new Function(). Browser-originated requests are confined
+		// to this application: htmx uses them for enhanced GET navigation
+		// and refresh, while selfRequestsOnly independently enforces the
+		// same boundary.
 		header.Set("Content-Security-Policy",
-			"default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+			"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("X-Frame-Options", "DENY")
 		header.Set("Referrer-Policy", "no-referrer")
@@ -237,30 +398,259 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// handleIndex renders the console page from the current snapshots. The
-// handler performs no API call: rendering is snapshots plus template.
-func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
+// assemble gathers the current snapshots and derives the page view once,
+// then sets the shared shell for the named section. Every screen renders
+// a slice of this same page: the build is snapshots plus derivation with
+// no API call, so a per-section handler costs nothing the full page did
+// not.
+func (h *Handler) assemble(r *http.Request, current string) Page {
 	// The log affordance follows the same poweruser gate as the route, so
 	// a viewer never sees a link that would deny.
-	logsVisible := h.cfg.AllowLogs && h.level(r) >= authz.TierPowerUser
+	access := h.requestAccess(r)
+	logsVisible := h.cfg.AllowLogs && access.hasIdentity && access.level >= authz.TierPowerUser
 	s := snapshots{window: h.cfg.EventsWindow, allowLogs: logsVisible}
 	s.cluster, s.ok = h.sources.Cluster.Current()
 	s.pods, s.podsOK = h.sources.Pods.CurrentPods()
 	s.events, s.eventsOK = h.sources.Events.CurrentEvents()
 	s.backups, s.backupsOK = h.sources.Backups.CurrentBackups()
+	s.poolers, s.poolersOK = h.sources.Poolers.CurrentPoolers()
+	s.poolerPods, s.poolerPodsOK = h.sources.PoolerPods.CurrentPoolerPods()
+	s.quorum, s.quorumOK = h.sources.FailoverQuorum.CurrentFailoverQuorum()
+	s.catalogs, s.catalogsOK = h.sources.ImageCatalogs.CurrentImageCatalogs()
+	s.declared, s.declaredOK = h.sources.DatabaseObjects.CurrentDatabaseObjects()
+	if h.sources.Infrastructure != nil {
+		s.infra, s.infraOK = h.sources.Infrastructure.CurrentInfrastructure()
+	}
 	if h.sources.Evidence != nil {
 		s.evidence = h.sources.Evidence.CurrentEvidence()
 		s.evidenceEnabled = true
 	}
-	page := buildPage(h.cfg.ClusterName, h.cfg.Namespace, s, h.now(), h.cfg.Links)
+	page := buildPage(r.Context(), h.cfg.ClusterName, h.cfg.Namespace, s, h.now(), h.cfg.Links)
 	page.Identity = h.buildIdentityView(r)
-	page.OperationsEnabled = h.cfg.AllowOperations && h.executor != nil
+	page.Shell = h.shell(r, current)
+	page.Shell.SnapshotState = page.SnapshotState
+	page.Shell.SnapshotAge = page.SnapshotAge
+	page.Shell.Generation = page.Generation
+	page.Shell.Identity = page.Identity
+	// Deliberately not page.Links: the page's list is every configured
+	// link-out, which the evidence screen reads to know whether the
+	// viewer is wired at all. The map's list is the one this reader may
+	// follow, and h.shell already decided it.
+	return page
+}
+
+// renderPage writes one screen template, logging a render failure as a
+// category only.
+func (h *Handler) renderPage(w http.ResponseWriter, route, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.tpl.ExecuteTemplate(w, "page.html.tmpl", page); err != nil {
+	if err := h.tpl.ExecuteTemplate(w, name, data); err != nil {
 		h.logger.Error("render failed",
-			slog.String("route", "index"),
+			slog.String("route", route),
 			slog.String("category", redact.Safe(err)))
 	}
+}
+
+// handleIndex renders the plain-language Overview: the derived summary
+// that opens the console, restating the attributed sections in one
+// screen. The detail lives on the section screens the sidebar maps.
+func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "index", "index.html.tmpl", h.assemble(r, "overview"))
+}
+
+// handleObjects renders the inventory: every observed object grouped by
+// the resource it belongs to, each kind carrying its own freshness.
+//
+// The raw-definition affordance is attached here rather than in the view
+// builder because it depends on the request's level, and the builder
+// takes no request. It is the same gate the revision routes enforce, so
+// the link never appears where following it would refuse.
+func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
+	page := h.assemble(r, "objects")
+	if access := h.requestAccess(r); access.hasIdentity && access.level >= authz.TierPowerUser {
+		h.attachRetainedRevisions(page.Objects)
+	}
+	h.renderPage(w, "objects", "objects.html.tmpl", page)
+}
+
+// attachRetainedRevisions resolves each listed object against the
+// history journal, so a row can offer the definition the console already
+// holds. It never reads the API server: the journal is fed by the
+// watches the console already runs, and its manifests were scrubbed at
+// that capture boundary. A kind the journal does not record — every
+// supporting object, by design — resolves to nothing and offers no link.
+func (h *Handler) attachRetainedRevisions(objects *ObjectsView) {
+	if objects == nil || h.sources.History == nil {
+		return
+	}
+	snap, ok := h.sources.History.Snapshot()
+	if !ok {
+		return
+	}
+	// Newest first, so the first match for a name is the current
+	// definition and later revisions of the same object are skipped.
+	type key struct{ kind, name string }
+	seq := map[key]uint64{}
+	for _, entry := range snap.Entries {
+		if !entry.HasManifest {
+			continue
+		}
+		k := key{entry.Kind, entry.Name}
+		if _, seen := seq[k]; !seen {
+			seq[k] = entry.Seq
+		}
+	}
+	for gi := range objects.Groups {
+		for ki := range objects.Groups[gi].Kinds {
+			kind := &objects.Groups[gi].Kinds[ki]
+			if kind.APIKind == "" {
+				continue
+			}
+			for ri := range kind.Rows {
+				kind.Rows[ri].RawSeq = seq[key{kind.APIKind, kind.Rows[ri].Name}]
+			}
+		}
+	}
+}
+
+// handleClusterOverview renders the power-user wiring: the observed
+// shape with placement and replication facts, and the configured backup
+// path.
+
+// handleClusterOverview renders the power-user wiring: the observed
+// shape with placement and replication facts, and the configured backup
+// path.
+func (h *Handler) handleClusterOverview(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "cluster-overview", "cluster-overview.html.tmpl", h.assemble(r, "cluster-overview"))
+}
+
+// handleClusterPods renders the Kubernetes-observed instance pods and
+// the merged recent per-pod timeline.
+func (h *Handler) handleClusterPods(w http.ResponseWriter, r *http.Request) {
+	page := h.assemble(r, "cluster-pods")
+	page.PodHistory, _ = h.buildPodTimeline("", h.rosterMembers(h.sources.Pods.CurrentPods), recentPodHistoryBound, h.now())
+	h.renderPage(w, "cluster-pods", "cluster-pods.html.tmpl", page)
+}
+
+// rosterMembers is the set of pod names one watch proved membership
+// for. A nil set would mean "every Pod", which is the wrong answer for
+// a screen that lists one roster.
+func (h *Handler) rosterMembers(current func() (observe.PodsSnapshot, bool)) map[string]bool {
+	members := map[string]bool{}
+	snap, ok := current()
+	if !ok {
+		return members
+	}
+	for _, pod := range snap.Pods {
+		members[pod.Name] = true
+	}
+	return members
+}
+
+// recentPodHistoryBound caps the roster screen's timeline; the per-pod
+// detail carries the rest.
+const recentPodHistoryBound = 8
+
+// handleBackupsOverview renders the backup catalog verdict and the
+// operator-versus-repository cross-check.
+func (h *Handler) handleBackupsOverview(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "backups", "backups-overview.html.tmpl", h.assemble(r, "backups-overview"))
+}
+
+// handleBackupsObjects renders the Backup and ScheduledBackup catalogs
+// and the ObjectStore reference lookup.
+func (h *Handler) handleBackupsObjects(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "backups-objects", "backups-objects.html.tmpl", h.assemble(r, "backups-objects"))
+}
+
+// handleBackupsEvidence renders the repository-evidence section.
+func (h *Handler) handleBackupsEvidence(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, "backups-evidence", "backups-evidence.html.tmpl", h.assemble(r, "backups-evidence"))
+}
+
+// handleDatabases renders the declarative-objects section. The four
+// entries share one screen and one snapshot: they are four lists of the
+// same kind of claim — what was declared and what the operator did with
+// it — and giving each its own freshness would let one screen disagree
+// with itself about how current it is. The named key sets which sidebar
+// entry reads as current and which list the screen opens on.
+func (h *Handler) handleDatabases(current string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.renderPage(w, current, "databases.html.tmpl", h.assemble(r, current))
+	}
+}
+
+// handlePoolers renders the poolers section. The three entries share one
+// screen: a Pooler's pods and logs are the Deployment's, which this
+// console does not observe separately, so splitting them would promise
+// detail it does not have. The named key sets which sidebar entry reads
+// as current.
+func (h *Handler) handlePoolers(current string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		page := h.assemble(r, current)
+		if current == "poolers-pods" {
+			page.PodHistory, _ = h.buildPodTimeline("",
+				h.rosterMembers(h.poolerPodsSnapshot), recentPodHistoryBound, h.now())
+		}
+		h.renderPage(w, current, "poolers.html.tmpl", page)
+	}
+}
+
+// shell builds the chrome shared by every page. It carries no cluster
+// fact of its own: pages that have a snapshot copy their own state onto
+// it after calling this, and pages that do not simply leave those fields
+// empty so the top bar renders no snapshot line rather than a false one.
+func (h *Handler) shell(r *http.Request, current string) ShellView {
+	access := h.requestAccess(r)
+	return ShellView{
+		ClusterName:            h.cfg.ClusterName,
+		Namespace:              h.cfg.Namespace,
+		CurrentURL:             r.URL.RequestURI(),
+		Identity:               h.buildIdentityView(r),
+		Links:                  buildLinks(h.cfg.Links, access.hasIdentity && access.level >= authz.TierDBA),
+		OperationsAvailable:    h.cfg.AllowOperations && h.executor != nil,
+		CanOperate:             access.canOperate(h),
+		AccessReviewAvailable:  h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil,
+		CanReviewAccess:        access.canReviewAccess(h),
+		HistoryAvailable:       h.sources.History != nil,
+		CanRead:                access.hasIdentity && access.level >= authz.TierView,
+		CanBrowse:              access.hasIdentity && access.level >= authz.TierPowerUser,
+		CanAdminister:          access.hasIdentity && access.level >= authz.TierDBA,
+		MetricsAvailable:       h.sources.Metrics != nil,
+		PoolerMetricsAvailable: h.sources.PoolerMetrics != nil,
+		Current:                current,
+	}
+}
+
+// requestAccess is the request-scoped input to UI capability rendering.
+// It deliberately carries only the proxy assertions the route gates already
+// consume: rendering never probes Kubernetes RBAC and never widens the
+// ServiceAccount's authority.
+type requestAccess struct {
+	level       authz.Tier
+	hasIdentity bool
+}
+
+// requestAccess resolves the forwarded identity and asserted level once for
+// capability decisions. A level without a usable identity exposes no gated
+// affordance because the corresponding route would refuse it for lack of an
+// auditable actor.
+func (h *Handler) requestAccess(r *http.Request) requestAccess {
+	access := requestAccess{level: h.level(r)}
+	if h.auth.Extractor != nil {
+		_, access.hasIdentity = h.auth.Extractor.FromRequest(r)
+	}
+	return access
+}
+
+// canOperate follows the route: the day-2 operations are the dba's, in
+// the same tier as the review panel. The poweruser tier reads every
+// screen the console shows and changes none of them.
+func (a requestAccess) canOperate(h *Handler) bool {
+	return a.hasIdentity && a.level >= authz.TierDBA && h.cfg.AllowOperations && h.executor != nil
+}
+
+func (a requestAccess) canReviewAccess(h *Handler) bool {
+	return a.hasIdentity && a.level >= authz.TierDBA && h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil
 }
 
 // requireLevel gates a route on a minimum proxy-asserted level. A usable
@@ -270,22 +660,35 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 // confinement invariant; the console probes nothing. Denials render
 // categories only; neither the forwarded identity nor the asserted level
 // value ever enters a log line.
+// The requirement sentences the denial page shows. They name the level
+// the route needs, never the level the reader has: the reader's own
+// level is already in the top bar, and repeating it in a refusal reads
+// as an accusation rather than an explanation.
+const (
+	requireViewLevel  = "this console is read through a proxy-asserted level, and none reached it"
+	requirePowerLevel = "this screen requires the poweruser or dba level"
+)
+
 func (h *Handler) requireLevel(min authz.Tier, requirement string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.auth.Extractor == nil {
-			h.renderDenied(w, http.StatusServiceUnavailable,
-				"level gating unavailable without a trusted identity header")
+		if h.auth.Extractor == nil || h.cfg.LevelHeader == "" {
+			// Every screen is decided by the forwarded level, so a
+			// deployment without the headers to read it serves nothing.
+			// That is a wiring fault rather than a refusal of this
+			// reader, and it says so.
+			h.renderDenied(w, r, http.StatusServiceUnavailable,
+				"this deployment forwards no identity or level header, so the console can admit nobody")
 			return
 		}
 		if _, ok := h.auth.Extractor.FromRequest(r); !ok {
 			h.logger.Info("denied", slog.String("reason", "no-identity"))
-			h.renderDenied(w, http.StatusForbidden,
+			h.renderDenied(w, r, http.StatusForbidden,
 				"identity required: the proxy forwarded no usable identity")
 			return
 		}
 		if h.level(r) < min {
 			h.logger.Info("denied", slog.String("reason", "insufficient-level"))
-			h.renderDenied(w, http.StatusForbidden, "not authorized: "+requirement)
+			h.renderDenied(w, r, http.StatusForbidden, "not authorized: "+requirement)
 			return
 		}
 		next(w, r)
@@ -303,10 +706,26 @@ func (h *Handler) level(r *http.Request) authz.Tier {
 }
 
 // renderDenied writes the constant denial page.
-func (h *Handler) renderDenied(w http.ResponseWriter, status int, message string) {
+// assertedLevel is the level the proxy forwarded, for the denial page
+// to restate. Empty when none was forwarded or none was recognised —
+// the two are the same thing to the ladder, and the page says so in
+// words rather than showing whatever string arrived.
+func (h *Handler) assertedLevel(r *http.Request) string {
+	if h.cfg.LevelHeader == "" {
+		return ""
+	}
+	switch level := authz.ParseLevel(r.Header.Get(h.cfg.LevelHeader)); level {
+	case authz.TierView, authz.TierPowerUser, authz.TierDBA:
+		return level.String()
+	default:
+		return ""
+	}
+}
+
+func (h *Handler) renderDenied(w http.ResponseWriter, r *http.Request, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	if err := h.tpl.ExecuteTemplate(w, "denied.html.tmpl", DeniedView{Message: message}); err != nil {
+	if err := h.tpl.ExecuteTemplate(w, "denied.html.tmpl", DeniedView{Shell: h.shell(r, ""), Message: message, Level: h.assertedLevel(r)}); err != nil {
 		h.logger.Error("render failed",
 			slog.String("route", "denied"),
 			slog.String("category", redact.Safe(err)))
@@ -332,18 +751,48 @@ func (h *Handler) buildIdentityView(r *http.Request) *IdentityView {
 // shape before anything touches the API.
 var podNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
 
+// serveRawTail writes the bounded tail as plain text. It sits behind
+// the same requireLevel gate as the page form of the route.
+// tail is the roster's own membership-proving fetch: the two rosters
+// are separate ownership chains, and the raw route must not be the way
+// round one of them.
+func (h *Handler) serveRawTail(w http.ResponseWriter, r *http.Request, pod string, tail func(context.Context, string) (observe.LogTail, error)) {
+	if h.tailer == nil {
+		http.Error(w, "no Kubernetes access", http.StatusServiceUnavailable)
+		return
+	}
+	tailed, err := tail(r.Context(), pod)
+	if err != nil {
+		if redact.Categorize(err) == redact.CategoryNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, redact.Safe(err), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(tailed.Content))
+}
+
 // handleLogs serves one bounded, on-demand log tail for a verified
 // member pod. This is a closed request-time API exception: the fetch
 // runs on the request's context, so a client disconnect cancels it;
 // nothing is cached or persisted. A non-member pod is indistinguishable
-// from a nonexistent one.
+// from a nonexistent one. With ?raw=1 the same gated tail is served as
+// plain text, which is what the pod detail's follow enhancement polls.
 func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	pod := r.PathValue("pod")
 	if !podNamePattern.MatchString(pod) {
 		http.NotFound(w, r)
 		return
 	}
+	if r.URL.Query().Get("raw") == "1" {
+		h.serveRawTail(w, r, pod, h.tailer.TailLogs)
+		return
+	}
 	view := LogsView{
+		Shell:       h.shell(r, ""),
 		ClusterName: h.cfg.ClusterName,
 		Pod:         pod,
 		Origin:      OriginKubernetes,
@@ -381,6 +830,24 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 			slog.String("route", "logs"),
 			slog.String("category", redact.Safe(err)))
 	}
+}
+
+// handlePoolerLogs serves one bounded, on-demand tail of a pooler pod's
+// pgbouncer container, on the same terms as the instance tail: the same
+// level gate, the same bounds, and membership re-verified live before
+// the fetch.
+// handlePoolerLogs serves the bounded tail for one pooler pod. The
+// standalone screen it used to render is gone — the pod's own detail
+// screen carries a Logs tab, which is where a reader looking at a pod
+// expects its logs — so this answers only the raw form the follow poll
+// asks for.
+func (h *Handler) handlePoolerLogs(w http.ResponseWriter, r *http.Request) {
+	pod := r.PathValue("pod")
+	if !podNamePattern.MatchString(pod) {
+		http.NotFound(w, r)
+		return
+	}
+	h.serveRawTail(w, r, pod, h.tailer.TailPoolerLogs)
 }
 
 // handleHealthz proves process liveness and nothing else.
@@ -429,4 +896,34 @@ func (EmptySnapshots) CurrentEvents() (observe.EventsSnapshot, bool) {
 // CurrentBackups reports no backup snapshot.
 func (EmptySnapshots) CurrentBackups() (observe.BackupsSnapshot, bool) {
 	return observe.BackupsSnapshot{}, false
+}
+
+// CurrentPoolers reports no pooler snapshot.
+func (EmptySnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
+	return observe.PoolersSnapshot{}, false
+}
+
+// CurrentPoolerPods reports no pooler pod snapshot.
+func (EmptySnapshots) CurrentPoolerPods() (observe.PodsSnapshot, bool) {
+	return observe.PodsSnapshot{}, false
+}
+
+// CurrentFailoverQuorum reports no failover-quorum snapshot.
+func (EmptySnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
+	return observe.FailoverQuorumSnapshot{}, false
+}
+
+// CurrentImageCatalogs reports no image-catalog snapshot.
+func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
+	return observe.ImageCatalogsSnapshot{}, false
+}
+
+// CurrentDatabaseObjects reports no declarative-object snapshot.
+func (EmptySnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool) {
+	return observe.DatabaseObjectsSnapshot{}, false
+}
+
+// CurrentInfrastructure reports no infrastructure snapshot.
+func (EmptySnapshots) CurrentInfrastructure() (observe.InfrastructureSnapshot, bool) {
+	return observe.InfrastructureSnapshot{}, false
 }

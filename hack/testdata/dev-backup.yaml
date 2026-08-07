@@ -1,0 +1,54 @@
+# The dev cluster's backup wiring: where WAL and base backups go, and on
+# what schedule. Applied after the barman-cloud plugin's CRDs exist.
+#
+# This is what lights up the console's backup panels and the storage tier
+# of the wiring diagram — destination, endpoint and retention are read
+# from the ObjectStore resource, never assumed.
+#
+# The credentials are the throwaway MinIO ones from dev-minio.yaml.
+# pgConsole holds no permission on Secrets and never reads this one; it is
+# here because CloudNativePG's plugin does.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-s3-creds
+  namespace: payments
+stringData:
+  ACCESS_KEY_ID: pgconsoledev
+  ACCESS_SECRET_KEY: pgconsoledev123
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: orders-store
+  namespace: payments
+spec:
+  retentionPolicy: 30d
+  configuration:
+    destinationPath: s3://pgbackups/orders
+    endpointURL: http://minio.minio.svc:9000
+    s3Credentials:
+      accessKeyId:
+        name: minio-s3-creds
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: minio-s3-creds
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: orders-nightly
+  namespace: payments
+spec:
+  cluster:
+    name: orders
+  schedule: "0 0 2 * * *"
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  backupOwnerReference: self

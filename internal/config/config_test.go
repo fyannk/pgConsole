@@ -96,6 +96,21 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.ObjectStoreViewerURL != "" || cfg.PgAdminURL != "" || cfg.MonitoringURL != "" || cfg.RepositoryEvidenceURL != "" {
 		t.Error("optional URLs must default to empty")
 	}
+	if !cfg.HistoryEnabled {
+		t.Error("HistoryEnabled must default to true")
+	}
+	if cfg.HistoryMaxRevisions != DefaultHistoryMaxRevisions {
+		t.Errorf("HistoryMaxRevisions = %d, want %d", cfg.HistoryMaxRevisions, DefaultHistoryMaxRevisions)
+	}
+	if cfg.HistoryMaxBytes != DefaultHistoryMaxBytes {
+		t.Errorf("HistoryMaxBytes = %d, want %d", cfg.HistoryMaxBytes, DefaultHistoryMaxBytes)
+	}
+	if cfg.HistoryPerObjectRevisions != DefaultHistoryPerObjectRevisions {
+		t.Errorf("HistoryPerObjectRevisions = %d, want %d", cfg.HistoryPerObjectRevisions, DefaultHistoryPerObjectRevisions)
+	}
+	if cfg.HistoryCoalesceWindow != DefaultHistoryCoalesceWindow {
+		t.Errorf("HistoryCoalesceWindow = %s, want %s", cfg.HistoryCoalesceWindow, DefaultHistoryCoalesceWindow)
+	}
 }
 
 func TestLoadMatrix(t *testing.T) {
@@ -240,6 +255,127 @@ func TestLoadMatrix(t *testing.T) {
 			name:    "api timeout above bound",
 			mutate:  map[string]string{EnvAPIRequestTimeout: "2m"},
 			wantErr: EnvAPIRequestTimeout + ": must be a duration between 1s and 1m0s",
+		},
+		{
+			name:   "history disabled explicitly",
+			mutate: map[string]string{EnvHistoryEnabled: "false"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryEnabled {
+					t.Error("HistoryEnabled = true, want false")
+				}
+			},
+		},
+		{
+			name:    "history flag not a strict boolean",
+			mutate:  map[string]string{EnvHistoryEnabled: "on"},
+			wantErr: EnvHistoryEnabled + `: must be "true" or "false"`,
+		},
+		{
+			name:   "metrics disabled explicitly",
+			mutate: map[string]string{EnvMetricsEnabled: "false"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MetricsEnabled {
+					t.Error("MetricsEnabled = true, want false")
+				}
+			},
+		},
+		{
+			name:   "metrics cadence and retention configured",
+			mutate: map[string]string{EnvMetricsInterval: "30s", EnvMetricsRetention: "48h"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MetricsInterval != 30*time.Second || cfg.MetricsRetention != 48*time.Hour {
+					t.Errorf("metrics bounds = %v/%v", cfg.MetricsInterval, cfg.MetricsRetention)
+				}
+			},
+		},
+		{
+			name:    "metrics interval below bound",
+			mutate:  map[string]string{EnvMetricsInterval: "1s"},
+			wantErr: EnvMetricsInterval + ": must be a duration between 5s and 5m0s",
+		},
+		{
+			name:    "metrics retention above bound",
+			mutate:  map[string]string{EnvMetricsRetention: "1000h"},
+			wantErr: EnvMetricsRetention + ": must be a duration between 1h0m0s and 720h0m0s",
+		},
+		{
+			name:   "metrics snapshot path configured",
+			mutate: map[string]string{EnvMetricsPath: "/var/lib/pgconsole/metrics.snapshot"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MetricsPath != "/var/lib/pgconsole/metrics.snapshot" {
+					t.Errorf("MetricsPath = %q", cfg.MetricsPath)
+				}
+			},
+		},
+		{
+			name:    "metrics path must be absolute",
+			mutate:  map[string]string{EnvMetricsPath: "metrics.snapshot"},
+			wantErr: EnvMetricsPath + ": must be an absolute file path",
+		},
+		{
+			name:    "metrics path conflicts with disabled metrics",
+			mutate:  map[string]string{EnvMetricsEnabled: "false", EnvMetricsPath: "/var/lib/pgconsole/metrics.snapshot"},
+			wantErr: EnvMetricsPath + ": requires " + EnvMetricsEnabled + "=true",
+		},
+		{
+			name:    "history revisions below bound",
+			mutate:  map[string]string{EnvHistoryMaxRevisions: "99"},
+			wantErr: EnvHistoryMaxRevisions + ": must be an integer between 100 and 20000",
+		},
+		{
+			name:    "history bytes above bound",
+			mutate:  map[string]string{EnvHistoryMaxBytes: "67108865"},
+			wantErr: EnvHistoryMaxBytes + ": must be an integer between 1048576 and 67108864",
+		},
+		{
+			name:    "history per-object revisions above bound",
+			mutate:  map[string]string{EnvHistoryPerObjectRevisions: "201"},
+			wantErr: EnvHistoryPerObjectRevisions + ": must be an integer between 2 and 200",
+		},
+		{
+			name:    "history coalesce window malformed",
+			mutate:  map[string]string{EnvHistoryCoalesceWindow: "soon"},
+			wantErr: EnvHistoryCoalesceWindow + ": must be a duration between 1s and 1h0m0s",
+		},
+		{
+			name:   "history path accepted",
+			mutate: map[string]string{EnvHistoryPath: "/var/lib/pgconsole/history.db"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryPath != "/var/lib/pgconsole/history.db" {
+					t.Errorf("HistoryPath = %q", cfg.HistoryPath)
+				}
+			},
+		},
+		{
+			name:   "history path defaults to empty",
+			mutate: map[string]string{},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryPath != "" {
+					t.Errorf("HistoryPath = %q, want empty", cfg.HistoryPath)
+				}
+			},
+		},
+		{
+			name:    "history path must be absolute",
+			mutate:  map[string]string{EnvHistoryPath: "history.db"},
+			wantErr: EnvHistoryPath + ": must be an absolute file path",
+		},
+		{
+			name: "history path with history disabled is conflicting intent",
+			mutate: map[string]string{
+				EnvHistoryEnabled: "false",
+				EnvHistoryPath:    "/var/lib/pgconsole/history.db",
+			},
+			wantErr: EnvHistoryPath + ": requires " + EnvHistoryEnabled + "=true",
+		},
+		{
+			name:   "history bounds accepted at the edges",
+			mutate: map[string]string{EnvHistoryMaxRevisions: "100", EnvHistoryCoalesceWindow: "1s"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.HistoryMaxRevisions != 100 || cfg.HistoryCoalesceWindow != time.Second {
+					t.Errorf("bounds not applied: %d, %s", cfg.HistoryMaxRevisions, cfg.HistoryCoalesceWindow)
+				}
+			},
 		},
 		{
 			name:   "https link accepted",

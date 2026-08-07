@@ -1,0 +1,81 @@
+{{- /*
+  Cluster pods. The recent per-pod timeline leads — events and retained
+  definition revisions, each in its source's words — then the observed
+  roster, with the primary disagreement finding surfaced when the
+  operator's claim and the observed role labels conflict. Each row opens
+  its pod's detail screen; the name is a real link, so the row click is
+  an enhancement.
+*/ -}}
+{{template "page-head" "pods"}}
+{{template "shell-open" .Shell}}
+    {{- with .Pods}}
+    <section class="panel sectioned" data-panel="pods">
+      <div class="panel-head">
+        <h2>Instance pods</h2>
+      </div>
+      <div class="panel-body">
+      {{- with .Disagreement}}
+      <div class="finding">
+        <p class="state">disagreement on the primary instance</p>
+        <p>{{.OperatorClaim}} <span class="origin">({{.OperatorOrigin.Label}})</span></p>
+        <p>{{.ObservedClaim}} <span class="origin">({{.ObservedOrigin.Label}})</span></p>
+      </div>
+      {{- end}}
+      {{- if .Rows}}
+      <div x-data="dataTable">
+        <div class="table-tools" x-cloak>
+          <input type="search" x-model="query" placeholder="Filter pods" aria-label="Filter pods">
+          <span class="count" x-text="summary"></span>
+        </div>
+        <div class="table-scroll">
+      <table class="pods">
+        <thead><tr><th>Name</th><th>Role</th><th>Phase</th><th>Ready</th><th>Restarts</th><th>Node</th><th>Image</th></tr></thead>
+        <tbody>
+          {{- range .Rows}}
+          <tr data-href="/cluster/pods/{{.Name}}"><td><a href="/cluster/pods/{{.Name}}">{{.Name}}</a></td><td>{{.Role}}</td><td>{{.Phase}}</td><td>{{.Ready}}</td><td>{{.Restarts}}</td><td>{{.Node}}</td><td>{{.Image}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+        </div>
+      </div>
+      {{- else}}
+      <p class="state">no member pods observed</p>
+      {{- end}}
+      {{- if .Truncated}}
+      <p class="state">truncated: more members matched than the display bound</p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}} — <span data-state="{{stateToken .Meta.State}}">snapshot: {{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
+      </div>
+    </section>
+    {{- else}}
+    <section class="panel">
+      <h2>Instance pods</h2>
+      <div class="empty"><strong>No pods snapshot yet</strong>The Kubernetes API has not been observed for this cluster's instance pods.</div>
+      <p class="origin">source: kubernetes-observed</p>
+    </section>
+    {{- end}}
+    {{- if .PodHistory}}
+    <section class="panel sectioned">
+      <div class="panel-head">
+        <h2>Recent pod history</h2>
+      </div>
+      <div class="panel-body">
+      <ol class="timeline">
+        {{- range .PodHistory}}
+        <li data-kind="{{.Kind}}">
+          <div class="when"><b>{{.Age}} ago</b><time datetime="{{.StampISO}}" data-local>{{.Stamp}}</time></div>
+          <div class="rail"></div>
+          <div class="entry">
+            <div class="head"><span class="title">{{.Title}}</span><span class="tag" data-kind="{{.Kind}}">{{.Tag}}</span><span class="object">{{.Object}}</span></div>
+            {{- if .Body}}
+            <p>{{.Body}}</p>
+            {{- end}}
+          </div>
+        </li>
+        {{- end}}
+      </ol>
+      <p class="origin">source: Kubernetes-observed events and retained object definitions; times are when this pgConsole process observed them</p>
+      </div>
+    </section>
+    {{- end}}
+{{template "shell-close"}}

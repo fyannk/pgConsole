@@ -63,11 +63,39 @@ func (e *recordingExecutor) Execute(_ context.Context, id ops.ID, target string,
 	return "accepted", nil
 }
 
-// powerUser is the minimal authorized header set for the operation
-// routes: a forwarded identity and the poweruser level. The operations
-// mechanics tests below exercise the confirm/execute flow past the level
-// gate, so every request they issue carries it.
+// powerUser is the poweruser level with an identity. It reads every
+// screen the console shows and executes none of them: the day-2
+// operations and the review panel are the dba's.
 var powerUser = map[string]string{"X-Forwarded-User": "operator", "X-PgToolBox-Level": "poweruser"}
+
+// operator is the minimal authorized header set for the operation
+// routes. The mechanics tests below exercise the confirm/execute flow
+// past the level gate, so every request they issue carries it.
+var operator = map[string]string{"X-Forwarded-User": "operator", "X-PgToolBox-Level": "dba"}
+
+func TestOperationsNavigationRequiresIdentityAndDBALevel(t *testing.T) {
+	t.Parallel()
+	h := newOpsHandler(t, newRecordingExecutor())
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    bool
+	}{
+		{name: "dba", headers: operator, want: true},
+		{name: "poweruser", headers: powerUser},
+		{name: "view", headers: map[string]string{"X-Forwarded-User": "viewer", "X-PgToolBox-Level": "view"}},
+		{name: "level without identity", headers: map[string]string{"X-PgToolBox-Level": "dba"}},
+		{name: "identity without level", headers: map[string]string{"X-Forwarded-User": "operator"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := getWithHeaders(t, h, "/", tc.headers).Body.String()
+			if got := strings.Contains(body, `href="/operations"`); got != tc.want {
+				t.Errorf("operations navigation present = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 // newOpsHandler builds an operations-enabled handler over the executor,
 // with the trusted level header configured so poweruser requests reach
@@ -76,7 +104,7 @@ func newOpsHandler(t *testing.T, exec OpsExecutor) *Handler {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowOperations: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}},
+		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}, Poolers: staticSnapshots{}, PoolerPods: staticSnapshots{}, FailoverQuorum: staticSnapshots{}, ImageCatalogs: staticSnapshots{}, DatabaseObjects: staticSnapshots{}},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		exec, nil, func() time.Time { return testNow }, logger)
@@ -90,7 +118,7 @@ func newOpsHandler(t *testing.T, exec OpsExecutor) *Handler {
 // routes.
 func opsGet(t *testing.T, h *Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	return getWithHeaders(t, h, path, powerUser)
+	return getWithHeaders(t, h, path, operator)
 }
 
 // confirmToken fetches a confirmation page and extracts the CSRF token.
@@ -115,7 +143,7 @@ func postOp(t *testing.T, h *Handler, op string, form url.Values, headers map[st
 	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/operations/"+op, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	for k, v := range powerUser {
+	for k, v := range operator {
 		req.Header.Set(k, v)
 	}
 	for k, v := range headers {
@@ -245,12 +273,12 @@ func TestOperationsUnknownIs404(t *testing.T) {
 // TestOperationsRequirePowerUserLevel proves the operations routes admit
 // the poweruser and dba levels and deny everything below — view, an
 // unknown level, and a missing identity — by the level header alone.
-func TestOperationsRequirePowerUserLevel(t *testing.T) {
+func TestOperationsRequireDBALevel(t *testing.T) {
 	t.Parallel()
 	exec := newRecordingExecutor()
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowOperations: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}},
+		Sources{Cluster: staticSnapshots{}, Pods: staticSnapshots{}, Events: staticSnapshots{}, Backups: staticSnapshots{}, Poolers: staticSnapshots{}, PoolerPods: staticSnapshots{}, FailoverQuorum: staticSnapshots{}, ImageCatalogs: staticSnapshots{}, DatabaseObjects: staticSnapshots{}},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		exec, nil, func() time.Time { return testNow }, logger)
@@ -260,9 +288,10 @@ func TestOperationsRequirePowerUserLevel(t *testing.T) {
 
 	denied := []map[string]string{
 		{"X-Forwarded-User": "viewer", "X-PgToolBox-Level": "view"},
+		{"X-Forwarded-User": "viewer", "X-PgToolBox-Level": "poweruser"},
 		{"X-Forwarded-User": "viewer", "X-PgToolBox-Level": "bogus"},
 		{"X-Forwarded-User": "viewer"},
-		{"X-PgToolBox-Level": "poweruser"}, // no identity to attribute
+		{"X-PgToolBox-Level": "dba"}, // no identity to attribute
 	}
 	for _, headers := range denied {
 		if rec := getWithHeaders(t, h, "/operations", headers); rec.Code != http.StatusForbidden {
@@ -270,10 +299,8 @@ func TestOperationsRequirePowerUserLevel(t *testing.T) {
 		}
 	}
 
-	for _, level := range []string{"poweruser", "dba"} {
-		rec := getWithHeaders(t, h, "/operations", map[string]string{"X-Forwarded-User": "operator", "X-PgToolBox-Level": level})
-		if rec.Code != http.StatusOK {
-			t.Errorf("%s operations index = %d, want 200", level, rec.Code)
-		}
+	rec := getWithHeaders(t, h, "/operations", operator)
+	if rec.Code != http.StatusOK {
+		t.Errorf("dba operations index = %d, want 200", rec.Code)
 	}
 }

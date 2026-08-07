@@ -19,11 +19,18 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `TRUSTED_LEVEL_HEADER` | `X-PgToolBox-Level` | Proxy level header carrying `view`, `poweruser`, or `dba`; empty leaves only the read-only baseline. |
 | `ALLOW_OPERATIONS` | `false` | Enables the enumerated day-2 operation routes. Strict boolean. |
 | `ALLOW_ACCESS_REVIEW` | `false` | Enables the dba access-request review panel. Strict boolean; needs its own Role. |
+| `ALLOW_CLUSTER_CATALOGS` | `false` | Lets the console read the one cluster-scoped `ClusterImageCatalog` its Cluster references. Strict boolean; needs its own ClusterRole. The only setting that grants authority outside the namespace. |
 | `ALLOW_LOGS` | `true` | Master switch for the bounded log tail; when on, the tail still requires the `poweruser` level. |
 | `LOG_TAIL_LINES` | `200` | Lines per log request, 1–2000. |
 | `LOG_TAIL_MAX_BYTES` | `1048576` | Bytes per log request, 4 KiB–8 MiB. |
 | `EVENTS_MAX_AGE` | `1h` | Event age window, 1m–24h. |
 | `API_REQUEST_TIMEOUT` | `10s` | Per-request Kubernetes API bound, 1s–1m. |
+| `HISTORY_ENABLED` | `true` | Records the bounded, scrubbed object-definition timeline from the existing watches. `false` constructs no recorder and registers no history route. |
+| `HISTORY_MAX_REVISIONS` | `2000` | Global retained revision bound, 100–20000. |
+| `HISTORY_MAX_BYTES` | `16777216` | Global retained manifest/attribution byte bound, 1 MiB–64 MiB. |
+| `HISTORY_PER_OBJECT_REVISIONS` | `20` | Per-object retained revision bound, 2–200. |
+| `HISTORY_COALESCE_WINDOW` | `1m` | Window for folding consecutive status-only transitions, 1s–1h. |
+| `HISTORY_PATH` | *empty* | Absolute bbolt journal path. Empty keeps history in memory only; a value requires `HISTORY_ENABLED=true`, a writable PVC, and one replica. |
 | `OBJECTSTOREVIEWER_URL` | *empty* | ObjectStoreViewer link-out; empty hides it. |
 | `PGADMIN_URL` | *empty* | pgAdmin link-out; empty hides it. |
 | `MONITORING_URL` | *empty* | Monitoring link-out; empty hides it. |
@@ -44,3 +51,7 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 - Setting `TRUSTED_USER_HEADER` or `TRUSTED_LEVEL_HEADER` to an explicit
   empty string is a valid, fail-safe configuration — it removes a capability
   rather than loosening one.
+- The history screen renders 100 manifest-free entries per page. Revision
+  manifests are scrubbed before storage and capped at 256 KiB when displayed;
+  structural diffs retain their 256-entry/value bounds. These UI ceilings do
+  not change the configured in-memory retention budget.

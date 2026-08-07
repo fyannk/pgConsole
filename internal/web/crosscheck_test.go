@@ -15,6 +15,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -270,7 +271,7 @@ func TestCrossCheckOrphanDisplayBound(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexCrossCheckRendersFindingsAndProhibitedLanguage(t *testing.T) {
+func TestHandlerBackupEvidenceCrossCheckFindingsAndProhibitedLanguage(t *testing.T) {
 	t.Parallel()
 	report := completeReport()
 	facts := healthyFacts()
@@ -293,7 +294,7 @@ func TestHandlerIndexCrossCheckRendersFindingsAndProhibitedLanguage(t *testing.T
 		},
 	}}
 	h := newEvidenceHandler(t, sources, status)
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/evidence").Body.String()
 
 	for _, want := range []string{
 		"Backup cross-check",
@@ -324,5 +325,28 @@ func TestHandlerIndexCrossCheckAbsentWithoutEvidenceConsumer(t *testing.T) {
 	h, _ := newTestHandler(t, sources, nil, Links{})
 	if body := get(t, h, http.MethodGet, "/").Body.String(); strings.Contains(body, "Backup cross-check") {
 		t.Error("disabled consumer renders a cross-check section")
+	}
+}
+
+// The evidence section tells a reader to open ObjectStoreViewer from the
+// sidebar. That is only true when the viewer link-out in particular is
+// configured — a deployment with pgAdmin and monitoring wired but no
+// viewer has no such sidebar entry, and pointing at one is worse than
+// staying quiet.
+func TestEvidenceIntroPointsAtTheSidebarOnlyWhenTheViewerIsThere(t *testing.T) {
+	t.Parallel()
+	page := buildPage(context.Background(), "orders", "payments", snapshots{window: time.Hour},
+		testNow, Links{PgAdmin: "https://pgadmin.example.com", Monitoring: "https://grafana.example.com"})
+	if page.ViewerLinked {
+		t.Error("other siblings being linked marks the viewer as linked")
+	}
+	if len(page.Links) == 0 {
+		t.Fatal("the fixture configured no link-out at all, so the case is not exercised")
+	}
+
+	page = buildPage(context.Background(), "orders", "payments", snapshots{window: time.Hour},
+		testNow, Links{ObjectStoreViewer: "https://viewer.example.com/orders"})
+	if !page.ViewerLinked {
+		t.Error("the configured viewer link is not reported")
 	}
 }
