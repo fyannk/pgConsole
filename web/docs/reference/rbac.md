@@ -60,7 +60,7 @@ Reads on the two pgToolBox CRDs plus one status write.
 | Purpose | API group | Resources | Verbs |
 |---|---|---|---|
 | List and follow access requests | `pgtoolbox.fyannk.dev` | `pgtoolboxaccessrequests` | `get`, `list`, `watch` |
-| Record a decision | `pgtoolbox.fyannk.dev` | `pgtoolboxaccessrequests/status` | `update` |
+| Record a decision | `pgtoolbox.fyannk.dev` | `pgtoolboxaccessrequests/status` | `patch` |
 | Populate the role picker | `pgtoolbox.fyannk.dev` | `pgtoolboxroles` | `get`, `list`, `watch` |
 
 The console never creates or modifies users, roles, or proxy configuration;
