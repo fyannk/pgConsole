@@ -1,0 +1,53 @@
+{{- /*
+  Bounded object-definition history. Every timestamp is when this process
+  observed Kubernetes state, and every manager is self-declared managedFields
+  data rather than an authenticated identity.
+*/ -}}
+{{template "page-head" "object history"}}
+{{template "shell-open" .Shell}}
+  <header>
+    <div class="header-bar">
+      <h1>Object definition history</h1>
+      <dl class="target"><dt>History generation</dt><dd>{{.Generation}}</dd></dl>
+    </div>
+  </header>
+  <section class="panel">
+    <h2>Observed revisions</h2>
+    <p class="origin">source: Kubernetes-reported object definitions; times are when this pgConsole process observed them</p>
+    {{- if .Evicted}}
+    <p class="state">retention has evicted older revisions; this is the retained window, not the beginning of the cluster's history</p>
+    {{- end}}
+    {{- if .Entries}}
+    <div class="history-visual" data-history-visual hidden aria-hidden="true"></div>
+    <div class="table-scroll" x-data="dataTable">
+      <div class="table-tools" x-cloak>
+        <label>Filter <input type="search" x-model="query"></label>
+        <span x-text="summary"></span>
+      </div>
+      <table class="history-table">
+        <thead><tr><th>Observed</th><th>Object</th><th>Change</th><th>Manager</th><th>Scope</th><th>Detail</th></tr></thead>
+        <tbody>
+        {{- range .Entries}}
+          <tr data-history-seq="{{.Seq}}" data-history-change="{{.Change}}">
+            <td><time datetime="{{.ObservedAt}}">{{.Age}} ago</time></td>
+            <td><strong>{{.Object}}</strong><br><span class="meta">namespace {{.Namespace}}</span></td>
+            <td>{{.Change}}{{if .Coalesced}}<br><span class="meta">{{.Coalesced}} additional transitions coalesced</span>{{end}}{{if .GapWindow}}<br><span class="state">discovered after a gap {{.GapWindow}}</span>{{end}}</td>
+            <td>{{.Manager}}{{if .Operation}} — {{.Operation}}{{end}}<br><span class="meta">self-declared field manager</span></td>
+            <td>{{.Scope}}</td>
+            <td>{{if not .HasManifest}}definition not retained for deletion{{else if $.CanInspect}}<a href="/history/revisions/{{.Seq}}">revision {{.Seq}}</a>{{else}}<span class="meta">revision {{.Seq}} — details require the poweruser or dba level</span>{{end}}</td>
+          </tr>
+        {{- end}}
+        </tbody>
+      </table>
+    </div>
+    {{- if .Before}}<p><a href="/history" hx-boost="true">Return to newest revisions</a></p>{{end}}
+    {{- if .HasMore}}<p><a href="{{.NextURL}}" hx-boost="true">Older retained revisions</a></p>{{end}}
+    {{- else}}
+    <p class="state">no object-definition revisions are retained yet</p>
+    {{- end}}
+  </section>
+  <section class="panel" id="history-detail" aria-live="polite">
+    <h2>Revision detail</h2>
+    <p>Select a retained definition to inspect its scrubbed manifest and structural diff.</p>
+  </section>
+{{template "shell-close"}}

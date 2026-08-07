@@ -7,7 +7,7 @@ DIST_DIR ?= dist
 ARTIFACT_DIR ?= artifacts
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build clean dev-up test test-race test-integration test-scale test-container test-multiarch test-e2e lint golangci-lint vuln check docs package docker-build supply-chain release-check
+.PHONY: build clean dev-up test test-race test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln check docs package docker-build supply-chain release-check
 
 build:
 	mkdir -p bin
@@ -33,8 +33,9 @@ test-integration:
 		$(GO) test -race -tags=integration ./internal/kube/ -count=1
 
 test-scale:
-	$(GO) test -race ./internal/observe -run '^Test(PodStoreBoundsAndFlagsTruncation|EventCollectorBoundsRetentionAndRendering|BackupStoreBoundsAndFlagsTruncation)$$' -count=1
-	$(GO) test -race ./internal/web -run '^TestHandlerIndex(PodUnknownsAndTruncation|EventsTruncationVisible|BackupTruncationVisible)$$' -count=1
+	$(GO) test -race ./internal/observe -run '^Test(PodStoreBoundsAndFlagsTruncation|EventCollectorBoundsRetentionAndRendering|BackupStoreBoundsAndFlagsTruncation|PoolerStoreBoundsAndFlagsTruncation|ImageCatalogStoreBoundsAndFlagsTruncation)$$' -count=1
+	$(GO) test -race ./internal/web -run '^TestHandler(ClusterPodsUnknownsAndTruncation|ClusterEventsTruncationVisible|BackupObjectsTruncationVisible)$$' -count=1
+	$(GO) test -race ./internal/web -run '^TestHistoryViewBoundsLargeTimeline$$' -count=1
 
 test-container: docker-build
 	./hack/test-container.sh $(IMAGE)
@@ -44,6 +45,9 @@ test-multiarch:
 
 test-e2e: docker-build
 	./hack/test-e2e.sh
+
+test-ui:
+	./hack/test-ui.sh
 
 lint: golangci-lint
 	test -z "$$(gofmt -l $$(find cmd internal -name '*.go' -type f))"
@@ -74,10 +78,19 @@ package:
 	cd $(DIST_DIR) && sha256sum pgconsole-* > SHA256SUMS
 	printf 'version=%s\n' '$(VERSION)' > $(DIST_DIR)/VERSION
 
+# The daemon's own proxy settings cover image pulls but not RUN steps, so
+# behind a mandatory proxy `go mod download` inside the builder has neither
+# a route out nor working DNS. These are Docker's predefined build args:
+# passing them without a value forwards the caller's environment, and on a
+# machine with no proxy they stay unset and change nothing.
+DOCKER_BUILD_PROXY_ARGS = \
+	--build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY \
+	--build-arg http_proxy --build-arg https_proxy --build-arg no_proxy
+
 docker-build:
-	docker build --tag $(IMAGE) .
+	docker build $(DOCKER_BUILD_PROXY_ARGS) --tag $(IMAGE) .
 
 supply-chain: docker-build
 	./hack/generate-supply-chain-artifacts.sh $(IMAGE) $(ARTIFACT_DIR)/release
 
-release-check: check docs test-integration test-scale test-container test-e2e package test-multiarch supply-chain
+release-check: check docs test-integration test-scale test-ui test-container test-e2e package test-multiarch supply-chain

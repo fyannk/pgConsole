@@ -181,3 +181,29 @@ func TestAccessReviewStoreBoundsAndFlagsTruncation(t *testing.T) {
 		t.Fatalf("role bound not applied: len=%d", len(snap.Roles))
 	}
 }
+
+// TestAccessReviewStorePublishesATruncatedSetBelowTheBound proves the
+// rendered cut is decided by the length and never by the truncation
+// flag. The flag is sticky for the life of a seed, so a set that was
+// once over the bound and has since shrunk below it still arrives here
+// flagged; cutting on the flag sliced past the end and panicked.
+func TestAccessReviewStorePublishesATruncatedSetBelowTheBound(t *testing.T) {
+	t.Parallel()
+	requests := []AccessRequestFacts{
+		{Name: "req-a", State: AccessRequestPending, CreatedAt: time.Unix(1, 0)},
+		{Name: "req-b", State: AccessRequestPending, CreatedAt: time.Unix(2, 0)},
+	}
+	store := NewAccessReviewStore()
+	store.publish(requests, []string{"reader"}, time.Unix(1000, 0), true)
+
+	snap, ok := store.CurrentAccessReview()
+	if !ok {
+		t.Fatal("no snapshot published")
+	}
+	if len(snap.Requests) != len(requests) {
+		t.Errorf("published %d requests, want all %d retained", len(snap.Requests), len(requests))
+	}
+	if !snap.RequestsTruncated {
+		t.Error("the source truncation flag was dropped; the page would claim a complete queue")
+	}
+}

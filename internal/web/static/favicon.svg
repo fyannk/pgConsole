@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="pgConsole">
+  <!-- Served from the binary rather than inlined as a data: URI, because
+       the Content-Security-Policy sets img-src 'self' and favicons are
+       governed by img-src. Without this file every page load spends a
+       request on a 404 and logs a console error. -->
+  <rect width="32" height="32" rx="7" fill="#1f6feb"/>
+  <g fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round">
+    <ellipse cx="16" cy="9.5" rx="7.5" ry="3.2"/>
+    <path d="M8.5 9.5v13c0 1.77 3.36 3.2 7.5 3.2s7.5-1.43 7.5-3.2v-13"/>
+    <path d="M8.5 16c0 1.77 3.36 3.2 7.5 3.2s7.5-1.43 7.5-3.2"/>
+  </g>
+</svg>

@@ -90,6 +90,11 @@ capability cannot act even if the flag is set by mistake. The instance log
 tail is on by default (`ALLOW_LOGS=true`) but requires the `poweruser`
 level or above.
 
+Object-definition history is enabled in memory by default and uses the same
+existing watches, so it requires no extra Role. Durability is a separate
+deployment choice: set `HISTORY_PATH`, mount the example PVC, and keep the
+Deployment at one replica.
+
 ## First console
 
 ```bash

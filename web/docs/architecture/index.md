@@ -5,9 +5,12 @@ title: Architecture
 
 # Architecture
 
-pgConsole is a single stateless process with a strict internal shape: the
+pgConsole is a single process with a strict internal shape: the
 Kubernetes API is touched in exactly one package, rendering happens from
 immutable snapshots, and mutation exists only where it is enumerated.
+Object-definition history is bounded in memory; it remains process-local by
+default and becomes durable only when `HISTORY_PATH` explicitly mounts a
+single-replica journal.
 
 ## The pipeline
 
@@ -15,9 +18,12 @@ immutable snapshots, and mutation exists only where it is enumerated.
 flowchart LR
   A[Kubernetes API] -->|list + watch| K[internal/kube<br/>adapter + redaction]
   K -->|source-neutral facts| O[internal/observe<br/>collectors, stores, snapshots]
+  K -->|accepted watch events and complete seeds| H[internal/history<br/>bounded scrubbed revisions]
   O -->|immutable snapshot| W[internal/web<br/>view models + html/template]
+  H -->|Snapshot, Revision, Diff| W
   P[trusted proxy headers] --> W
-  W -->|rendered page| U[browser]
+  W -->|complete rendered HTML| U[browser]
+  U -->|optional same-origin enhanced GET| W
 ```
 
 - **`internal/kube`** is the only package that imports client-go. It lists
@@ -28,6 +34,10 @@ flowchart LR
   resource kind and publishes immutable snapshots.
 - **`internal/web`** renders snapshots through `html/template`, applies the
   security headers, and gates routes on the proxy-asserted level.
+- **The browser** receives a complete document. Vendored htmx may replace one
+  application root for GET navigation and refresh, while Alpine CSP owns only
+  local controls. Neither library authorizes a route or interprets cluster
+  facts, and htmx's browser history cache is disabled.
 
 ## Layers of authority
 
@@ -65,7 +75,7 @@ access-review status write. Everything else is reads.
 
 ## The process lifecycle
 
-pgConsole is one stateless process. It reads its entire configuration once,
+pgConsole reads its entire configuration once,
 at startup, from environment variables interpreted in a single place
 (`internal/config`); every other package receives typed, validated values,
 never the raw environment. Kubernetes configuration comes only from the
@@ -73,6 +83,12 @@ in-cluster ServiceAccount — no kubeconfig file is read. On `SIGTERM` (or
 `SIGINT`) the process stops accepting new requests, drains the in-flight
 ones within a bounded window, and cancels the watch collectors so no
 goroutine outlives shutdown.
+
+Without `HISTORY_PATH`, all retained revisions die with the process and the
+stateless deployment rule holds. With `HISTORY_PATH`, the bbolt journal is an
+explicit exception: startup fails if it cannot be used, the deployment must
+have one replica, and the first post-restart seeds classify changes across the
+unobserved window rather than pretending continuous observation.
 
 ## Security properties
 
@@ -84,6 +100,9 @@ goroutine outlives shutdown.
   nothing is fetched at runtime. No embedded iframes, external scripts,
   fonts, styles, or telemetry — monitoring depth is a single link-out to an
   operator-configured URL.
+- Enhanced requests are restricted by `connect-src 'self'` and htmx's own
+  same-origin setting. Evaluation, response script tags, generated inline
+  indicator styles, and browser history caching are disabled.
 - Sensitive routes send `Cache-Control: no-store`, a strict CSP,
   `X-Content-Type-Options: nosniff`, and a referrer policy.
 - State-changing routes exist only as POST with CSRF and same-origin

@@ -1,0 +1,35 @@
+{{- /*
+  Overview. Renders only web.Page.Summary — the derived, plain-language
+  restatement that opens the console. The summary is the one surface
+  permitted to speak across the three claim vocabularies (AGENTS.md rule
+  8): it earns that by restating only what the attributed section screens
+  already carry, the headline paraphrasing while every card still names
+  its single origin. The reported detail lives on the section screens the
+  sidebar maps; nothing here is a fact those sections do not repeat.
+*/ -}}
+{{template "page-head" "overview"}}
+{{template "shell-open" .Shell}}
+    {{- with .Summary}}
+    <div class="verdict">
+      <p class="headline" data-state="{{.HeadlineState}}">{{.Headline}}</p>
+      <p class="sub">{{.Sub}}</p>
+    </div>
+    {{- with $.Topology}}
+    {{template "topology" .}}
+    {{- end}}
+    {{- range .Groups}}
+    <h2 class="section-title">{{.Title}}</h2>
+    <div class="cards">
+      {{- range .Cards}}
+      <div class="card">
+        <span class="label">{{.Label}}</span>
+        <span class="value"{{if .State}} data-state="{{.State}}"{{end}}>{{.Value}}</span>
+        <span class="note">{{.Note}}</span>
+        <span class="origin">source: {{.Origin.Label}}</span>
+      </div>
+      {{- end}}
+    </div>
+    {{- end}}
+    <p class="origin">Every card restates an attributed section. Open a section from the sidebar for the reported detail and its source.</p>
+    {{- end}}
+{{template "shell-close"}}

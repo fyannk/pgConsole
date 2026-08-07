@@ -39,8 +39,8 @@ type OpsExecutor interface {
 
 // handleOperationsIndex lists the enumerated operations. It exists only
 // in operations mode; there is no route otherwise.
-func (h *Handler) handleOperationsIndex(w http.ResponseWriter, _ *http.Request) {
-	view := OperationsView{ClusterName: h.cfg.ClusterName, Operations: h.executor.Catalog()}
+func (h *Handler) handleOperationsIndex(w http.ResponseWriter, r *http.Request) {
+	view := OperationsView{Shell: h.shell(r, "operations"), ClusterName: h.cfg.ClusterName, Operations: h.executor.Catalog()}
 	h.renderOps(w, http.StatusOK, "operations.html.tmpl", view)
 }
 
@@ -58,6 +58,7 @@ func (h *Handler) handleOperationConfirm(w http.ResponseWriter, r *http.Request)
 		target = ""
 	}
 	view := ConfirmView{
+		Shell:       h.shell(r, "operations"),
 		ClusterName: h.cfg.ClusterName,
 		Op:          desc,
 		Target:      target,
@@ -79,16 +80,16 @@ func (h *Handler) handleOperationExecute(w http.ResponseWriter, r *http.Request)
 	}
 	if !sameOriginPOST(r) {
 		h.logger.Info("operation refused", slog.String("reason", "cross-origin"))
-		h.renderDenied(w, http.StatusForbidden, "cross-origin request refused")
+		h.renderDenied(w, r, http.StatusForbidden, "cross-origin request refused")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		h.renderDenied(w, http.StatusBadRequest, "malformed request")
+		h.renderDenied(w, r, http.StatusBadRequest, "malformed request")
 		return
 	}
 	target := r.PostForm.Get("instance")
 	if desc.NeedsInstance && !podNamePattern.MatchString(target) {
-		h.renderDenied(w, http.StatusBadRequest, "a valid instance name is required")
+		h.renderDenied(w, r, http.StatusBadRequest, "a valid instance name is required")
 		return
 	}
 	if !desc.NeedsInstance {
@@ -96,7 +97,7 @@ func (h *Handler) handleOperationExecute(w http.ResponseWriter, r *http.Request)
 	}
 	if !h.executor.Verify(desc.ID, target, r.PostForm.Get("csrf")) {
 		h.logger.Info("operation refused", slog.String("reason", "csrf"))
-		h.renderDenied(w, http.StatusForbidden, "confirmation expired or invalid; try again")
+		h.renderDenied(w, r, http.StatusForbidden, "confirmation expired or invalid; try again")
 		return
 	}
 
@@ -112,6 +113,7 @@ func (h *Handler) handleOperationExecute(w http.ResponseWriter, r *http.Request)
 
 	outcome, err := h.executor.Execute(r.Context(), desc.ID, target, actor)
 	view := ResultView{
+		Shell:       h.shell(r, "operations"),
 		ClusterName: h.cfg.ClusterName,
 		Op:          desc,
 		Target:      target,

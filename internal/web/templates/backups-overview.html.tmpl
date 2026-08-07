@@ -1,0 +1,44 @@
+{{- /*
+  Backups — overview. The operator-reported catalog at a glance:
+  recency, how many resources exist, and the schedule. A completed
+  backup stays an operator claim, never repository evidence — the
+  Objects and Evidence screens carry the detail and the cross-check.
+*/ -}}
+{{template "page-head" "backups"}}
+{{template "shell-open" .Shell}}
+    {{- with .BackupsDrawing}}
+    {{template "topology" .}}
+    {{- end}}
+    {{- with .Backups}}
+    <section class="panel">
+      <h2>Backups at a glance</h2>
+      <div class="cards">
+        <div class="card">
+          <span class="label">Most recent completed</span>
+          <span class="value">{{.LastCompletedAge}}</span>
+          <span class="note">Age of the newest Backup the operator marked completed — an operator claim, not proof the data is in the repository.</span>
+        </div>
+        <div class="card">
+          <span class="label">Backup resources</span>
+          <span class="value">{{len .Rows}}</span>
+          <span class="note">Backup objects the operator reports for this cluster{{if .BackupsTruncated}}, at the display bound{{end}}.</span>
+        </div>
+        <div class="card">
+          <span class="label">Scheduled</span>
+          <span class="value">{{len .ScheduledRows}}</span>
+          <span class="note">ScheduledBackup objects configured{{if .ScheduledRows}}; the first runs on {{(index .ScheduledRows 0).Schedule}}{{end}}.</span>
+        </div>
+      </div>
+      {{- with .EvidenceLink}}
+      <p><a href="{{.URL}}" hx-boost="false" rel="noopener noreferrer">{{.Label}}</a></p>
+      {{- end}}
+      <p class="origin">source: {{.Origin.Label}}</p>
+    </section>
+    {{- else}}
+    <section class="panel">
+      <h2>Backups</h2>
+      <div class="empty"><strong>No backup snapshot yet</strong>The operator's Backup and ScheduledBackup resources have not been observed for this cluster.</div>
+      <p class="origin">source: operator-reported</p>
+    </section>
+    {{- end}}
+{{template "shell-close"}}

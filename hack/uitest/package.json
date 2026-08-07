@@ -1,0 +1,17 @@
+{
+  "name": "pgconsole-uitest",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser-side checks for the console UI, driven by hack/test-ui.sh",
+  "license": "Apache-2.0",
+  "scripts": {
+    "drive": "node drive.js"
+  },
+  "dependencies": {
+    "axe-core": "4.12.1",
+    "playwright": "1.62.1"
+  },
+  "engines": {
+    "node": ">=20.0"
+  }
+}

@@ -97,9 +97,16 @@ func TestAssemblyWiresEvidencePollerIntoThePage(t *testing.T) {
 	base, stop := startWithFetcher(t, staticFetcher{report: report})
 	defer stop()
 
-	body := waitForBody(t, base+"/", "Repository evidence")
-	if !strings.Contains(body, "sha256:"+strings.Repeat("ab", 32)) {
+	// Wait on the fingerprint, not on the heading: the screen renders its
+	// heading as soon as it is reachable, which is before the poller has
+	// fetched anything. Waiting for the heading and then asserting the
+	// fingerprint races the first poll and fails whenever it loses.
+	body := waitForBody(t, base+"/backups/evidence", report.Fingerprint)
+	if !strings.Contains(body, report.Fingerprint) {
 		t.Error("published report did not reach the page")
+	}
+	if !strings.Contains(body, "Repository evidence") {
+		t.Error("the evidence screen did not render its panel")
 	}
 
 	status, _, err := httpGet(t, base+"/readyz")
@@ -116,7 +123,7 @@ func TestAssemblyEvidenceFailureRendersUnknownPanel(t *testing.T) {
 	base, stop := startWithFetcher(t, staticFetcher{err: errors.New("dial refused")})
 	defer stop()
 
-	body := waitForBody(t, base+"/", "no successful sidecar contact yet")
+	body := waitForBody(t, base+"/backups/evidence", "no successful sidecar contact yet")
 	if !strings.Contains(body, "Repository evidence") {
 		t.Error("failing sidecar did not render the unknown panel")
 	}

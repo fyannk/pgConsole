@@ -10,10 +10,25 @@ status=0
 # permits: internal/ops originates mutations, and internal/kube/ops.go
 # is the transport that executes them (the narrow writer). No other call
 # site may create, update, patch, delete, or apply.
+#
+# internal/history is excluded: its Update/Delete call sites are the
+# local journal's (bbolt transactions and bucket writes), not the
+# Kubernetes API's. That exclusion is sound only while the history
+# packages cannot reach a Kubernetes client at all, which the scan
+# below this one enforces.
 if grep -rEn --include='*.go' --exclude='*_test.go' \
     '\.(Create|Update|Patch|Delete|Apply|DeleteCollection)\(' \
-    cmd internal | grep -v '^internal/ops/' | grep -v '^internal/kube/ops.go:'; then
+    cmd internal | grep -v '^internal/ops/' | grep -v '^internal/kube/ops.go:' \
+  | grep -v '^internal/history/'; then
   echo "mutation-shaped call site outside internal/ops and the kube transport" >&2
+  status=1
+fi
+
+# The exclusion's precondition: internal/history is pure domain plus a
+# local storage engine, and must never import a Kubernetes client or
+# API type.
+if grep -rEn --include='*.go' 'k8s\.io/(client-go|api|apimachinery)|cloudnative-pg/api' internal/history; then
+  echo "internal/history imports a Kubernetes client or API type" >&2
   status=1
 fi
 
@@ -49,6 +64,32 @@ if [ -f deploy/access-review-role.yaml ]; then
   fi
   if grep -Eq '"update"' deploy/access-review-role.yaml && ! grep -Eq 'pgtoolboxaccessrequests/status' deploy/access-review-role.yaml; then
     echo "access-review Role grants update outside the request status subresource" >&2
+    status=1
+  fi
+fi
+
+# Cluster-scoped authority is confined to one opt-in manifest. Every
+# other manifest must stay namespaced: that is the difference between a
+# console whose blast radius is one namespace and one that can read the
+# whole cluster.
+for manifest in deploy/*.yaml; do
+  [ "$manifest" = "deploy/cluster-catalog-role.yaml" ] && continue
+  if grep -En '^kind: Cluster(Role|RoleBinding)' "$manifest"; then
+    echo "cluster-scoped grant outside deploy/cluster-catalog-role.yaml: $manifest" >&2
+    status=1
+  fi
+done
+
+# The one cluster-scoped Role may grant only a get, and only on catalogs.
+# A list or watch there would mean enumerating every catalog in the
+# cluster rather than reading the one the Cluster names.
+if [ -f deploy/cluster-catalog-role.yaml ]; then
+  if grep -En '"(list|watch|create|update|patch|delete|deletecollection|impersonate|escalate|bind)"' deploy/cluster-catalog-role.yaml; then
+    echo "cluster-catalog Role grants more than a get" >&2
+    status=1
+  fi
+  if grep -En 'resources:' deploy/cluster-catalog-role.yaml | grep -vq 'clusterimagecatalogs'; then
+    echo "cluster-catalog Role names a resource other than clusterimagecatalogs" >&2
     status=1
   fi
 fi

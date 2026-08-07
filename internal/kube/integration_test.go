@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -110,6 +111,37 @@ func startEnv(t *testing.T) *integrationEnv {
 				APIGroups: []string{""},
 				Resources: []string{"events"},
 				Verbs:     []string{"list", "watch"},
+			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"poolers"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups: []string{"apps"},
+				Resources: []string{"replicasets", "deployments"},
+				Verbs:     []string{"get"},
+			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"databases", "databaseroles", "publications", "subscriptions"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups:     []string{"postgresql.cnpg.io"},
+				Resources:     []string{"failoverquorums"},
+				Verbs:         []string{"get"},
+				ResourceNames: []string{"orders"},
+			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"failoverquorums"},
+				Verbs:     []string{"watch"},
+			},
+			{
+				APIGroups: []string{"postgresql.cnpg.io"},
+				Resources: []string{"imagecatalogs"},
+				Verbs:     []string{"get", "list", "watch"},
 			},
 		},
 	}
@@ -519,5 +551,352 @@ func TestEventCollectorAgainstRealAPIServer(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("event collector did not stop on cancellation")
+	}
+}
+
+// poolerObject is a Pooler referencing the named cluster.
+func poolerObject(name, cluster, poolerType string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       "Pooler",
+		"metadata":   map[string]any{"name": name, "namespace": "payments"},
+		"spec": map[string]any{
+			"cluster":   map[string]any{"name": cluster},
+			"type":      poolerType,
+			"instances": int64(2),
+			"pgbouncer": map[string]any{"poolMode": "transaction"},
+		},
+	}}
+}
+
+// TestPoolerCollectorAgainstRealAPIServer proves the pooler access shape
+// works under the Role the deployment actually grants, and that
+// selection is the spec.cluster.name reference rather than the
+// namespace. A missing RBAC rule fails here and nowhere else: the unit
+// tests use a fake client that grants everything.
+func TestPoolerCollectorAgainstRealAPIServer(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Create(ctx, poolerObject("orders-rw", "orders", "rw"), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create target pooler: %v", err)
+	}
+	if _, err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Create(ctx, poolerObject("other-rw", "other", "rw"), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create foreign pooler: %v", err)
+	}
+
+	store := observe.NewPoolerStore()
+	collector := observe.NewPoolerCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "target-only pooler set", func() bool {
+		snap, ok := store.CurrentPoolers()
+		return ok && len(snap.Poolers) == 1 && snap.Poolers[0].Name == "orders-rw"
+	})
+
+	if _, err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Create(ctx, poolerObject("orders-ro", "orders", "ro"), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create second target pooler: %v", err)
+	}
+	waitFor(t, "watched pooler addition", func() bool {
+		snap, ok := store.CurrentPoolers()
+		return ok && len(snap.Poolers) == 2
+	})
+
+	if err := ie.adminDyn.Resource(poolerGVR).Namespace("payments").Delete(ctx, "orders-ro", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("delete pooler: %v", err)
+	}
+	waitFor(t, "watched pooler removal", func() bool {
+		snap, ok := store.CurrentPoolers()
+		return ok && len(snap.Poolers) == 1
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pooler collector did not stop on cancellation")
+	}
+}
+
+// TestFailoverQuorumAccessShapeAgainstRealRBAC proves the quorum's
+// access shape works under the Role the deployment grants: the get is
+// pinned by name like the Cluster's, the name-scoped watch succeeds, and
+// an absent object is a successful observation rather than a denial.
+func TestFailoverQuorumAccessShapeAgainstRealRBAC(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// No object yet: absence must read as an observation, not a denial.
+	state, err := client.FetchFailoverQuorum(ctx)
+	if err != nil {
+		t.Fatalf("absent quorum returned an error: %v", err)
+	}
+	if state.Facts.Present {
+		t.Fatal("an absent quorum reported itself present")
+	}
+
+	quorum := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       "FailoverQuorum",
+		"metadata":   map[string]any{"name": "orders", "namespace": "payments"},
+	}}
+	created, err := ie.adminDyn.Resource(failoverQuorumGVR).Namespace("payments").Create(ctx, quorum, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create quorum: %v", err)
+	}
+	created.Object["status"] = map[string]any{
+		"method": "any", "primary": "orders-1",
+		"standbyNames": []any{"orders-2"}, "standbyNumber": int64(1),
+	}
+	if _, err := ie.adminDyn.Resource(failoverQuorumGVR).Namespace("payments").UpdateStatus(ctx, created, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("set quorum status: %v", err)
+	}
+
+	store := observe.NewFailoverQuorumStore()
+	collector := observe.NewFailoverQuorumCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "reported quorum", func() bool {
+		snap, ok := store.CurrentFailoverQuorum()
+		return ok && snap.Quorum.Present && snap.Quorum.Primary == "orders-1"
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("quorum collector did not stop on cancellation")
+	}
+}
+
+// TestImageCatalogCollectorAgainstRealAPIServer proves the catalog
+// access shape works under the deployed Role.
+func TestImageCatalogCollectorAgainstRealAPIServer(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	catalog := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       "ImageCatalog",
+		"metadata":   map[string]any{"name": "postgres", "namespace": "payments"},
+		"spec": map[string]any{"images": []any{
+			map[string]any{"major": int64(17), "image": "pg:17"},
+			map[string]any{"major": int64(16), "image": "pg:16"},
+		}},
+	}}
+	if _, err := ie.adminDyn.Resource(imageCatalogGVR).Namespace("payments").Create(ctx, catalog, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create catalog: %v", err)
+	}
+
+	store := observe.NewImageCatalogStore()
+	collector := observe.NewImageCatalogCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "observed catalog", func() bool {
+		snap, ok := store.CurrentImageCatalogs()
+		if !ok {
+			return false
+		}
+		found, ok := snap.Catalog("postgres")
+		return ok && len(found.Images) == 2 && found.Images[0].Major == 16
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("catalog collector did not stop on cancellation")
+	}
+}
+
+// declaredObject is one declarative resource referencing the named
+// cluster.
+func declaredObject(kind, name, cluster string, spec map[string]any) *unstructured.Unstructured {
+	if spec == nil {
+		spec = map[string]any{}
+	}
+	spec["cluster"] = map[string]any{"name": cluster}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "postgresql.cnpg.io/v1",
+		"kind":       kind,
+		"metadata":   map[string]any{"name": name, "namespace": "payments"},
+		"spec":       spec,
+	}}
+}
+
+// TestDatabaseObjectsAgainstRealAPIServer proves the four-way merged
+// watch works under the Role the deployment grants, that each kind
+// selects on its own spec.cluster.name, and that a change to any one of
+// the four reaches the store — the property a merged stream can quietly
+// lose if one pump is wired to the wrong watch.
+func TestDatabaseObjectsAgainstRealAPIServer(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	seed := []struct {
+		gvr schema.GroupVersionResource
+		obj *unstructured.Unstructured
+	}{
+		{databaseGVR, declaredObject("Database", "app-db", "orders", map[string]any{"name": "app", "owner": "app"})},
+		{databaseGVR, declaredObject("Database", "other-db", "other", map[string]any{"name": "other", "owner": "other"})},
+		{databaseRoleGVR, declaredObject("DatabaseRole", "app-role", "orders", map[string]any{"name": "app"})},
+		{publicationGVR, declaredObject("Publication", "app-pub", "orders", map[string]any{"name": "pub", "dbname": "app"})},
+	}
+	for _, s := range seed {
+		if _, err := ie.adminDyn.Resource(s.gvr).Namespace("payments").Create(ctx, s.obj, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create %s: %v", s.obj.GetName(), err)
+		}
+	}
+
+	store := observe.NewDatabaseObjectsStore()
+	collector := observe.NewDatabaseObjectsCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "seeded declarations, target only", func() bool {
+		snap, ok := store.CurrentDatabaseObjects()
+		return ok && len(snap.Databases) == 1 && snap.Databases[0].Name == "app-db" &&
+			len(snap.Roles) == 1 && len(snap.Publications) == 1
+	})
+
+	// A change on the fourth kind must reach the store through the same
+	// merged stream.
+	if _, err := ie.adminDyn.Resource(subscriptionGVR).Namespace("payments").Create(ctx,
+		declaredObject("Subscription", "app-sub", "orders",
+			map[string]any{"name": "sub", "dbname": "app", "publicationName": "pub", "externalClusterName": "upstream"}),
+		metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	waitFor(t, "watched subscription addition", func() bool {
+		snap, ok := store.CurrentDatabaseObjects()
+		return ok && len(snap.Subscriptions) == 1 && snap.Subscriptions[0].Name == "app-sub"
+	})
+
+	if err := ie.adminDyn.Resource(databaseGVR).Namespace("payments").Delete(ctx, "app-db", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("delete database: %v", err)
+	}
+	waitFor(t, "watched database removal", func() bool {
+		snap, ok := store.CurrentDatabaseObjects()
+		return ok && len(snap.Databases) == 0
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("declarative collector did not stop on cancellation")
+	}
+}
+
+// TestPoolerPodOwnershipAgainstRealRBAC proves the Pod -> ReplicaSet ->
+// Deployment -> Pooler walk works under the Role the deployment grants,
+// and that a pod wearing the right labels without the ownership behind
+// them is refused. The apps/get rules are what make the walk possible;
+// without them every pooler pod is excluded, and only this test says so.
+func TestPoolerPodOwnershipAgainstRealRBAC(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for _, obj := range []struct {
+		gvr schema.GroupVersionResource
+		o   *unstructured.Unstructured
+	}{
+		{deploymentGVR, ownedObject("Deployment", "orders-rw-pooler", "Pooler", "orders-rw-pooler", "postgresql.cnpg.io/v1")},
+		{replicaSetGVR, ownedObject("ReplicaSet", "orders-rw-pooler-abc", "Deployment", "orders-rw-pooler", "apps/v1")},
+	} {
+		// A Deployment needs a spec the API server will accept.
+		if obj.gvr == deploymentGVR {
+			obj.o.Object["spec"] = map[string]any{
+				"selector": map[string]any{"matchLabels": map[string]any{"app": "pooler"}},
+				"template": map[string]any{
+					"metadata": map[string]any{"labels": map[string]any{"app": "pooler"}},
+					"spec":     map[string]any{"containers": []any{map[string]any{"name": "pgbouncer", "image": "pgbouncer:1.24"}}},
+				},
+			}
+		}
+		if obj.gvr == replicaSetGVR {
+			obj.o.Object["spec"] = map[string]any{
+				"selector": map[string]any{"matchLabels": map[string]any{"app": "pooler"}},
+				"template": map[string]any{
+					"metadata": map[string]any{"labels": map[string]any{"app": "pooler"}},
+					"spec":     map[string]any{"containers": []any{map[string]any{"name": "pgbouncer", "image": "pgbouncer:1.24"}}},
+				},
+			}
+		}
+		if _, err := ie.adminDyn.Resource(obj.gvr).Namespace("payments").Create(ctx, obj.o, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create %s: %v", obj.o.GetName(), err)
+		}
+	}
+
+	podsGVR := clusterGVR
+	podsGVR.Group, podsGVR.Version, podsGVR.Resource = "", "v1", "pods"
+	for _, p := range []*unstructured.Unstructured{
+		poolerPodObject("orders-rw-pooler-abc-1", "orders-rw-pooler", "orders-rw-pooler-abc"),
+		poolerPodObject("impostor-1", "orders-rw-pooler", ""),
+	} {
+		if _, err := ie.adminDyn.Resource(podsGVR).Namespace("payments").Create(ctx, p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create pod %s: %v", p.GetName(), err)
+		}
+	}
+
+	pods, _, err := client.FetchPoolerPods(ctx)
+	if err != nil {
+		t.Fatalf("FetchPoolerPods under the deployed Role: %v", err)
+	}
+	if len(pods) != 1 || pods[0].Name != "orders-rw-pooler-abc-1" {
+		t.Fatalf("selected %+v, want only the pod with a whole chain to a Pooler", pods)
 	}
 }

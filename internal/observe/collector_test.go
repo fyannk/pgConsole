@@ -32,6 +32,16 @@ type fakeClock struct {
 	mu    sync.Mutex
 	t     time.Time
 	waits []time.Duration
+	nows  int
+}
+
+// reads reports how many times Now has been called. The collector loop
+// must read the clock exactly once per publication, so this count is the
+// direct form of an invariant every ObservedAt assertion relies on.
+func (f *fakeClock) reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.nows
 }
 
 func newFakeClock() *fakeClock {
@@ -41,6 +51,7 @@ func newFakeClock() *fakeClock {
 func (f *fakeClock) Now() time.Time {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.nows++
 	f.t = f.t.Add(time.Second)
 	return f.t
 }

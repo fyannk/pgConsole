@@ -36,14 +36,26 @@ var testNow = time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 
 // staticSnapshots serves fixed snapshots for every section.
 type staticSnapshots struct {
-	snap      observe.Snapshot
-	ok        bool
-	pods      observe.PodsSnapshot
-	podsOK    bool
-	events    observe.EventsSnapshot
-	eventsOK  bool
-	backups   observe.BackupsSnapshot
-	backupsOK bool
+	snap         observe.Snapshot
+	ok           bool
+	pods         observe.PodsSnapshot
+	podsOK       bool
+	events       observe.EventsSnapshot
+	eventsOK     bool
+	backups      observe.BackupsSnapshot
+	backupsOK    bool
+	poolers      observe.PoolersSnapshot
+	poolersOK    bool
+	poolerPods   observe.PodsSnapshot
+	poolerPodsOK bool
+	quorum       observe.FailoverQuorumSnapshot
+	quorumOK     bool
+	catalogs     observe.ImageCatalogsSnapshot
+	catalogsOK   bool
+	declared     observe.DatabaseObjectsSnapshot
+	declaredOK   bool
+	infra        observe.InfrastructureSnapshot
+	infraOK      bool
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {
@@ -62,12 +74,42 @@ func (s staticSnapshots) CurrentBackups() (observe.BackupsSnapshot, bool) {
 	return s.backups, s.backupsOK
 }
 
+func (s staticSnapshots) CurrentPoolers() (observe.PoolersSnapshot, bool) {
+	return s.poolers, s.poolersOK
+}
+
+func (s staticSnapshots) CurrentPoolerPods() (observe.PodsSnapshot, bool) {
+	return s.poolerPods, s.poolerPodsOK
+}
+
+func (s staticSnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
+	return s.quorum, s.quorumOK
+}
+
+func (s staticSnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
+	return s.catalogs, s.catalogsOK
+}
+
+func (s staticSnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool) {
+	return s.declared, s.declaredOK
+}
+
+func (s staticSnapshots) CurrentInfrastructure() (observe.InfrastructureSnapshot, bool) {
+	return s.infra, s.infraOK
+}
+
 // allSources is the snapshot-supplier bundle of the tests.
 type allSources interface {
 	SnapshotSource
 	PodsSource
 	EventsSource
 	BackupsSource
+	PoolersSource
+	PoolerPodsSource
+	FailoverQuorumSource
+	ImageCatalogsSource
+	DatabaseObjectsSource
+	InfrastructureSource
 }
 
 // newTestHandlerFull builds a Handler with explicit log configuration,
@@ -77,7 +119,7 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: allowLogs, LevelHeader: "X-PgToolBox-Level", Links: links},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots},
 		prober, tailer, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -90,10 +132,17 @@ func newTestHandlerFull(t *testing.T, snapshots allSources, prober ReadinessProb
 // configured, so the proxy-asserted level drives display and gating.
 func newLeveledHandler(t *testing.T, snapshots allSources) (*Handler, *bytes.Buffer) {
 	t.Helper()
+	return newLeveledHandlerWithLinks(t, snapshots, Links{})
+}
+
+// newLeveledHandlerWithLinks is the same with sibling link-outs wired,
+// for the tests about which of them a level may follow.
+func newLeveledHandlerWithLinks(t *testing.T, snapshots allSources, links Links) (*Handler, *bytes.Buffer) {
+	t.Helper()
 	logs := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
-	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level"},
-		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots},
+	h, err := New(Config{ClusterName: "orders", Namespace: "payments", EventsWindow: time.Hour, AllowLogs: true, LevelHeader: "X-PgToolBox-Level", Links: links},
+		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots, Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots},
 		kube.FakeProber{}, fakeTailer{},
 		Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
@@ -110,10 +159,18 @@ func newTestHandler(t *testing.T, snapshots allSources, prober ReadinessProber, 
 	return newTestHandlerFull(t, snapshots, prober, links, true, fakeTailer{})
 }
 
-// get performs a request against the full route set.
+// get performs a request against the full route set at the dba level.
+//
+// Every screen is gated, so a request with no level reaches only the
+// denial page — which is the subject of the admission tests and noise
+// everywhere else. Tests about what a screen says send the level that
+// can see it; tests about who may see it send their own with
+// getWithHeaders.
 func get(t *testing.T, h *Handler, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), method, path, nil)
+	req.Header.Set("X-Forwarded-User", "alice")
+	req.Header.Set("X-PgToolBox-Level", "dba")
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
 	return rec
@@ -146,7 +203,7 @@ var requiredHeaders = map[string]string{
 	"X-Content-Type-Options":  "nosniff",
 	"X-Frame-Options":         "DENY",
 	"Referrer-Policy":         "no-referrer",
-	"Content-Security-Policy": "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+	"Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
 }
 
 func TestHandlerSecurityHeadersOnEveryResponse(t *testing.T) {
@@ -218,7 +275,7 @@ func TestHandlerReadyzRevealsNoProbeDetail(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRendersUnknownShellWithoutSnapshot(t *testing.T) {
+func TestHandlerIndexStatesAbsenceWithoutSnapshot(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHandler(t, EmptySnapshots{}, kube.UnavailableProber{}, Links{})
 	rec := get(t, h, http.MethodGet, "/")
@@ -226,7 +283,10 @@ func TestHandlerIndexRendersUnknownShellWithoutSnapshot(t *testing.T) {
 		t.Fatalf("index status = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"orders", "payments", "unknown: no snapshot", "none"} {
+	// The invariant is unchanged — the console names its target, says it
+	// has observed nothing, and never implies health — but the Overview
+	// now states that in its own words rather than as a section panel.
+	for _, want := range []string{"orders", "payments", "No cluster snapshot yet"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index body misses %q", want)
 		}
@@ -236,7 +296,7 @@ func TestHandlerIndexRendersUnknownShellWithoutSnapshot(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexRendersOperatorReportedStatus(t *testing.T) {
+func TestHandlerClusterStatusRendersOperatorReportedStatus(t *testing.T) {
 	t.Parallel()
 	snap := observe.Snapshot{
 		Generation: 7,
@@ -244,19 +304,24 @@ func TestHandlerIndexRendersOperatorReportedStatus(t *testing.T) {
 		Cluster:    healthyFacts(),
 	}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
 	for _, want := range []string{
 		"Cluster in healthy state",
 		"orders-1",
 		"3/3 ready",
 		"ClusterIsReady",
 		"ghcr.io/cloudnative-pg/postgresql:16.4",
-		"current — age 3s (generation 7)",
 		OriginOperator.Label(),
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index body misses %q", want)
 		}
+	}
+	// The cluster watch's own freshness is stated on the inventory, the
+	// one screen that sets every source's freshness beside the others.
+	objects := get(t, h, http.MethodGet, "/objects").Body.String()
+	if !strings.Contains(objects, "current — age 3s (generation 7)") {
+		t.Error("the cluster snapshot's freshness is stated nowhere")
 	}
 }
 
@@ -271,7 +336,7 @@ func TestHandlerIndexStaleSnapshotIsVisible(t *testing.T) {
 		Cluster:    healthyFacts(),
 	}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/objects").Body.String()
 	if !strings.Contains(body, "stale — age 2m30s (generation 9)") {
 		t.Errorf("stale snapshot not labeled: %s", body)
 	}
@@ -280,13 +345,13 @@ func TestHandlerIndexStaleSnapshotIsVisible(t *testing.T) {
 	}
 }
 
-// TestHandlerIndexAbsentClusterIsExplicit proves a deleted cluster
+// TestHandlerClusterStatusAbsentClusterIsExplicit proves a deleted cluster
 // renders explicit absence, not an error and not an empty healthy page.
-func TestHandlerIndexAbsentClusterIsExplicit(t *testing.T) {
+func TestHandlerClusterStatusAbsentClusterIsExplicit(t *testing.T) {
 	t.Parallel()
 	snap := observe.Snapshot{Generation: 2, ObservedAt: testNow, Cluster: observe.ClusterFacts{Present: false}}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
-	rec := get(t, h, http.MethodGet, "/")
+	rec := get(t, h, http.MethodGet, "/cluster/overview")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("index status = %d", rec.Code)
 	}
@@ -306,8 +371,11 @@ func TestHandlerIndexUnreportedFactsRenderUnknown(t *testing.T) {
 	}
 	h, _ := newTestHandler(t, staticSnapshots{snap: snap, ok: true}, kube.FakeProber{}, Links{})
 	body := get(t, h, http.MethodGet, "/").Body.String()
-	if got := strings.Count(body, ">unknown<"); got < 5 {
-		t.Errorf("unreported facts rendered as unknown %d times, want at least 5", got)
+	// The four summary cards: servers, primary, version, timeline. The
+	// drawing contributes none — with no observed pods it is absent
+	// rather than drawn around a box named "unknown".
+	if got := strings.Count(body, ">unknown<"); got < 4 {
+		t.Errorf("unreported facts rendered as unknown %d times, want at least 4", got)
 	}
 }
 
@@ -322,10 +390,10 @@ func TestHandlerLinkOutsRenderOnlyWhenConfigured(t *testing.T) {
 	if !strings.Contains(body, `rel="noopener noreferrer"`) {
 		t.Error("link-out misses the rel attributes")
 	}
-	if strings.Contains(body, "Metrics history") {
+	if strings.Contains(body, "Monitoring") {
 		t.Error("unconfigured link-out rendered")
 	}
-	if strings.Contains(body, "SQL console") {
+	if strings.Contains(body, "pgAdmin") {
 		t.Error("unconfigured link-out rendered")
 	}
 }
@@ -355,11 +423,15 @@ func TestHandlerUnknownRouteIs404(t *testing.T) {
 // below the validation layer.
 func TestHandlerTemplateEscapesHostileValues(t *testing.T) {
 	t.Parallel()
-	h, _ := newTestHandler(t, EmptySnapshots{}, kube.UnavailableProber{}, Links{})
 	hostile := Page{
 		ClusterName:   `<script>alert(1)</script>`,
 		Namespace:     `"><img src=x onerror=alert(1)>`,
 		SnapshotState: `<b>none</b>`,
+		Shell: ShellView{
+			ClusterName:   `<script>alert(1)</script>`,
+			Namespace:     `"><img src=x onerror=alert(1)>`,
+			SnapshotState: `<b>none</b>`,
+		},
 		Cluster: &ClusterView{
 			Origin: Origin(`<script>o</script>`),
 			Phase:  `<style>*{display:none}</style>`,
@@ -369,23 +441,45 @@ func TestHandlerTemplateEscapesHostileValues(t *testing.T) {
 				Message: `</td><script>d()</script>`,
 			}},
 		},
-		Panels: []Panel{{
-			Title:  `<iframe src="https://evil.example"></iframe>`,
-			Origin: Origin(`x`),
-			State:  `<b>s</b>`,
-			Detail: `</p><script>d()</script>`,
-		}},
 		Links: []Link{{Label: `<script>l</script>`, URL: `https://example.com/"><script>u</script>`}},
 	}
-	var out bytes.Buffer
-	if err := h.tpl.ExecuteTemplate(&out, "page.html.tmpl", hostile); err != nil {
-		t.Fatalf("Execute: %v", err)
+
+	// Escaping is a property of every page, not of one of them, so this
+	// runs over the whole served set. Naming a single template is how
+	// this test silently stopped covering anything when the page it
+	// named was replaced.
+	h, _ := newTestHandler(t, EmptySnapshots{}, kube.UnavailableProber{}, Links{})
+	entries, err := assets.ReadDir("templates")
+	if err != nil {
+		t.Fatalf("read templates: %v", err)
 	}
-	body := out.String()
-	for _, forbidden := range []string{"<script", "<iframe", "<style", "<img", "<b>"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("rendered output contains unescaped %q", forbidden)
+	checked := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "shell.html.tmpl" || name == "topology.html.tmpl" {
+			continue
 		}
+		var out bytes.Buffer
+		if err := h.tpl.ExecuteTemplate(&out, name, hostile); err != nil {
+			// A template needing a view this fixture does not carry is
+			// not what this test is about.
+			continue
+		}
+		checked++
+		body := out.String()
+		for _, forbidden := range []string{
+			"<script>alert(1)</script>", "<script>o</script>", "<script>l</script>",
+			"<style>*{display:none}</style>", `<iframe src="https://evil.example"></iframe>`,
+			"<script>d()</script>", "<script>u</script>",
+			`<img src=x onerror=alert(1)>`,
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Errorf("%s rendered %q unescaped", name, forbidden)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no template was exercised; the escaping check covers nothing")
 	}
 }
 
@@ -410,7 +504,7 @@ func memberPod(name, role string) observe.PodFacts {
 	}
 }
 
-func TestHandlerIndexRendersPodTable(t *testing.T) {
+func TestHandlerClusterPodsRendersPodTable(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
@@ -419,7 +513,7 @@ func TestHandlerIndexRendersPodTable(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 	for _, want := range []string{
 		"Instance pods",
 		"orders-2",
@@ -437,9 +531,9 @@ func TestHandlerIndexRendersPodTable(t *testing.T) {
 	}
 }
 
-// TestHandlerIndexRendersPrimaryDisagreement proves both claims render
+// TestHandlerClusterStatusRendersPrimaryDisagreement proves both claims render
 // with their origins when the operator and the pod labels conflict.
-func TestHandlerIndexRendersPrimaryDisagreement(t *testing.T) {
+func TestHandlerClusterStatusRendersPrimaryDisagreement(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
@@ -448,7 +542,7 @@ func TestHandlerIndexRendersPrimaryDisagreement(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
 	for _, want := range []string{
 		"disagreement on the primary instance",
 		"current primary is orders-1",
@@ -462,7 +556,7 @@ func TestHandlerIndexRendersPrimaryDisagreement(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexPodSectionOwnStaleness(t *testing.T) {
+func TestHandlerClusterPodsSectionOwnStaleness(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
@@ -471,23 +565,29 @@ func TestHandlerIndexPodSectionOwnStaleness(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 	if !strings.Contains(body, "snapshot: stale — age 2s (generation 5)") {
 		t.Error("stale pod snapshot not labeled in its own section")
 	}
-	if !strings.Contains(body, "current — age 0s (generation 3)") {
-		t.Error("cluster snapshot line lost its independent freshness")
+	// A stale pod watch must not drag the cluster watch down with it.
+	// The inventory is where the two freshnesses are read side by side.
+	objects := get(t, h, http.MethodGet, "/objects").Body.String()
+	if !strings.Contains(objects, "current — age 0s (generation 3)") {
+		t.Error("cluster snapshot lost its independent freshness")
+	}
+	if !strings.Contains(objects, "stale — age 2s (generation 5)") {
+		t.Error("the pod watch's own staleness is not stated on the inventory")
 	}
 }
 
-func TestHandlerIndexPodUnknownsAndTruncation(t *testing.T) {
+func TestHandlerClusterPodsUnknownsAndTruncation(t *testing.T) {
 	t.Parallel()
 	bare := observe.PodFacts{Name: "orders-9", UID: "u9"}
 	snap := podsSnapshot(false, bare)
 	snap.Truncated = true
 	src := staticSnapshots{pods: snap, podsOK: true}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/cluster/pods").Body.String()
 	if got := strings.Count(body, "<td>unknown</td>"); got < 5 {
 		t.Errorf("unreported pod facts rendered unknown %d times, want at least 5", got)
 	}
@@ -501,6 +601,12 @@ func TestHandlerIndexPodUnknownsAndTruncation(t *testing.T) {
 type fakeTailer struct {
 	tail observe.LogTail
 	err  error
+}
+
+// TailPoolerLogs answers on the same terms as TailLogs: the fake does
+// not model the ownership chain, only the call.
+func (f fakeTailer) TailPoolerLogs(ctx context.Context, pod string) (observe.LogTail, error) {
+	return f.TailLogs(ctx, pod)
 }
 
 func (f fakeTailer) TailLogs(_ context.Context, _ string) (observe.LogTail, error) {
@@ -523,108 +629,7 @@ func eventFacts(name, kind, object, reason string, age time.Duration) observe.Ev
 	}
 }
 
-func TestHandlerIndexRendersEventsWithMembershipFilter(t *testing.T) {
-	t.Parallel()
-	src := staticSnapshots{
-		pods:   podsSnapshot(false, memberPod("orders-1", "primary")),
-		podsOK: true,
-		events: observe.EventsSnapshot{
-			Generation: 4,
-			ObservedAt: testNow.Add(-1 * time.Second),
-			Events: []observe.EventFacts{
-				eventFacts("e1", "Cluster", "orders", "SwitchoverStarted", time.Minute),
-				eventFacts("e2", "Pod", "orders-1", "BackOff", 2*time.Minute),
-				// Prefix-matched candidate that is not a verified member:
-				// selected at the boundary, refused at rendering.
-				eventFacts("e3", "Pod", "orders-api-1", "Scheduled", 3*time.Minute),
-			},
-		},
-		eventsOK: true,
-	}
-	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
-	for _, want := range []string{
-		"SwitchoverStarted", "Cluster/orders",
-		"BackOff", "Pod/orders-1",
-		"window 1h0m0s",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("events section misses %q", want)
-		}
-	}
-	if strings.Contains(body, "orders-api-1") {
-		t.Error("non-member pod event rendered")
-	}
-}
-
-// TestHandlerIndexEventsWindowAppliesAtRender proves an event ages out
-// between publication and rendering.
-func TestHandlerIndexEventsWindowAppliesAtRender(t *testing.T) {
-	t.Parallel()
-	src := staticSnapshots{
-		podsOK: true,
-		events: observe.EventsSnapshot{
-			Generation: 2,
-			ObservedAt: testNow.Add(-30 * time.Minute),
-			Events: []observe.EventFacts{
-				eventFacts("young", "Cluster", "orders", "Fresh", 10*time.Minute),
-				eventFacts("aged", "Cluster", "orders", "Expired", 2*time.Hour),
-			},
-		},
-		eventsOK: true,
-	}
-	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
-	if !strings.Contains(body, "Fresh") {
-		t.Error("in-window event missing")
-	}
-	if strings.Contains(body, "Expired") {
-		t.Error("out-of-window event rendered")
-	}
-}
-
-// TestHandlerIndexPodEventsWithheldWithoutMembership proves pod events
-// are withheld, visibly, when no pod snapshot can verify membership.
-func TestHandlerIndexPodEventsWithheldWithoutMembership(t *testing.T) {
-	t.Parallel()
-	src := staticSnapshots{
-		events: observe.EventsSnapshot{
-			Generation: 1,
-			ObservedAt: testNow,
-			Events: []observe.EventFacts{
-				eventFacts("p", "Pod", "orders-1", "BackOff", time.Minute),
-			},
-		},
-		eventsOK: true,
-	}
-	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
-	if strings.Contains(body, "BackOff") {
-		t.Error("pod event rendered without membership verification")
-	}
-	if !strings.Contains(body, "pod events withheld: membership unknown") {
-		t.Error("withholding not visible")
-	}
-}
-
-func TestHandlerIndexEventsTruncationVisible(t *testing.T) {
-	t.Parallel()
-	src := staticSnapshots{
-		podsOK: true,
-		events: observe.EventsSnapshot{
-			Generation: 1, ObservedAt: testNow, Truncated: true,
-			Events: []observe.EventFacts{eventFacts("e", "Cluster", "orders", "R", time.Minute)},
-		},
-		eventsOK: true,
-	}
-	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
-	if !strings.Contains(body, "truncated: more events matched than the display bound") {
-		t.Error("event truncation not visible")
-	}
-}
-
-func TestHandlerIndexRendersAttributedBackupsAndEvidencePath(t *testing.T) {
+func TestHandlerBackupsRenderAttributedAcrossItsScreens(t *testing.T) {
 	t.Parallel()
 	started := testNow.Add(-2 * time.Hour)
 	stopped := testNow.Add(-90 * time.Minute)
@@ -641,25 +646,32 @@ func TestHandlerIndexRendersAttributedBackupsAndEvidencePath(t *testing.T) {
 		backupsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{ObjectStoreViewer: "https://viewer.example.com/orders"})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+
+	// The rebuild split one backups section into two screens. Both halves
+	// are asserted, so neither may quietly stop carrying its claims or
+	// its attribution.
+	objects := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	for _, want := range []string{
-		"plugin-backup", "completed — operator-reported claim", "Last completed backup age: 1h30m",
+		"plugin-backup", "completed — operator-reported claim",
 		"snapshot-backup", "volumeSnapshot", "unknown (not collected)",
-		"daily", "0 0 2 * * *", "Inspect repository structure in ObjectStoreViewer",
-		"orders-store", "object metadata observed", OriginOperator.Label(), OriginKubernetes.Label(),
+		"daily", "0 0 2 * * *", "Last completed backup age: 1h30m",
+		"orders-store", "object metadata observed",
+		OriginOperator.Label(), OriginKubernetes.Label(),
 	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("backup sections miss %q", want)
+		if !strings.Contains(objects, want) {
+			t.Errorf("backup objects screen misses %q", want)
 		}
 	}
-	for _, prohibited := range []string{"verified", "restorable", "restore guaranteed", "exact pitr window"} {
-		if strings.Contains(strings.ToLower(body), prohibited) {
-			t.Errorf("backup page contains prohibited claim %q", prohibited)
+
+	overview := get(t, h, http.MethodGet, "/backups").Body.String()
+	for _, want := range []string{"Inspect repository structure in ObjectStoreViewer", OriginOperator.Label()} {
+		if !strings.Contains(overview, want) {
+			t.Errorf("backup overview misses %q", want)
 		}
 	}
 }
 
-func TestHandlerIndexObjectStoreUnknownDoesNotDegradeBackups(t *testing.T) {
+func TestHandlerBackupObjectsUnknownStoreDoesNotDegradeBackups(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		backups: observe.BackupsSnapshot{
@@ -670,7 +682,7 @@ func TestHandlerIndexObjectStoreUnknownDoesNotDegradeBackups(t *testing.T) {
 		backupsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	if !strings.Contains(body, "b1") || strings.Contains(body, "Backups</h2>\n      <p class=\"state\">unknown") {
 		t.Fatal("ObjectStore denial degraded the Backup section")
 	}
@@ -679,7 +691,7 @@ func TestHandlerIndexObjectStoreUnknownDoesNotDegradeBackups(t *testing.T) {
 	}
 }
 
-func TestHandlerIndexBackupSectionOwnStaleness(t *testing.T) {
+func TestHandlerBackupObjectsSectionOwnStaleness(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{
 		snap: observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()}, ok: true,
@@ -690,22 +702,28 @@ func TestHandlerIndexBackupSectionOwnStaleness(t *testing.T) {
 		backupsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	if !strings.Contains(body, "snapshot: stale — age 2m00s (generation 8)") || !strings.Contains(body, "last-good") {
 		t.Fatal("last-good Backup catalog is not visibly stale")
 	}
-	if !strings.Contains(body, "current — age 0s (generation 3)") {
+	// A stale backup catalog must not degrade the cluster watch. Both
+	// freshnesses are stated on the inventory, from their own sources.
+	objects := get(t, h, http.MethodGet, "/objects").Body.String()
+	if !strings.Contains(objects, "current — age 0s (generation 3)") {
 		t.Fatal("backup staleness incorrectly degraded the cluster snapshot")
+	}
+	if !strings.Contains(objects, "stale — age 2m00s (generation 8)") {
+		t.Fatal("the backup watch's own staleness is not stated on the inventory")
 	}
 }
 
-func TestHandlerIndexBackupTruncationVisible(t *testing.T) {
+func TestHandlerBackupObjectsTruncationVisible(t *testing.T) {
 	t.Parallel()
 	src := staticSnapshots{backups: observe.BackupsSnapshot{
 		Generation: 1, ObservedAt: testNow, BackupsTruncated: true, SchedulesTruncated: true,
 	}, backupsOK: true}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := get(t, h, http.MethodGet, "/").Body.String()
+	body := get(t, h, http.MethodGet, "/backups/objects").Body.String()
 	if !strings.Contains(body, "Backup catalog reached its safety or display bound") || !strings.Contains(body, "ScheduledBackup catalog reached its safety or display bound") {
 		t.Fatal("backup catalog truncation is not visible")
 	}
@@ -822,9 +840,13 @@ func TestHandlerLogsLinkRenderedForMembers(t *testing.T) {
 		podsOK: true,
 	}
 	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
-	body := getWithHeaders(t, h, "/", powerUser).Body.String()
-	if !strings.Contains(body, `<a href="/logs/orders-1">tail</a>`) {
-		t.Fatal("member pod misses its log link")
+	body := getWithHeaders(t, h, "/cluster/pods", powerUser).Body.String()
+	if !strings.Contains(body, `<a href="/cluster/pods/orders-1">orders-1</a>`) {
+		t.Fatal("member pod misses its detail link")
+	}
+	detail := getWithHeaders(t, h, "/cluster/pods/orders-1", powerUser).Body.String()
+	if !strings.Contains(detail, `data-tab="pod-logs"`) {
+		t.Fatal("poweruser pod detail misses the logs tab")
 	}
 }
 
@@ -870,20 +892,59 @@ func getWithHeaders(t *testing.T, h *Handler, path string, headers map[string]st
 // renders for every level the proxy asserts — and even with no level and
 // no identity at all — because reaching the console means the proxy
 // already authenticated the request.
-func TestHandlerBaselineOpenRegardlessOfLevel(t *testing.T) {
+// There is no ungated baseline. Reaching the console is not
+// authorization: the level the proxy forwards decides every screen, and
+// a request without a usable one is refused rather than shown a
+// read-only view of the cluster.
+func TestNoScreenIsReachableWithoutALevel(t *testing.T) {
 	t.Parallel()
 	h, _ := newLeveledHandler(t, staticSnapshots{})
-	cases := []map[string]string{
-		{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "view"},
-		{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "dba"},
+	refused := []map[string]string{
 		{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "bogus"},
 		{"X-Forwarded-User": "alice"},
+		{"X-PgToolBox-Level": "view"}, // a level nobody is attributed to
 		{},
 	}
-	for _, headers := range cases {
-		rec := getWithHeaders(t, h, "/", headers)
-		if rec.Code != http.StatusOK {
-			t.Errorf("baseline status = %d for headers %v, want 200", rec.Code, headers)
+	for _, path := range []string{"/", "/cluster/overview", "/objects", "/cluster/pods"} {
+		for _, headers := range refused {
+			if got := getWithHeaders(t, h, path, headers).Code; got != http.StatusForbidden {
+				t.Errorf("%s for %v = %d, want 403", path, headers, got)
+			}
+		}
+	}
+	// The readiness endpoints stay open: they answer Kubernetes, which
+	// forwards no level and never will.
+	for _, path := range []string{"/healthz", "/readyz"} {
+		if got := getWithHeaders(t, h, path, nil).Code; got == http.StatusForbidden {
+			t.Errorf("%s is gated, so the probes cannot reach it", path)
+		}
+	}
+}
+
+// The ladder, screen by screen.
+func TestLevelLadderAdmitsExactlyItsScreens(t *testing.T) {
+	t.Parallel()
+	h, _ := newLeveledHandler(t, staticSnapshots{})
+	view := map[string]string{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "view"}
+	power := map[string]string{"X-Forwarded-User": "alice", "X-PgToolBox-Level": "poweruser"}
+
+	// view reaches the overviews and nothing else.
+	for _, path := range []string{"/", "/cluster/overview", "/backups", "/databases", "/poolers"} {
+		if got := getWithHeaders(t, h, path, view).Code; got != http.StatusOK {
+			t.Errorf("view %s = %d, want 200", path, got)
+		}
+	}
+	for _, path := range []string{"/objects", "/cluster/pods", "/backups/objects", "/backups/evidence",
+		"/databases/roles", "/poolers/pods"} {
+		if got := getWithHeaders(t, h, path, view).Code; got != http.StatusForbidden {
+			t.Errorf("view %s = %d, want 403", path, got)
+		}
+	}
+	// poweruser reaches every read screen.
+	for _, path := range []string{"/", "/objects", "/cluster/pods", "/backups/objects",
+		"/backups/evidence", "/databases/roles", "/poolers/pods"} {
+		if got := getWithHeaders(t, h, path, power).Code; got != http.StatusOK {
+			t.Errorf("poweruser %s = %d, want 200", path, got)
 		}
 	}
 }
@@ -963,5 +1024,564 @@ func TestHandlerBoundsConditionMessages(t *testing.T) {
 	}
 	if !strings.HasSuffix(msg, "…") {
 		t.Error("truncated message misses the ellipsis")
+	}
+}
+
+// TestHandlerPoolersRendersAttributedRows proves the poolers screen
+// reports what the operator says of each pooler, attributed, and that
+// the pool mode and endpoint reach the page.
+func TestHandlerPoolersRendersAttributedRows(t *testing.T) {
+	t.Parallel()
+	snapshots := staticSnapshots{
+		poolers: observe.PoolersSnapshot{
+			Generation: 3, ObservedAt: testNow.Add(-2 * time.Second),
+			Poolers: []observe.PoolerFacts{{
+				Name: "orders-rw", UID: "u1", Type: "rw", PoolMode: "transaction",
+				ReadyInstances: 2, Phase: "active", Image: "pgbouncer:1.24",
+			}},
+		},
+		poolersOK: true,
+	}
+	h, _ := newTestHandler(t, snapshots, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/poolers").Body.String()
+
+	for _, want := range []string{"orders-rw", "rw — the write endpoint", "transaction", "active", "pgbouncer:1.24", "operator-reported"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("poolers page misses %q", want)
+		}
+	}
+}
+
+// TestHandlerPoolersDistinguishesNotObservedFromNone proves the two
+// claims are worded differently. An empty result means the operator
+// reports no poolers; an absent snapshot means this build makes no
+// claim at all, and rendering the first for the second would invent a
+// fact.
+func TestHandlerPoolersDistinguishesNotObservedFromNone(t *testing.T) {
+	t.Parallel()
+	none := staticSnapshots{poolers: observe.PoolersSnapshot{Generation: 1, ObservedAt: testNow}, poolersOK: true}
+	h, _ := newTestHandler(t, none, kube.FakeProber{}, Links{})
+	if body := get(t, h, http.MethodGet, "/poolers").Body.String(); !strings.Contains(body, "No poolers") {
+		t.Error("an observed-empty pooler set does not say the operator reports none")
+	}
+
+	h, _ = newTestHandler(t, staticSnapshots{}, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/poolers").Body.String()
+	if !strings.Contains(body, "No pooler snapshot yet") {
+		t.Error("an absent pooler snapshot does not say the build makes no claim")
+	}
+	if strings.Contains(body, "No poolers") {
+		t.Error("an absent snapshot rendered as an observed-empty set")
+	}
+}
+
+// TestClusterStatusRendersTheFailoverQuorum proves the quorum panel
+// distinguishes a cluster running one from a cluster that is not. "Not
+// configured" is an observation of absence; a missing snapshot is the
+// absence of an observation, and they must not read the same.
+func TestClusterStatusRendersTheFailoverQuorum(t *testing.T) {
+	t.Parallel()
+	configured := staticSnapshots{
+		snap: observe.Snapshot{Generation: 1, ObservedAt: testNow, Cluster: healthyFacts()}, ok: true,
+		quorum: observe.FailoverQuorumSnapshot{
+			Generation: 2, ObservedAt: testNow,
+			Quorum: observe.FailoverQuorumFacts{
+				Present: true, Method: "any", Primary: "orders-1",
+				StandbyNumber: 1, Standbys: []string{"orders-2", "orders-3"},
+			},
+		},
+		quorumOK: true,
+	}
+	h, _ := newTestHandler(t, configured, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
+	for _, want := range []string{"Failover quorum", "orders-1", "orders-2", "operator-reported"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("quorum panel misses %q", want)
+		}
+	}
+
+	absent := configured
+	absent.quorum = observe.FailoverQuorumSnapshot{Generation: 2, ObservedAt: testNow}
+	h, _ = newTestHandler(t, absent, kube.FakeProber{}, Links{})
+	if body := get(t, h, http.MethodGet, "/cluster/overview").Body.String(); !strings.Contains(body, "Not configured") {
+		t.Error("a cluster without a quorum does not say so")
+	}
+}
+
+// TestImageCatalogViewResolvesTheClusterReference proves the panel is
+// built from two separate observations — the reference on the Cluster
+// and the catalog itself — and that each way the pairing can fail is a
+// distinct, honest claim rather than a blank.
+func TestImageCatalogViewResolvesTheClusterReference(t *testing.T) {
+	t.Parallel()
+	catalogs := observe.ImageCatalogsSnapshot{
+		Generation: 1, ObservedAt: testNow,
+		Catalogs: []observe.ImageCatalogFacts{{
+			Name: "postgres", UID: "u1",
+			Images: []observe.CatalogImageFacts{
+				{Major: 16, Image: "pg:16"},
+				{Major: 17, Image: "pg:17"},
+			},
+		}},
+	}
+
+	// No reference: the cluster names its image directly.
+	if v := buildImageCatalogView(catalogs, nil, testNow); v.Referenced {
+		t.Error("a cluster with no catalog reference reported one")
+	}
+
+	// Referenced and observed: the drawn major is marked.
+	v := buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ImageCatalog", Name: "postgres", Major: 17}, testNow)
+	if !v.Referenced || !v.Observable || !v.Found {
+		t.Fatalf("view = %+v, want a resolved reference", v)
+	}
+	if len(v.Images) != 2 || !v.Images[1].Current || v.Images[0].Current {
+		t.Errorf("images = %+v, want only major 17 marked as drawn", v.Images)
+	}
+
+	// Referenced but not present in the namespace.
+	v = buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ImageCatalog", Name: "missing", Major: 17}, testNow)
+	if !v.Referenced || !v.Observable || v.Found {
+		t.Errorf("view = %+v, want a reference that resolved to nothing", v)
+	}
+
+	// Cluster-scoped with no opt-in: named honestly, content not claimed,
+	// and explicitly not reported as missing.
+	catalogs.ClusterCatalogState = observe.ClusterCatalogDisabled
+	v = buildImageCatalogView(catalogs, &observe.ImageCatalogRef{Kind: "ClusterImageCatalog", Name: "shared", Major: 17}, testNow)
+	if !v.Referenced || v.Observable || v.Found || len(v.Images) != 0 {
+		t.Errorf("view = %+v, want the reference shown and its content unclaimed", v)
+	}
+	if v.Unobservable == "" {
+		t.Error("the panel does not say why the content is not claimed")
+	}
+}
+
+// TestClusterImageCatalogOutcomesAreDistinct proves the four ways a
+// cluster-scoped reference can resolve stay distinct on the page. The
+// one that matters most is that a refused read never renders as a
+// missing catalog: declining the opt-in is a deployment choice, whereas
+// absence is a claim about the cluster.
+func TestClusterImageCatalogOutcomesAreDistinct(t *testing.T) {
+	t.Parallel()
+	ref := &observe.ImageCatalogRef{Kind: "ClusterImageCatalog", Name: "shared", Major: 17}
+	base := observe.ImageCatalogsSnapshot{Generation: 1, ObservedAt: testNow}
+
+	for _, tc := range []struct {
+		name           string
+		state          observe.ClusterCatalogState
+		wantObservable bool
+		wantFound      bool
+		wantExplained  bool
+	}{
+		{"opted out", observe.ClusterCatalogDisabled, false, false, true},
+		{"refused", observe.ClusterCatalogUnknown, false, false, true},
+		{"confirmed absent", observe.ClusterCatalogAbsent, true, false, false},
+		{"read", observe.ClusterCatalogPresent, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := base
+			snap.ClusterCatalogState = tc.state
+			if tc.state == observe.ClusterCatalogPresent {
+				snap.ClusterCatalog = observe.ImageCatalogFacts{
+					Name: "shared", Images: []observe.CatalogImageFacts{{Major: 17, Image: "pg:17"}},
+				}
+			}
+			v := buildImageCatalogView(snap, ref, testNow)
+			if v.Observable != tc.wantObservable || v.Found != tc.wantFound {
+				t.Errorf("observable=%v found=%v, want %v/%v", v.Observable, v.Found, tc.wantObservable, tc.wantFound)
+			}
+			if (v.Unobservable != "") != tc.wantExplained {
+				t.Errorf("explanation=%q, want present=%v", v.Unobservable, tc.wantExplained)
+			}
+		})
+	}
+}
+
+// declaredFixture is a populated declarative snapshot covering all four
+// kinds and both reconciliation outcomes.
+func declaredFixture() observe.DatabaseObjectsSnapshot {
+	applied, failed := true, false
+	return observe.DatabaseObjectsSnapshot{
+		Generation: 4, ObservedAt: testNow.Add(-3 * time.Second),
+		Databases: []observe.DatabaseFacts{{
+			Name: "app-db", UID: "d1", Database: "app", Owner: "app", Encoding: "UTF8", Ensure: "present",
+			Declared: observe.Declared{Applied: &applied, ObservedGeneration: 2},
+		}},
+		Roles: []observe.DatabaseRoleFacts{{
+			Name: "app-role", UID: "r1", Role: "app", Superuser: true, ConnectionLimit: -1,
+			InRoles: []string{"reader"}, HasPasswordSecret: true,
+			Declared: observe.Declared{Applied: &failed, Message: "role could not be reconciled", ObservedGeneration: 1},
+		}},
+		Publications: []observe.PublicationFacts{{
+			Name: "app-pub", UID: "p1", Publication: "pub", Database: "app", AllTables: true,
+			Declared: observe.Declared{Applied: &applied, ObservedGeneration: 1},
+		}},
+		Subscriptions: []observe.SubscriptionFacts{{
+			Name: "app-sub", UID: "s1", Subscription: "sub", Database: "app",
+			Publication: "pub", ExternalCluster: "upstream",
+			Declared: observe.Declared{ObservedGeneration: 0},
+		}},
+	}
+}
+
+// TestDatabasesScreensShowOnlyTheirOwnKind proves the four sidebar
+// entries are four screens and not one page shown four times. The
+// sidebar names a destination; showing every list on all of them makes
+// three of those names a lie.
+func TestDatabasesScreensShowOnlyTheirOwnKind(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
+
+	for _, tc := range []struct {
+		path    string
+		present string
+		absent  []string
+	}{
+		{"/databases", "Database resources", []string{"DatabaseRole resources", "Publication resources", "Subscription resources"}},
+		{"/databases/roles", "DatabaseRole resources", []string{"Database resources", "Publication resources", "Subscription resources"}},
+		{"/databases/publications", "Publication resources", []string{"Database resources", "DatabaseRole resources", "Subscription resources"}},
+		{"/databases/subscriptions", "Subscription resources", []string{"Database resources", "DatabaseRole resources", "Publication resources"}},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			body := get(t, h, http.MethodGet, tc.path).Body.String()
+			if !strings.Contains(body, tc.present) {
+				t.Errorf("%s does not show %q", tc.path, tc.present)
+			}
+			for _, other := range tc.absent {
+				if strings.Contains(body, other) {
+					t.Errorf("%s also shows %q, so it is not its own screen", tc.path, other)
+				}
+			}
+			if !strings.Contains(body, OriginOperator.Label()) {
+				t.Errorf("%s drops its attribution", tc.path)
+			}
+		})
+	}
+}
+
+// TestDatabasesRendersDeclarationsAndVerdicts proves each screen shows
+// what was declared alongside what the operator did with it, and that an
+// unreported verdict reads as unknown rather than as a failure — a
+// freshly created declaration has simply not been acted on yet.
+func TestDatabasesRendersDeclarationsAndVerdicts(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
+
+	for path, wants := range map[string][]string{
+		"/databases":               {"app-db", "UTF8", "applied"},
+		"/databases/roles":         {"app-role", "superuser", "unlimited", "failed"},
+		"/databases/publications":  {"app-pub", "all tables", "applied"},
+		"/databases/subscriptions": {"app-sub", "upstream", "unknown"},
+	} {
+		body := get(t, h, http.MethodGet, path).Body.String()
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s misses %q", path, want)
+			}
+		}
+	}
+}
+
+// TestDatabasesNeverRendersSecretMaterial proves the page reports that a
+// role references a password Secret without naming it. The console holds
+// no Secret permission and nothing it displays may need one.
+func TestDatabasesNeverRendersSecretMaterial(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, staticSnapshots{declared: declaredFixture(), declaredOK: true}, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/databases/roles").Body.String()
+
+	if !strings.Contains(body, "from a referenced Secret") {
+		t.Error("the page does not say how the role authenticates")
+	}
+	for _, forbidden := range []string{"passwordSecret", "secretResourceVersion"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("the page rendered %q, which names Secret wiring", forbidden)
+		}
+	}
+}
+
+// TestDatabasesDistinguishesNotObservedFromNone proves an empty
+// declaration set and an absent snapshot are different claims.
+func TestDatabasesDistinguishesNotObservedFromNone(t *testing.T) {
+	t.Parallel()
+	empty := staticSnapshots{
+		declared:   observe.DatabaseObjectsSnapshot{Generation: 1, ObservedAt: testNow},
+		declaredOK: true,
+	}
+	h, _ := newTestHandler(t, empty, kube.FakeProber{}, Links{})
+	if body := get(t, h, http.MethodGet, "/databases").Body.String(); !strings.Contains(body, "No declared databases") {
+		t.Error("an observed-empty declaration set does not say the cluster declares none")
+	}
+
+	h, _ = newTestHandler(t, staticSnapshots{}, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/databases").Body.String()
+	if !strings.Contains(body, "No declaration snapshot yet") {
+		t.Error("an absent snapshot does not say the build makes no claim")
+	}
+	if strings.Contains(body, "No declared databases") {
+		t.Error("an absent snapshot rendered as an observed-empty set")
+	}
+}
+
+// TestTopologyIsServedDrawn proves the wiring diagram ships as a
+// finished drawing: real geometry from the layout engine, every flow
+// routed and every box placed, with no script involved at all.
+func TestTopologyIsServedDrawn(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestHandler(t, wiringSources(), kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/").Body.String()
+
+	for _, want := range []string{
+		`<svg class="topo"`, `class="topo-node`, `class="topo-edge`, `<rect x=`,
+		// The legend keys the styles the router took off the wires.
+		`class="topo-legend"`, "writes", "reads",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("served diagram misses %q", want)
+		}
+	}
+	// A script may draw a diagram beside this one, but never this one:
+	// the served SVG above carries no scripted hook of its own.
+	svg := body[strings.Index(body, `<svg class="topo"`):]
+	svg = svg[:strings.Index(svg, "</svg>")]
+	for _, hook := range []string{"data-topo-graph", "data-topo-cyto", "onload", "x-data"} {
+		if strings.Contains(svg, hook) {
+			t.Errorf("the served drawing carries the scripted hook %q", hook)
+		}
+	}
+	// Every drawn box carries its own placement: a layout that failed
+	// would stack them all on one spot.
+	positions := topoRectPositions(body)
+	seen := map[string]bool{}
+	for _, p := range positions {
+		seen[p] = true
+	}
+	if len(positions) < 2 || len(seen) != len(positions) {
+		t.Errorf("%d boxes share %d positions", len(positions), len(seen))
+	}
+	if got := strings.Count(body, `marker-end="url(#topo-arrow)"`); got == 0 {
+		t.Error("no flow was routed")
+	}
+	// Orthogonal routes: every path is elbows and rounded corners, never
+	// the cubic curves the old hand-rolled router drew.
+	for _, path := range topoPaths(body) {
+		if strings.Contains(path, "C") {
+			t.Errorf("route is a cubic curve rather than an orthogonal run: %q", path)
+		}
+		if !strings.Contains(path, "L") {
+			t.Errorf("route carries no straight run: %q", path)
+		}
+	}
+}
+
+// topoRectPositions lists each diagram box's placement.
+func topoRectPositions(body string) []string {
+	start := strings.Index(body, `<svg class="topo"`)
+	if start < 0 {
+		return nil
+	}
+	svg := body[start:]
+	if end := strings.Index(svg, "</svg>"); end >= 0 {
+		svg = svg[:end]
+	}
+	var out []string
+	for _, tag := range strings.Split(svg, "<rect ")[1:] {
+		if cut := strings.Index(tag, " width="); cut >= 0 {
+			out = append(out, tag[:cut])
+		}
+	}
+	return out
+}
+
+// topoPaths extracts the routed flows from a rendered page. Only the
+// flows carry an arrowhead; the legend's swatches share the edge
+// classes but are straight rules, not routes.
+func topoPaths(body string) []string {
+	var out []string
+	for _, tag := range strings.Split(body, "<path ") {
+		if !strings.Contains(tag, "topo-edge") || !strings.Contains(tag, "marker-end") {
+			continue
+		}
+		d := strings.Index(tag, ` d="`)
+		if d < 0 {
+			continue
+		}
+		rest := tag[d+len(` d="`):]
+		end := strings.Index(rest, `"`)
+		if end < 0 {
+			continue
+		}
+		out = append(out, rest[:end])
+	}
+	return out
+}
+
+// TestTopologyEscapesHostileIdentifiers proves an identifier drawn from
+// cluster state cannot break out of the SVG it is drawn into. The
+// consequence of it not holding is script injection on the Overview.
+func TestTopologyEscapesHostileIdentifiers(t *testing.T) {
+	t.Parallel()
+	hostile := `</text><script>alert(1)</script>`
+	pod := memberPod(hostile, "primary")
+	src := staticSnapshots{
+		snap:   observe.Snapshot{Generation: 3, ObservedAt: testNow, Cluster: healthyFacts()},
+		ok:     true,
+		pods:   podsSnapshot(false, pod),
+		podsOK: true,
+	}
+	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/").Body.String()
+	if strings.Contains(body, "<script>alert(1)</script>") {
+		t.Fatal("a hostile identifier reached the document unescaped")
+	}
+}
+
+// poolerPodFixture is a two-pod pooler roster.
+func poolerPodFixture() observe.PodsSnapshot {
+	ready := true
+	restarts := 0
+	return observe.PodsSnapshot{
+		Generation: 5, ObservedAt: testNow.Add(-2 * time.Second),
+		Pods: []observe.PodFacts{
+			{Name: "orders-rw-pooler-abc-1", UID: "pp1", Role: "orders-rw-pooler", Phase: "Running",
+				Ready: &ready, Restarts: &restarts, Node: "node-a", Image: "pgbouncer:1.24"},
+			{Name: "orders-rw-pooler-abc-2", UID: "pp2", Role: "orders-rw-pooler", Phase: "Running",
+				Ready: &ready, Restarts: &restarts, Node: "node-b", Image: "pgbouncer:1.24"},
+		},
+	}
+}
+
+// TestPoolerScreensShowTheirOwnContent proves the three Poolers entries
+// are three screens. They rendered the same roster until pooler pods
+// were observed, which made two of the three sidebar names promises the
+// console could not keep.
+func TestPoolerScreensShowTheirOwnContent(t *testing.T) {
+	t.Parallel()
+	src := staticSnapshots{
+		poolers: observe.PoolersSnapshot{
+			Generation: 2, ObservedAt: testNow,
+			Poolers: []observe.PoolerFacts{{Name: "orders-rw-pooler", UID: "p1", Type: "rw", Phase: "active"}},
+		},
+		poolersOK:    true,
+		poolerPods:   poolerPodFixture(),
+		poolerPodsOK: true,
+	}
+	h, _ := newLeveledHandler(t, src)
+
+	overview := getWithHeaders(t, h, "/poolers", powerUser).Body.String()
+	if !strings.Contains(overview, "Pooler resources") {
+		t.Error("the poolers overview does not show the pooler roster")
+	}
+	if strings.Contains(overview, "Pods run by this cluster") {
+		t.Error("the overview also shows the pod roster, so it is not its own screen")
+	}
+
+	pods := getWithHeaders(t, h, "/poolers/pods", powerUser).Body.String()
+	for _, want := range []string{"Pods run by this cluster", "orders-rw-pooler-abc-1", "pgbouncer:1.24", "node-b"} {
+		if !strings.Contains(pods, want) {
+			t.Errorf("the pooler pods screen misses %q", want)
+		}
+	}
+	if strings.Contains(pods, "Pooler resources") {
+		t.Error("the pods screen also shows the pooler roster")
+	}
+
+	// The standalone logs screen is gone: a pod's logs live on the pod,
+	// in its own detail screen's Logs tab.
+	if got := getWithHeaders(t, h, "/poolers/logs", powerUser).Code; got != http.StatusNotFound {
+		t.Errorf("the retired pooler logs screen still answers: status %d", got)
+	}
+	detail := getWithHeaders(t, h, "/poolers/pods/orders-rw-pooler-abc-1", powerUser).Body.String()
+	// The pooler tail is a different route to a different container,
+	// verified against a different ownership chain.
+	if !strings.Contains(detail, "/poolers/logs/orders-rw-pooler-abc-1") {
+		t.Error("the pooler pod detail offers no tail")
+	}
+	if strings.Contains(detail, `"/logs/orders-rw-pooler`) {
+		t.Error("a pooler pod links to the instance log route")
+	}
+}
+
+// TestPoolerLogsRouteTailsThePoolerContainer proves the route exists and
+// reaches the pooler tail rather than the instance one.
+func TestPoolerLogsRouteTailsThePoolerContainer(t *testing.T) {
+	t.Parallel()
+	src := staticSnapshots{poolerPods: poolerPodFixture(), poolerPodsOK: true}
+	h, _ := newTestHandlerFull(t, src, kube.FakeProber{}, Links{}, true,
+		fakeTailer{tail: observe.LogTail{Content: "pgbouncer ready", LineLimit: 200, ByteLimit: 1024}})
+
+	rec := getWithHeaders(t, h, "/poolers/logs/orders-rw-pooler-abc-1", powerUser)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pooler log route = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "pgbouncer ready") {
+		t.Error("the pooler tail content did not reach the page")
+	}
+}
+
+// The map shows what it cannot open rather than hiding it: "not for you"
+// and "not a thing" are different claims, and a console whose shape
+// changes with the reader teaches nobody what it is. Every entry above
+// the level is present, disabled, and says which level it needs.
+func TestSidebarOffersNoLinkTheRouteWouldRefuse(t *testing.T) {
+	t.Parallel()
+	h, _ := newLeveledHandler(t, staticSnapshots{})
+	cases := []struct {
+		level  string
+		linked []string
+		barred []string
+	}{
+		{level: "", barred: []string{"/", "/cluster/overview", "/objects", "/cluster/pods"}},
+		{level: "view",
+			linked: []string{"/", "/cluster/overview", "/backups", "/databases", "/poolers"},
+			barred: []string{"/objects", "/cluster/pods", "/backups/evidence", "/poolers/pods"}},
+		{level: "poweruser",
+			linked: []string{"/", "/objects", "/cluster/pods", "/backups/evidence", "/poolers/pods"}},
+	}
+	for _, tc := range cases {
+		headers := map[string]string{"X-Forwarded-User": "alice"}
+		if tc.level != "" {
+			headers["X-PgToolBox-Level"] = tc.level
+		}
+		// "/" renders the map either way: the screen for a level that
+		// reaches it, the denial page for one that does not.
+		body := getWithHeaders(t, h, "/", headers).Body.String()
+		for _, path := range tc.linked {
+			if !strings.Contains(body, `href="`+path+`"`) {
+				t.Errorf("level %q: the map does not link %s", tc.level, path)
+			}
+		}
+		for _, path := range tc.barred {
+			if strings.Contains(body, `href="`+path+`"`) {
+				t.Errorf("level %q: the map links %s, which the route refuses", tc.level, path)
+			}
+		}
+	}
+}
+
+// pgAdmin is a SQL console onto the data, so it reaches past everything
+// this console shows below dba. The map must not offer the door to a
+// reader who may not open it.
+func TestPgAdminLinkIsTheDBALevels(t *testing.T) {
+	t.Parallel()
+	h, _ := newLeveledHandlerWithLinks(t, staticSnapshots{}, Links{
+		PgAdmin:    "https://pgadmin.example.com",
+		Monitoring: "https://grafana.example.com",
+	})
+	for _, tc := range []struct {
+		level string
+		want  bool
+	}{{"view", false}, {"poweruser", false}, {"dba", true}} {
+		body := getWithHeaders(t, h, "/", map[string]string{
+			"X-Forwarded-User": "alice", "X-PgToolBox-Level": tc.level,
+		}).Body.String()
+		if got := strings.Contains(body, "pgadmin.example.com"); got != tc.want {
+			t.Errorf("level %q offers pgAdmin = %v, want %v", tc.level, got, tc.want)
+		}
+		// The other link-outs are not level-decided.
+		if !strings.Contains(body, "grafana.example.com") {
+			t.Errorf("level %q lost the monitoring link-out", tc.level)
+		}
 	}
 }

@@ -1,0 +1,72 @@
+{{- /*
+  One wiring diagram: an inline SVG drawn from a TopologyView, with no
+  script and no external asset. It reads left to right — the clients,
+  the endpoints, the servers, and the storage — so a reader can see how
+  applications reach the database and where the data is kept. Every box
+  carries a text label; colour and the primary's emphasis are
+  reinforcement, never the only signal. The geometry is settled
+  server-side by the layout engine; the template only draws it.
+*/ -}}
+{{- define "topology" -}}
+<section class="panel topo-panel{{if .Frames}} topo-panel-grouped{{end}}">
+  <h2 class="topo-title">{{.Title}}</h2>
+  <div class="topo-scroll">
+  {{- /* width and height carry the size the layout actually settled on.
+         Without them the stylesheet stretched a framed drawing to fill
+         whatever panel it sat in, so a compact schema was blown up past
+         the size its own arithmetic chose — bigger boxes, bigger text,
+         and more air between them than the geometry intended. With
+         them it draws at its own size and only ever scales down. */}}
+  <svg class="topo" viewBox="0 0 {{.Width}} {{.Height}}" width="{{.Width}}" height="{{.Height}}" role="img"
+       aria-label="{{.Aria}}"
+       preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <marker id="topo-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z"></path>
+      </marker>
+    </defs>
+    {{- range .Frames}}
+    <g class="topo-frame{{if .Kind}} topo-frame-{{.Kind}}{{end}}">
+      <rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="10"></rect>
+      <text class="topo-frame-label" x="{{add .X 14}}" y="{{add .Y 20}}">{{.Label}}{{if .Note}} <tspan class="topo-frame-note">{{.Note}}</tspan>{{end}}</text>
+    </g>
+    {{- end}}
+    {{- range .Edges}}
+    <path class="topo-edge topo-edge-{{.Kind}}" d="{{.Path}}" marker-end="url(#topo-arrow)"></path>
+    {{- if .Label}}
+    <text class="topo-elabel topo-elabel-{{.Kind}}" x="{{.LabelX}}" y="{{.LabelY}}" text-anchor="middle"{{if .LabelVertical}} transform="rotate(-90 {{.LabelX}} {{.LabelY}})"{{end}}>{{.Label}}</text>
+    {{- end}}
+    {{- end}}
+    {{- range .Dots}}
+    <circle class="topo-dot topo-dot-{{.Kind}}" cx="{{.X}}" cy="{{.Y}}" r="3"></circle>
+    {{- end}}
+    {{- range .Nodes}}
+    <g class="topo-node topo-{{.Kind}}"{{if .State}} data-state="{{.State}}"{{end}}>
+      <rect x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="8"></rect>
+      {{- if .Lines}}
+      {{- range .Lines}}
+      <text class="topo-{{.Class}}" x="{{.X}}" y="{{.Y}}">{{.Text}}</text>
+      {{- end}}
+      {{- else}}
+      <text class="topo-label" x="{{add .X 14}}" y="{{add .Y 23}}">{{.Label}}</text>
+      {{- if .Sub}}
+      <text class="topo-sub" x="{{add .X 14}}" y="{{add .Y 40}}">{{.Sub}}</text>
+      {{- end}}
+      {{- if .Disk}}
+      <text class="topo-disk" x="{{add .X 14}}" y="{{add .Y 54}}">{{.Disk}}</text>
+      {{- end}}
+      {{- end}}
+    </g>
+    {{- end}}
+  </svg>
+  </div>
+  {{- if .Legend}}
+  <div class="topo-legend">
+    {{- range .Legend}}
+    <span><svg viewBox="0 0 26 8"><path class="topo-edge topo-edge-{{.Kind}}" d="M0 4H26"></path></svg> {{.Label}}</span>
+    {{- end}}
+  </div>
+  {{- end}}
+  <p class="origin">{{.Caption}}</p>
+</section>
+{{- end -}}

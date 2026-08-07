@@ -45,6 +45,8 @@ type ReviewExecutor interface {
 
 // AccessReviewView is the dba review panel's view model.
 type AccessReviewView struct {
+	// Shell is the shared chrome.
+	Shell ShellView
 	// ClusterName is the target cluster.
 	ClusterName string
 	// Meta is the snapshot freshness line.
@@ -96,6 +98,8 @@ type DecidedRequestView struct {
 // AccessDecisionResultView is the fire-and-observe result of one
 // decision. The list reflects the write once the informer catches up.
 type AccessDecisionResultView struct {
+	// Shell is the shared chrome.
+	Shell ShellView
 	// ClusterName is the target cluster.
 	ClusterName string
 	// Request is the decided request name.
@@ -110,9 +114,10 @@ type AccessDecisionResultView struct {
 
 // handleAccessRequestsIndex renders the review panel from the current
 // snapshot. It performs no API call: rendering is snapshot plus template.
-func (h *Handler) handleAccessRequestsIndex(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) handleAccessRequestsIndex(w http.ResponseWriter, r *http.Request) {
 	snap, ok := h.sources.AccessReview.CurrentAccessReview()
 	view := h.buildAccessReviewView(snap, ok)
+	view.Shell = h.shell(r, "access")
 	h.renderReview(w, http.StatusOK, "access-requests.html.tmpl", view)
 }
 
@@ -168,16 +173,16 @@ func (h *Handler) handleAccessDecision(action string) http.HandlerFunc {
 		}
 		if !sameOriginPOST(r) {
 			h.logger.Info("access decision refused", slog.String("reason", "cross-origin"))
-			h.renderDenied(w, http.StatusForbidden, "cross-origin request refused")
+			h.renderDenied(w, r, http.StatusForbidden, "cross-origin request refused")
 			return
 		}
 		if err := r.ParseForm(); err != nil {
-			h.renderDenied(w, http.StatusBadRequest, "malformed request")
+			h.renderDenied(w, r, http.StatusBadRequest, "malformed request")
 			return
 		}
 		if !h.reviewer.Verify(name, action, r.PostForm.Get("csrf")) {
 			h.logger.Info("access decision refused", slog.String("reason", "csrf"))
-			h.renderDenied(w, http.StatusForbidden, "confirmation expired or invalid; try again")
+			h.renderDenied(w, r, http.StatusForbidden, "confirmation expired or invalid; try again")
 			return
 		}
 
@@ -194,6 +199,7 @@ func (h *Handler) handleAccessDecision(action string) http.HandlerFunc {
 
 		outcome, err := h.reviewer.Decide(r.Context(), name, action, r.PostForm.Get("role"), decidedBy, roles)
 		view := AccessDecisionResultView{
+			Shell:       h.shell(r, "access"),
 			ClusterName: h.cfg.ClusterName,
 			Request:     name,
 			Action:      action,

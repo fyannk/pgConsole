@@ -117,8 +117,20 @@ clock, explicit `unknown`). `make test` covers those behavior and security
 cases hermetically; `make test-race` repeats them under the race detector.
 Distinct environments keep distinct targets: `test-integration` for envtest,
 `test-scale` for bounded-resource cases, `test-container` for the restricted
-runtime, `test-multiarch` for both release architectures, and `test-e2e` for
-the pinned kind + CloudNativePG journey.
+runtime, `test-multiarch` for both release architectures, `test-ui` for the
+console in a browser, and `test-e2e` for the pinned kind + CloudNativePG
+journey.
+
+Changes to `internal/web/static/` or `internal/web/templates/` need
+`make test-ui`. It serves the fixture states from
+`internal/web/uiharness_test.go` and drives them with headless Chromium
+(`hack/uitest/drive.js`), asserting what a rendered string cannot show:
+that the embedded enhancement layer runs at all under the served
+Content-Security-Policy, that colour contrast clears WCAG 2 AA in both
+schemes across every state, that the page stays complete and honest with
+scripting disabled, and that tables survive a 375px viewport. It needs
+Node and downloads a pinned Chromium on first run; it needs no cluster.
+Screenshots and a summary land in `artifacts/ui/`.
 
 ## Documentation
 

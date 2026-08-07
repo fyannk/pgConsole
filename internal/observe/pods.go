@@ -17,11 +17,8 @@ package observe
 import (
 	"context"
 	"log/slog"
-	"sort"
 	"sync"
 	"time"
-
-	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // MaxPods bounds the retained and rendered instance pods. A CloudNativePG
@@ -47,6 +44,11 @@ type PodFacts struct {
 	Restarts *int
 	// Node is the assigned node name.
 	Node string
+	// IP is the pod IP, empty until assigned. The metrics scraper dials
+	// it and the pod detail states it.
+	IP string
+	// Started is the reported start time; nil when unreported.
+	Started *time.Time
 	// Image is the PostgreSQL container image.
 	Image string
 	// Deleting reports a set deletion timestamp.
@@ -135,13 +137,7 @@ func (s *PodStore) CurrentPods() (PodsSnapshot, bool) {
 // staleness. The pod set is sorted and bounded here so no publication
 // can bypass the bound.
 func (s *PodStore) publish(pods []PodFacts, observedAt time.Time) {
-	sorted := append([]PodFacts(nil), pods...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-	truncated := false
-	if len(sorted) > MaxPods {
-		sorted = sorted[:MaxPods]
-		truncated = true
-	}
+	sorted, truncated := bounded(pods, lessPodName, MaxPods)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snap = PodsSnapshot{
@@ -163,138 +159,89 @@ func (s *PodStore) markStale() {
 	s.snap.Stale = true
 }
 
+// lessPodName orders the published pod set by name. Pods have no
+// meaningful arrival order and the screen is read as a roster, so the
+// name is the only ordering an operator can predict.
+func lessPodName(a, b PodFacts) bool { return a.Name < b.Name }
+
+// podRetention identifies retained pods. There is no eviction policy:
+// the collector retains every member it observes and the bound is
+// applied once, at publication, so which pods survive a flood is decided
+// by lessPodName and never by arrival order.
+var podRetention = retention[PodFacts]{
+	Name: func(p PodFacts) string { return p.Name },
+	UID:  func(p PodFacts) string { return p.UID },
+}
+
 // PodCollector maintains the pod store from a PodSource with the same
 // contract as the cluster collector: seed, follow, republish per event,
-// stale on contact loss, exponential backoff on failure.
+// stale on contact loss, exponential backoff on failure. That contract
+// is the shared loop in loop.go; what follows is only the pod-specific
+// part of it.
 type PodCollector struct {
-	source  PodSource
-	store   *PodStore
-	clock   Clock
-	logger  *slog.Logger
-	backoff time.Duration
-	state   map[string]PodFacts
+	source PodSource
+	store  *PodStore
+	clock  Clock
+	logger *slog.Logger
+	state  keyed[PodFacts]
 }
 
 // NewPodCollector wires a pod collector onto a store.
 func NewPodCollector(source PodSource, store *PodStore, clock Clock, logger *slog.Logger) *PodCollector {
-	return &PodCollector{
-		source:  source,
-		store:   store,
-		clock:   clock,
-		logger:  logger,
-		backoff: backoffInitial,
-	}
+	return &PodCollector{source: source, store: store, clock: clock, logger: logger}
 }
 
 // Run blocks until ctx is done, maintaining the store. Cancellation is
 // the one clean exit.
 func (c *PodCollector) Run(ctx context.Context) error {
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
-		pods, rv, err := c.source.FetchPods(ctx)
-		if err != nil {
-			c.loseContact("pods fetch", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.state = make(map[string]PodFacts, len(pods))
-		for _, p := range pods {
-			c.state[p.Name] = p
-		}
-		c.publish()
-
-		w, err := c.source.WatchPods(ctx, rv)
-		if err != nil {
-			c.loseContact("pods watch start", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.follow(ctx, w)
-		if ctx.Err() != nil {
-			return nil
-		}
-		c.loseContact("pods watch", nil)
-		if c.wait(ctx) != nil {
-			return nil
-		}
-	}
+	return newLoop[string, PodEvent](c, c.clock, c.logger).Run(ctx)
 }
 
-// follow consumes watch events until the watch ends or ctx is done,
-// draining delivered events before honoring cancellation.
-func (c *PodCollector) follow(ctx context.Context, w PodWatch) {
-	defer w.Stop()
-	for {
-		select {
-		case ev, ok := <-w.Events():
-			if !ok {
-				return
-			}
-			c.apply(ev)
-			continue
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case ev, ok := <-w.Events():
-			if !ok {
-				return
-			}
-			c.apply(ev)
-		}
+// op names this resource in contact-loss logs.
+func (c *PodCollector) op() string { return "pods" }
+
+// seed replaces the retained member set and returns the resource
+// version the watch resumes from.
+func (c *PodCollector) seed(ctx context.Context) (string, error) {
+	pods, rv, err := c.source.FetchPods(ctx)
+	if err != nil {
+		return "", err
 	}
+	c.state = make(keyed[PodFacts], len(pods))
+	for _, p := range pods {
+		c.state.put(p, podRetention)
+	}
+	return rv, nil
 }
 
-// apply folds one event into the state and republishes. A deletion
-// whose UID no longer matches is ignored: the name was reused by a
-// newer incarnation that must not be removed.
-func (c *PodCollector) apply(ev PodEvent) {
+// follow starts the pod watch from the seed's resource version.
+func (c *PodCollector) follow(ctx context.Context, from string) (<-chan PodEvent, func(), error) {
+	w, err := c.source.WatchPods(ctx, from)
+	if err != nil {
+		return nil, nil, err
+	}
+	return w.Events(), w.Stop, nil
+}
+
+// apply folds one event into the retained set. It reports whether the
+// event was recognized; an event carrying nothing is not, and never
+// advances a generation.
+func (c *PodCollector) apply(ev PodEvent) bool {
 	switch {
 	case ev.Put != nil:
-		c.state[ev.Put.Name] = *ev.Put
+		c.state.put(*ev.Put, podRetention)
 	case ev.Delete != nil:
-		if current, ok := c.state[ev.Delete.Name]; ok && current.UID == ev.Delete.UID {
-			delete(c.state, ev.Delete.Name)
-		}
+		c.state.remove(ev.Delete.Name, ev.Delete.UID, podRetention)
 	default:
-		return
+		return false
 	}
-	c.publish()
+	return true
 }
 
-// publish snapshots the current state and resets the backoff.
-func (c *PodCollector) publish() {
-	pods := make([]PodFacts, 0, len(c.state))
-	for _, p := range c.state {
-		pods = append(pods, p)
-	}
-	c.store.publish(pods, c.clock.Now())
-	c.backoff = backoffInitial
+// publish snapshots the retained set into the store.
+func (c *PodCollector) publish(observedAt time.Time) {
+	c.store.publish(c.state.list(), observedAt)
 }
 
-// loseContact marks the snapshot stale and logs the failure category.
-func (c *PodCollector) loseContact(op string, err error) {
-	c.store.markStale()
-	attrs := []any{slog.String("op", op)}
-	if err != nil {
-		attrs = append(attrs, slog.String("category", redact.Safe(err)))
-	}
-	c.logger.Info("contact lost", attrs...)
-}
-
-// wait sleeps the current backoff and doubles it up to the bound.
-func (c *PodCollector) wait(ctx context.Context) error {
-	d := c.backoff
-	c.backoff *= 2
-	if c.backoff > backoffMax {
-		c.backoff = backoffMax
-	}
-	return c.clock.Wait(ctx, d)
-}
+// markStale marks the retained snapshot stale, if one exists.
+func (c *PodCollector) markStale() { c.store.markStale() }

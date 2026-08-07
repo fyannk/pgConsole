@@ -17,11 +17,8 @@ package observe
 import (
 	"context"
 	"log/slog"
-	"sort"
 	"sync"
 	"time"
-
-	"github.com/fyannk/pgConsole/internal/redact"
 )
 
 // Access-review bounds. One extra request is retained internally as a
@@ -165,18 +162,14 @@ func (s *AccessReviewStore) CurrentAccessReview() (AccessReviewSnapshot, bool) {
 }
 
 func (s *AccessReviewStore) publish(requests []AccessRequestFacts, roles []string, observedAt time.Time, sourceTruncated bool) {
-	requestCopy := append([]AccessRequestFacts(nil), requests...)
-	sort.Slice(requestCopy, func(i, j int) bool { return lessAccessRequest(requestCopy[i], requestCopy[j]) })
-	truncated := sourceTruncated || len(requestCopy) > MaxAccessRequests
-	if truncated {
-		requestCopy = requestCopy[:MaxAccessRequests]
-	}
+	// The cut is decided by the length, never by the flag. Cutting on
+	// the flag panicked: sourceTruncated is sticky for the life of a
+	// seed, so once eviction set it, deletions bringing the retained set
+	// back under the bound left a slice shorter than the cut.
+	requestCopy, cut := bounded(requests, lessAccessRequest, MaxAccessRequests)
+	truncated := sourceTruncated || cut
 
-	roleCopy := append([]string(nil), roles...)
-	sort.Strings(roleCopy)
-	if len(roleCopy) > MaxAccessRoles {
-		roleCopy = roleCopy[:MaxAccessRoles]
-	}
+	roleCopy, _ := bounded(roles, func(a, b string) bool { return a < b }, MaxAccessRoles)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -227,6 +220,19 @@ func (s *AccessReviewStore) markStale() {
 	}
 }
 
+// accessRequestRetention identifies retained access requests and bounds
+// them in memory at one above the rendered bound, so the extra entry is
+// the sentinel that lets the page say more exist without holding them.
+// The oldest request loses: the queue is read newest-first, so under a
+// flood the entries an approver would actually reach are the recent
+// ones.
+var accessRequestRetention = retention[AccessRequestFacts]{
+	Name:      func(r AccessRequestFacts) string { return r.Name },
+	UID:       func(r AccessRequestFacts) string { return r.UID },
+	Limit:     MaxAccessRequests + 1,
+	Evictable: func(a, b AccessRequestFacts) bool { return a.CreatedAt.Before(b.CreatedAt) },
+}
+
 // AccessReviewCollector maintains a bounded review view using seed,
 // watch, immutable publication, stale retention, and bounded retry
 // backoff. Roles are carried on the seed and refresh on each reseed.
@@ -235,139 +241,76 @@ type AccessReviewCollector struct {
 	store     *AccessReviewStore
 	clock     Clock
 	logger    *slog.Logger
-	backoff   time.Duration
-	requests  map[string]AccessRequestFacts
+	requests  keyed[AccessRequestFacts]
 	roles     []string
 	truncated bool
 }
 
 // NewAccessReviewCollector wires a review collector onto a store.
 func NewAccessReviewCollector(source AccessReviewSource, store *AccessReviewStore, clock Clock, logger *slog.Logger) *AccessReviewCollector {
-	return &AccessReviewCollector{source: source, store: store, clock: clock, logger: logger, backoff: backoffInitial}
+	return &AccessReviewCollector{source: source, store: store, clock: clock, logger: logger}
 }
 
 // Run blocks until ctx is canceled, maintaining the store.
 func (c *AccessReviewCollector) Run(ctx context.Context) error {
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
-		state, err := c.source.FetchAccessReview(ctx)
-		if err != nil {
-			c.loseContact("access review fetch", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.seed(state)
-		c.publish()
-
-		w, err := c.source.WatchAccessReview(ctx, state)
-		if err != nil {
-			c.loseContact("access review watch start", err)
-			if c.wait(ctx) != nil {
-				return nil
-			}
-			continue
-		}
-		c.follow(ctx, w)
-		if ctx.Err() != nil {
-			return nil
-		}
-		c.loseContact("access review watch", nil)
-		if c.wait(ctx) != nil {
-			return nil
-		}
-	}
+	return newLoop[AccessReviewState, AccessRequestChange](c, c.clock, c.logger).Run(ctx)
 }
 
-func (c *AccessReviewCollector) seed(state AccessReviewState) {
+// op names this resource in contact-loss logs.
+func (c *AccessReviewCollector) op() string { return "access review" }
+
+// seed replaces the retained requests and the role list. The cursor is
+// the whole seed state rather than a resource version: the review watch
+// resumes two kinds and needs both.
+//
+// Roles are carried on the seed and refreshed on each reseed, not
+// watched: the approval picker needs the names that exist now, and a
+// stale name there would offer a role that cannot be granted.
+func (c *AccessReviewCollector) seed(ctx context.Context) (AccessReviewState, error) {
+	state, err := c.source.FetchAccessReview(ctx)
+	if err != nil {
+		return AccessReviewState{}, err
+	}
 	c.truncated = state.RequestsTruncated
-	c.requests = make(map[string]AccessRequestFacts, len(state.Requests))
+	c.requests = make(keyed[AccessRequestFacts], len(state.Requests))
 	for _, request := range state.Requests {
-		c.retain(request)
+		if c.requests.put(request, accessRequestRetention) {
+			c.truncated = true
+		}
 	}
 	c.roles = append([]string(nil), state.Roles...)
+	return state, nil
 }
 
-func (c *AccessReviewCollector) follow(ctx context.Context, w AccessReviewWatch) {
-	defer w.Stop()
-	for {
-		select {
-		case change, ok := <-w.Changes():
-			if !ok {
-				return
-			}
-			c.apply(change)
-			continue
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case change, ok := <-w.Changes():
-			if !ok {
-				return
-			}
-			c.apply(change)
-		}
+// follow starts the review watch from the seed state.
+func (c *AccessReviewCollector) follow(ctx context.Context, from AccessReviewState) (<-chan AccessRequestChange, func(), error) {
+	w, err := c.source.WatchAccessReview(ctx, from)
+	if err != nil {
+		return nil, nil, err
 	}
+	return w.Changes(), w.Stop, nil
 }
 
-func (c *AccessReviewCollector) apply(change AccessRequestChange) {
+// apply folds one change into the retained requests. It reports whether
+// the change was recognized; a change carrying nothing is not.
+func (c *AccessReviewCollector) apply(change AccessRequestChange) bool {
 	switch {
 	case change.Put != nil:
-		c.retain(*change.Put)
+		if c.requests.put(*change.Put, accessRequestRetention) {
+			c.truncated = true
+		}
 	case change.Delete != nil:
-		if current, ok := c.requests[change.Delete.Name]; ok && current.UID == change.Delete.UID {
-			delete(c.requests, change.Delete.Name)
-		}
+		c.requests.remove(change.Delete.Name, change.Delete.UID, accessRequestRetention)
 	default:
-		return
+		return false
 	}
-	c.publish()
+	return true
 }
 
-func (c *AccessReviewCollector) retain(request AccessRequestFacts) {
-	const retained = MaxAccessRequests + 1
-	if _, exists := c.requests[request.Name]; !exists && len(c.requests) >= retained {
-		c.truncated = true
-		oldestName := ""
-		var oldest time.Time
-		for name, current := range c.requests {
-			if oldestName == "" || current.CreatedAt.Before(oldest) {
-				oldestName, oldest = name, current.CreatedAt
-			}
-		}
-		delete(c.requests, oldestName)
-	}
-	c.requests[request.Name] = request
+// publish snapshots the retained requests and roles into the store.
+func (c *AccessReviewCollector) publish(observedAt time.Time) {
+	c.store.publish(c.requests.list(), c.roles, observedAt, c.truncated)
 }
 
-func (c *AccessReviewCollector) publish() {
-	requests := make([]AccessRequestFacts, 0, len(c.requests))
-	for _, request := range c.requests {
-		requests = append(requests, request)
-	}
-	c.store.publish(requests, c.roles, c.clock.Now(), c.truncated)
-	c.backoff = backoffInitial
-}
-
-func (c *AccessReviewCollector) loseContact(op string, err error) {
-	c.store.markStale()
-	attrs := []any{slog.String("op", op)}
-	if err != nil {
-		attrs = append(attrs, slog.String("category", redact.Safe(err)))
-	}
-	c.logger.Info("contact lost", attrs...)
-}
-
-func (c *AccessReviewCollector) wait(ctx context.Context) error {
-	d := c.backoff
-	c.backoff *= 2
-	if c.backoff > backoffMax {
-		c.backoff = backoffMax
-	}
-	return c.clock.Wait(ctx, d)
-}
+// markStale marks the retained snapshot stale, if one exists.
+func (c *AccessReviewCollector) markStale() { c.store.markStale() }
