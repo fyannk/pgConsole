@@ -16,7 +16,7 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `NAMESPACE` | *required* | Its namespace, normally via the downward API. |
 | `LISTEN_ADDR` | `:3000` | Plain HTTP listen address (TLS is the proxy's job). |
 | `TRUSTED_USER_HEADER` | `X-Forwarded-User` | Proxy identity header — display and audit only; empty disables identity and denies every level-gated route. |
-| `TRUSTED_LEVEL_HEADER` | `X-PgToolBox-Level` | Proxy level header carrying `view`, `poweruser`, or `dba`; empty leaves only the read-only baseline. |
+| `TRUSTED_LEVEL_HEADER` | `X-PgToolBox-Level` | Proxy level header carrying `view`, `poweruser`, or `dba`; empty closes the console entirely — every screen answers 503, because a deployment that forwards no level can admit nobody. |
 | `ALLOW_OPERATIONS` | `false` | Enables the enumerated day-2 operation routes. Strict boolean. |
 | `ALLOW_ACCESS_REVIEW` | `false` | Enables the dba access-request review panel. Strict boolean; needs its own Role. |
 | `ALLOW_CLUSTER_CATALOGS` | `false` | Lets the console read the one cluster-scoped `ClusterImageCatalog` its Cluster references. Strict boolean; needs its own ClusterRole. The only setting that grants authority outside the namespace. |
@@ -31,6 +31,10 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `HISTORY_PER_OBJECT_REVISIONS` | `20` | Per-object retained revision bound, 2–200. |
 | `HISTORY_COALESCE_WINDOW` | `1m` | Window for folding consecutive status-only transitions, 1s–1h. |
 | `HISTORY_PATH` | *empty* | Absolute bbolt journal path. Empty keeps history in memory only; a value requires `HISTORY_ENABLED=true`, a writable PVC, and one replica. |
+| `METRICS_ENABLED` | `true` | Sweeps the instance and pooler exporters and serves the metrics screens. Strict boolean. On by default, so the console makes direct HTTP requests to pod IPs on `9187` and `9127` unless you turn it off — the NetworkPolicy must allow that egress. |
+| `METRICS_INTERVAL` | `10s` | Sweep period, 5s–5m. The exporters refresh their own caches on the order of seconds, so a faster sweep only rereads the same claims. |
+| `METRICS_RETENTION` | `7d` | Retained window, 1h–30d. Bounds the rollup ring the window is stored in. |
+| `METRICS_PATH` | *empty* | Absolute snapshot path. Empty keeps the window in memory only; a value requires `METRICS_ENABLED=true`. An unusable path fails before listen; an unreadable snapshot merely starts the window empty. |
 | `OBJECTSTOREVIEWER_URL` | *empty* | ObjectStoreViewer link-out; empty hides it. |
 | `PGADMIN_URL` | *empty* | pgAdmin link-out; empty hides it. |
 | `MONITORING_URL` | *empty* | Monitoring link-out; empty hides it. |

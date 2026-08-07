@@ -351,7 +351,7 @@ func (h *Handler) Routes() http.Handler {
 	}
 	// Operation routes exist only in operations mode with a wired
 	// executor: disabled mode registers no route to abuse. They require
-	// the poweruser level or above.
+	// the dba level.
 	if h.cfg.AllowOperations && h.executor != nil {
 		operate := func(next http.HandlerFunc) http.HandlerFunc {
 			return h.requireLevel(authz.TierDBA, "the day-2 operations require the dba level", next)
@@ -696,8 +696,10 @@ func (h *Handler) requireLevel(min authz.Tier, requirement string, next http.Han
 }
 
 // level parses the proxy-asserted authorization level for the request.
-// With no level header configured, no level is ever asserted and every
-// request stays at TierNone — the read-only baseline.
+// With no level header configured no level is ever asserted and every
+// request stays at TierNone, which admits no screen: requireLevel
+// refuses such a deployment outright, so this value never opens
+// anything on its own.
 func (h *Handler) level(r *http.Request) authz.Tier {
 	if h.cfg.LevelHeader == "" {
 		return authz.TierNone

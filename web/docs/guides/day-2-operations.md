@@ -24,14 +24,14 @@ pinned CloudNativePG version, byte-for-byte.
 
 Set `ALLOW_OPERATIONS=true` and apply `deploy/operations-role.yaml`. With
 the flag off there is no route; with the Role absent, RBAC denies the write
-even if the flag is set. The routes require the `poweruser` level (or
-`dba`).
+even if the flag is set. The routes require the `dba` level; a
+`poweruser` is refused.
 
 ## The flow
 
 Operations are **fire-and-observe**, never orchestrated:
 
-1. A `poweruser` opens `/operations` and picks an operation.
+1. A `dba` opens `/operations` and picks an operation.
 2. The confirmation page (`GET`) mints a fresh CSRF token bound to the
    operation and target — this GET has no side effect.
 3. Submitting (`POST`) checks same-origin provenance and the CSRF token,

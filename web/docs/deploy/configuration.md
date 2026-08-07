@@ -28,7 +28,9 @@ used for display and audit attribution only. `TRUSTED_LEVEL_HEADER`
 (default `X-PgToolBox-Level`) carries the authorization level `view`,
 `poweruser`, or `dba`. Setting either to the empty string disables it:
 with no user header there is no identity and every level-gated route is
-denied; with no level header only the read-only baseline is reachable.
+denied; with no level header the console can admit nobody and every
+screen answers 503. Neither setting leaves a reduced console behind —
+they close it.
 
 ## Capability switches
 

@@ -10,12 +10,17 @@ A short vocabulary that the rest of the documentation assumes.
 ## Observer of reported state
 
 pgConsole renders **claims**, not verified facts. Everything it shows comes
-from one of three origins, and every claim keeps its origin from the
+from one of four origins, and every claim keeps its origin from the
 Kubernetes adapter all the way to the rendered page:
 
 - **operator-reported** — what CloudNativePG wrote to a resource's status.
 - **Kubernetes-observed** — what the API server reports about pods, events,
   and resource existence.
+- **instance-reported metrics** — what an instance's or pooler's own
+  metrics endpoint claimed, recorded verbatim on the metrics screens.
+  Times are when this process scraped them, not when the instance
+  computed them, and a failed sweep is a gap in the line rather than a
+  value interpolated across it.
 - **repository-evidence** — what the optional ObjectStoreViewer sidecar
   publishes about the backup destination (never read by pgConsole itself).
 
@@ -63,8 +68,9 @@ pgConsole authenticates nobody. A trusted proxy forwards two headers:
   or `dba`.
 
 The console maps the level onto an ordered ladder and gates route
-admission — never widening its own ServiceAccount authority. A missing,
-empty, or unrecognized level reaches only the read-only baseline. See
+admission — never widening its own ServiceAccount authority. There is no
+ungated baseline: a missing, empty, or unrecognized level reaches no
+screen at all, including the index. See
 [Authorization](../architecture/authorization.md).
 
 ## The closed request-time exceptions

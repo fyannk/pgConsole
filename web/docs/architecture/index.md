@@ -21,6 +21,9 @@ flowchart LR
   K -->|accepted watch events and complete seeds| H[internal/history<br/>bounded scrubbed revisions]
   O -->|immutable snapshot| W[internal/web<br/>view models + html/template]
   H -->|Snapshot, Revision, Diff| W
+  E[instance + pooler<br/>metrics endpoints] -->|periodic scrape| S[internal/scrape]
+  S -->|samples| M[internal/metrics<br/>bounded rollup window]
+  M -->|series| W
   P[trusted proxy headers] --> W
   W -->|complete rendered HTML| U[browser]
   U -->|optional same-origin enhanced GET| W
@@ -32,6 +35,11 @@ flowchart LR
   escapes.
 - **`internal/observe`** runs one bounded, stale-retaining collector per
   resource kind and publishes immutable snapshots.
+- **`internal/scrape`** is the one path that leaves the cluster's API
+  server: with `METRICS_ENABLED` on, it sweeps the instance and pooler
+  exporters over HTTP on ports `9187` and `9127`, bounding each response.
+  **`internal/metrics`** holds the samples in a retention-bounded rollup
+  window that the metrics screens read.
 - **`internal/web`** renders snapshots through `html/template`, applies the
   security headers, and gates routes on the proxy-asserted level.
 - **The browser** receives a complete document. Vendored htmx may replace one
