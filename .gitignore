@@ -1,6 +1,9 @@
 /bin/
 /dist/
 /artifacts/
+# Screenshots taken against a dev cluster land here before anyone thinks
+# about them. Assets the repo does serve live under internal/web/static.
+/*.png
 *.out
 coverage.txt
 .gstack/
