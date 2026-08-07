@@ -80,7 +80,8 @@ package:
 	mkdir -p $(DIST_DIR)
 	for platform in linux/amd64 linux/arm64; do \
 		os=$${platform%/*}; arch=$${platform#*/}; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags='-s -w' \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath \
+			-ldflags='-s -w -X main.version=$(VERSION)' \
 			-o $(DIST_DIR)/pgconsole-$$os-$$arch ./cmd/pgconsole || exit 1; \
 	done
 	cd $(DIST_DIR) && sha256sum pgconsole-* > SHA256SUMS
@@ -96,7 +97,7 @@ DOCKER_BUILD_PROXY_ARGS = \
 	--build-arg http_proxy --build-arg https_proxy --build-arg no_proxy
 
 docker-build:
-	docker build $(DOCKER_BUILD_PROXY_ARGS) --tag $(IMAGE) .
+	docker build $(DOCKER_BUILD_PROXY_ARGS) --build-arg VERSION=$(VERSION) --tag $(IMAGE) .
 
 supply-chain: docker-build
 	./hack/generate-supply-chain-artifacts.sh $(IMAGE) $(ARTIFACT_DIR)/release

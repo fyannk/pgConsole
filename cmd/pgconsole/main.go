@@ -36,7 +36,29 @@ import (
 	"github.com/fyannk/pgConsole/internal/redact"
 )
 
+// version is the release identity, stamped at link time with
+// -X main.version. An unstamped build reports "dev", which is what a
+// local `go build` actually is rather than a placeholder for a version
+// it does not have.
+var version = "dev"
+
 func main() {
+	// The console is configured entirely by environment, so the only
+	// argument it accepts is the one asking what it is. Anything else is
+	// refused rather than ignored: a misspelled flag that changes nothing
+	// silently is how an operator concludes the setting had no effect.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-version":
+			fmt.Println(version)
+			return
+		default:
+			fmt.Fprintf(os.Stderr,
+				"unknown argument %q: pgconsole is configured by environment variables\n",
+				os.Args[1])
+			os.Exit(2)
+		}
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -53,6 +75,11 @@ func run() error {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// The identity is stated once, before anything can fail. The released
+	// image is distroless, so there is no shell to run --version in:
+	// `kubectl logs` is the operator's only route to the version a bug
+	// report asks for.
+	logger.Info("pgconsole starting", slog.String("version", version))
 
 	// Without in-cluster credentials the console still serves: the page
 	// stays the explicit unknown shell and readiness reports 503, which
