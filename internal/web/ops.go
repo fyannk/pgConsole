@@ -101,7 +101,7 @@ func (h *Handler) handleOperationExecute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// This route is reached only past the poweruser level gate, which
+	// This route is reached only past the dba level gate, which
 	// requires a usable forwarded identity; the actor is therefore
 	// present and proxy-asserted under the deployment invariant.
 	actor := ops.Identity{}

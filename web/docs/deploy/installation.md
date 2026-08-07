@@ -71,7 +71,11 @@ intentionally absent because their selectors are deployment-specific — you
 must add them:
 
 1. an **ingress** exception admitting only your proxy to port 3000;
-2. an **egress** exception to the Kubernetes API server.
+2. an **egress** exception to the Kubernetes API server;
+3. with `METRICS_ENABLED` left at its default of `true`, an **egress**
+   exception to the instance and pooler pods on ports `9187` and `9127`.
+   The console scrapes those exporters directly; without this the metrics
+   screens stay empty while every other screen looks healthy.
 
 Change the image and the `orders` / `payments` names to your own.
 
@@ -84,6 +88,11 @@ its own Role — apply the Role only when you set the flag:
 |---|---|---|
 | Day-2 operations (backup, reload, restart, promote) | `ALLOW_OPERATIONS=true` | `deploy/operations-role.yaml` |
 | The dba access-request review panel | `ALLOW_ACCESS_REVIEW=true` | `deploy/access-review-role.yaml` |
+| Cluster-wide image catalogs | `ALLOW_CLUSTER_CATALOGS=true` | `deploy/cluster-catalog-role.yaml` |
+
+The third is the only one that grants anything cluster-scoped: a `get`
+on `clusterimagecatalogs`, and nothing else. Declining it costs one
+panel, which reads `unknown` rather than failing.
 
 With a flag off, RBAC alone denies the writes; with a Role absent, the
 capability cannot act even if the flag is set by mistake. The instance log
@@ -102,9 +111,11 @@ kubectl -n payments rollout status deploy/pgconsole-orders
 kubectl -n payments get pod -l app.kubernetes.io/instance=orders
 ```
 
-Browse to the proxy's external URL. A `view` user sees the read-only
-baseline; `poweruser` additionally reaches operations and logs; `dba`
-additionally reaches the review panel.
+Browse to the proxy's external URL. Every screen is admitted by the
+forwarded level, and no level reaches nothing: `view` reaches the read
+screens; `poweruser` additionally reaches the log tails; `dba`
+additionally reaches the day-2 operations and the review panel. A
+request carrying no level at all reaches no screen, not a reduced one.
 
 For every configurable value, see the
 [configuration reference](../reference/configuration.md).

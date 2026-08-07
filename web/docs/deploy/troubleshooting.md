@@ -19,9 +19,11 @@ kubectl -n <ns> auth can-i --as=system:serviceaccount:<ns>:pgconsole-<name> \
 
 Logs are structured and redacted — they carry an error **category**, never
 a request URL, header value, or injected token. Because the console's entire
-authority is a namespaced Role on its own ServiceAccount — nothing
-cluster-scoped, no impersonation — `kubectl auth can-i --as` that
-ServiceAccount reproduces exactly what the console can and cannot do.
+authority is namespaced Roles on its own ServiceAccount — with no
+impersonation, and the single opt-in `ClusterRole` in
+`deploy/cluster-catalog-role.yaml` the only cluster-scoped grant —
+`kubectl auth can-i --as` that ServiceAccount reproduces exactly what the
+console can and cannot do.
 
 ## Panels and sections
 
@@ -38,7 +40,7 @@ ServiceAccount reproduces exactly what the console can and cannot do.
 | Symptom | Meaning | Fix |
 |---|---|---|
 | Every page: "identity required" | No usable `X-Forwarded-User` reached the console. | Fix the proxy path; confirm the NetworkPolicy admits only the proxy. |
-| A real user gets 403 on operations / review | The asserted `X-PgToolBox-Level` is below the required level, or unset. | Have the proxy assert `poweruser` (operations, logs) or `dba` (review); confirm `TRUSTED_LEVEL_HEADER`. |
+| A real user gets 403 on operations / review | The asserted `X-PgToolBox-Level` is below the required level, or unset. | Have the proxy assert `poweruser` (logs) or `dba` (operations, review); confirm `TRUSTED_LEVEL_HEADER`. |
 | `/operations` or `/access-requests` is 404 | The capability is disabled — the route does not exist. | Set the flag **and** apply the matching Role. |
 | Log tail is 403 for a `view` user | The tail requires `poweruser`; its affordance is hidden below. | Expected; grant a higher level. |
 | A POST fails "confirmation expired or invalid" | The CSRF token aged out (10 min) or the request was cross-origin. | Reload the confirmation page for a fresh token. |

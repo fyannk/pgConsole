@@ -34,10 +34,12 @@ const (
 	TierNone Tier = iota
 	// TierView is the explicit read-only level.
 	TierView
-	// TierPowerUser additionally may execute the enumerated day-2
-	// operations, subject to the operations master switch.
+	// TierPowerUser additionally reaches the bounded instance and pooler
+	// log tails.
 	TierPowerUser
-	// TierDBA additionally reaches the access-request review panel.
+	// TierDBA additionally may execute the enumerated day-2 operations,
+	// subject to the operations master switch, and reaches the
+	// access-request review panel.
 	TierDBA
 )
 
