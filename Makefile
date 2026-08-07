@@ -8,7 +8,7 @@ DIST_DIR ?= dist
 ARTIFACT_DIR ?= artifacts
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build clean dev-up test test-race test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln audit check docs package docker-build supply-chain release-check
+.PHONY: build clean dev-up test test-race test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln audit check docs package docker-build supply-chain supply-chain-published release-check
 
 build:
 	mkdir -p bin
@@ -100,6 +100,13 @@ docker-build:
 	docker build $(DOCKER_BUILD_PROXY_ARGS) --build-arg VERSION=$(VERSION) --tag $(IMAGE) .
 
 supply-chain: docker-build
+	./hack/generate-supply-chain-artifacts.sh $(IMAGE) $(ARTIFACT_DIR)/release
+
+# The same reports for an image that is already published, named by its
+# registry digest. It deliberately does not build: the artifact under test
+# is the one the registry serves, so rebuilding it here would describe
+# bytes nobody can pull.
+supply-chain-published:
 	./hack/generate-supply-chain-artifacts.sh $(IMAGE) $(ARTIFACT_DIR)/release
 
 release-check: check docs test-integration test-scale test-ui test-container test-e2e package test-multiarch supply-chain

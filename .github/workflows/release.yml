@@ -124,10 +124,12 @@ jobs:
           platforms: arm64
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
-      - name: Build release assets and supply-chain reports
+      # Binaries only. The supply-chain reports run after the push, against
+      # the image the registry actually serves.
+      - name: Build release binaries
         env:
           TAG: ${{ steps.release.outputs.tag }}
-        run: make package supply-chain VERSION="${TAG}" IMAGE="pgconsole:${TAG}"
+        run: make package VERSION="${TAG}"
 
       - name: Attest release binaries
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -183,6 +185,16 @@ jobs:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
+
+      # Scans the pushed image by digest, so the SBOM, licence report, and
+      # vulnerability result published as release assets describe exactly
+      # what `docker pull` resolves. Vulnerabilities are already gated
+      # before this point: the tag's CI run builds and scans the same
+      # source, and this job refuses to start unless that run succeeded.
+      - name: Supply-chain reports for the published image
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: make supply-chain-published IMAGE="${IMAGE_NAME}@${DIGEST}"
 
       - name: Publish GitHub Release
         shell: bash

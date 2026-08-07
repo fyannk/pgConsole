@@ -18,6 +18,17 @@ trap cleanup EXIT INT TERM
 mkdir -p "$artifact_dir"
 docker_socket_group=$(stat -c '%g' /var/run/docker.sock)
 
+# The scanners below read through the Docker daemon, so an image named by
+# registry digest has to be local first. Pulling it is what makes these
+# reports describe the published bytes rather than a same-source rebuild:
+# the two are never identical, because .dockerignore withholds .git from
+# the image build and the packaged binaries carry a VCS stamp.
+case "$image" in
+    *@sha256:*)
+        docker pull --quiet "$image" > /dev/null
+        ;;
+esac
+
 docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
     "$syft_image" "$image" --output spdx-json > "$artifact_dir/sbom.spdx.json"
 if ! go run "github.com/google/go-licenses@$go_licenses_version" report ./... \
@@ -31,10 +42,20 @@ if grep -En ',(Unknown|Forbidden)$' "$artifact_dir/licenses.csv"; then
     exit 1
 fi
 
-image_id=$(docker image inspect --format '{{.Id}}' "$image")
 architecture=$(docker image inspect --format '{{.Architecture}}' "$image")
+case "$image" in
+    *@sha256:*)
+        # A reference carrying a registry digest names the published image,
+        # so the digest recorded here is the one a puller resolves — not a
+        # local image ID, which identifies a rebuild nobody can fetch.
+        digest=${image##*@}
+        ;;
+    *)
+        digest=$(docker image inspect --format '{{.Id}}' "$image")
+        ;;
+esac
 printf '{"image":"%s","digest":"%s","architecture":"%s"}\n' \
-    "$image" "$image_id" "$architecture" > "$artifact_dir/image-digest.json"
+    "$image" "$digest" "$architecture" > "$artifact_dir/image-digest.json"
 
 docker run --rm \
     --user "$(id -u):$(id -g)" \
@@ -50,4 +71,4 @@ test -s "$artifact_dir/sbom.spdx.json"
 test -s "$artifact_dir/licenses.csv"
 test -s "$artifact_dir/image-digest.json"
 test -s "$artifact_dir/vulnerability.json"
-printf 'supply-chain checks passed for %s: SPDX SBOM, image digest, license report, and vulnerability result retained in %s\n' "$image_id" "$artifact_dir"
+printf 'supply-chain checks passed for %s (%s): SPDX SBOM, image digest, license report, and vulnerability result retained in %s\n' "$image" "$digest" "$artifact_dir"
