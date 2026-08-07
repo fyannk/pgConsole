@@ -26,6 +26,9 @@ LABEL org.opencontainers.image.title="pgConsole" \
       org.opencontainers.image.version="${VERSION}"
 COPY --from=build /out/pgconsole /pgconsole
 COPY LICENSE /licenses/pgconsole/LICENSE
+# The vendored front-end assets are embedded in the binary above, so their
+# licences have to travel with the image that carries them.
+COPY third_party/ /licenses/pgconsole/third_party/
 USER 65532:65532
 EXPOSE 3000
 ENTRYPOINT ["/pgconsole"]

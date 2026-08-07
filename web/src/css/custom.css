@@ -1,25 +1,257 @@
 /**
- * pgConsole docs theme overrides. A teal accent distinguishes it from the
- * blue pgToolBox operator site while staying in the same family.
+ * pgConsole docs theme.
+ *
+ * The palette is the console's own, converted from the OKLCH tokens in
+ * internal/web/static/app.css so the documentation and the product it
+ * documents are recognisably the same thing: navy chrome, the mark's
+ * light blue for the "Console" half of the wordmark, and the console's
+ * accent blue for links.
  */
 
 :root {
-  --ifm-color-primary: #0d9488;
-  --ifm-color-primary-dark: #0c8478;
-  --ifm-color-primary-darker: #0b7d71;
-  --ifm-color-primary-darkest: #09675d;
-  --ifm-color-primary-light: #0ea699;
-  --ifm-color-primary-lighter: #10b3a4;
-  --ifm-color-primary-lightest: #14c8b8;
+  /* Console --accent oklch(50% 0.15 252) and its ramp. */
+  --ifm-color-primary: #0064b5;
+  --ifm-color-primary-dark: #0052a1;
+  --ifm-color-primary-darker: #004998;
+  --ifm-color-primary-darkest: #003481;
+  --ifm-color-primary-light: #2076c9;
+  --ifm-color-primary-lighter: #3e89d7;
+  --ifm-color-primary-lightest: #67aaed;
   --ifm-code-font-size: 95%;
+
+  /* Brand constants, used by the navbar lockup in both themes. */
+  --pgc-navy: #0c3164;
+  --pgc-navy-border: #072754;
+  --pgc-logo-blue: #60bdeb;
+  --pgc-on-navy: #f7fafd;
+  --pgc-on-navy-muted: #a8c4e0;
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #2dd4bf;
-  --ifm-color-primary-dark: #14c8b8;
-  --ifm-color-primary-darker: #0ea699;
-  --ifm-color-primary-darkest: #0d9488;
-  --ifm-color-primary-light: #5eead4;
-  --ifm-color-primary-lighter: #99f6e4;
-  --ifm-color-primary-lightest: #ccfbf1;
+  /* Lifted for contrast on the dark surface; same hue family. */
+  --ifm-color-primary: #67aaed;
+  --ifm-color-primary-dark: #3e89d7;
+  --ifm-color-primary-darker: #2076c9;
+  --ifm-color-primary-darkest: #0064b5;
+  --ifm-color-primary-light: #8cc2f4;
+  --ifm-color-primary-lighter: #a9d2f7;
+  --ifm-color-primary-lightest: #cfe6fb;
+}
+
+/* Navy chrome in both themes, exactly as the console's topbar: the mark
+   sits on its own colour while the page body stays light or dark. */
+.navbar {
+  --ifm-navbar-background-color: var(--pgc-navy);
+  --ifm-navbar-link-color: var(--pgc-on-navy);
+  --ifm-navbar-link-hover-color: var(--pgc-logo-blue);
+  --ifm-navbar-search-input-background-color: rgb(255 255 255 / 12%);
+  --ifm-navbar-search-input-color: var(--pgc-on-navy);
+  --ifm-navbar-search-input-placeholder-color: var(--pgc-on-navy-muted);
+  border-bottom: 1px solid var(--pgc-navy-border);
+  color: var(--pgc-on-navy);
+}
+
+.navbar__link--active,
+.navbar__link:hover {
+  color: var(--pgc-logo-blue);
+}
+
+/* The wordmark. The console renders it as markup — pg<span>Console</span>
+   — which the navbar title cannot carry, so the two halves are drawn as
+   pseudo-elements and the text node is collapsed rather than removed.
+   The logo image keeps a real alt so the link has a name even where
+   pseudo-element content is left out of the accessible name. */
+.navbar__brand .navbar__title {
+  font-size: 0;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.navbar__brand .navbar__title::before,
+.navbar__brand .navbar__title::after {
+  font-size: 1.3rem;
+}
+
+.navbar__brand .navbar__title::before {
+  color: var(--pgc-on-navy);
+  content: 'pg';
+}
+
+.navbar__brand .navbar__title::after {
+  color: var(--pgc-logo-blue);
+  content: 'Console';
+}
+
+.navbar__logo {
+  height: 1.85rem;
+  margin-right: 0.55rem;
+}
+
+/* Dropdowns inherit the navy bar, so their own surface has to be reset
+   or the menu renders as light text on a light panel. */
+.navbar .dropdown__menu {
+  background-color: var(--ifm-background-surface-color);
+}
+
+.navbar .dropdown__link {
+  color: var(--ifm-font-color-base);
+}
+
+.navbar .dropdown__link:hover {
+  color: var(--ifm-color-primary);
+}
+
+.navbar__toggle,
+.navbar-sidebar__brand .navbar__title::before,
+.navbar-sidebar__brand .navbar__title::after {
+  color: var(--pgc-on-navy);
+}
+
+.navbar-sidebar {
+  --ifm-navbar-background-color: var(--pgc-navy);
+}
+
+/* GitHub link: an icon-only item, so it carries its mark as a mask and
+   its accessible name from aria-label rather than visible text. */
+.navbar-github {
+  align-items: center;
+  display: flex;
+  padding: 0.25rem 0.5rem;
+}
+
+.navbar-github::before {
+  background-color: var(--pgc-on-navy);
+  content: '';
+  display: block;
+  height: 1.4rem;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z'/%3E%3C/svg%3E");
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  width: 1.4rem;
+}
+
+.navbar-github:hover::before {
+  background-color: var(--pgc-logo-blue);
+}
+
+/* The search field sits on navy; its icon and text must follow. */
+.navbar .DocSearch-Button,
+.navbar .navbar__search-input {
+  color: var(--pgc-on-navy);
+}
+
+/* Landing page. The hero repeats the console's topbar lockup at scale:
+   navy field, the mark, and the two-tone wordmark. */
+.pgc-hero {
+  background: linear-gradient(180deg, var(--pgc-navy) 0%, #123a72 100%);
+  color: var(--pgc-on-navy);
+  padding: 4rem 1rem;
+}
+
+.pgc-hero__inner {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2.5rem;
+  justify-content: center;
+  margin: 0 auto;
+  max-width: 60rem;
+}
+
+.pgc-hero__mark {
+  height: auto;
+  max-width: 220px;
+  width: 100%;
+}
+
+.pgc-hero__copy {
+  flex: 1 1 22rem;
+}
+
+.pgc-hero__title {
+  font-size: clamp(2.75rem, 7vw, 4rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0 0 0.75rem;
+}
+
+.pgc-hero__title span {
+  color: var(--pgc-logo-blue);
+}
+
+.pgc-hero__tagline {
+  color: var(--pgc-on-navy-muted);
+  font-size: 1.25rem;
+  margin: 0 0 1.75rem;
+  max-width: 32ch;
+}
+
+.pgc-hero__tagline code {
+  background: rgb(255 255 255 / 12%);
+  border: none;
+  color: var(--pgc-on-navy);
+}
+
+.pgc-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+/* The outline button sits on navy, so Infima's dark-on-light default
+   would render it nearly invisible. */
+.pgc-hero__ghost.button--outline {
+  border-color: rgb(255 255 255 / 45%);
+  color: var(--pgc-on-navy);
+}
+
+.pgc-hero__ghost.button--outline:hover {
+  background: rgb(255 255 255 / 12%);
+  border-color: var(--pgc-logo-blue);
+  color: var(--pgc-on-navy);
+}
+
+.pgc-main {
+  margin: 0 auto;
+  max-width: 60rem;
+  padding: 3.5rem 1rem 4.5rem;
+}
+
+.pgc-lede {
+  font-size: 1.125rem;
+  margin: 0 0 2.75rem;
+}
+
+.pgc-grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
+}
+
+.pgc-card {
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+}
+
+.pgc-card h2 {
+  font-size: 1.125rem;
+  margin: 0 0 0.5rem;
+}
+
+.pgc-card p {
+  color: var(--ifm-color-emphasis-800);
+  margin: 0;
+}
+
+/* The scope disclaimer is a statement of limits, not a warning: it uses
+   the neutral emphasis ramp rather than a status colour. */
+.pgc-note {
+  background: var(--ifm-color-emphasis-100);
+  border-left: 4px solid var(--ifm-color-primary);
+  border-radius: 0.25rem;
+  margin-top: 2.75rem;
+  padding: 1.25rem 1.5rem;
 }

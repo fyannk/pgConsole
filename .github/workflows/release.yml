@@ -84,7 +84,7 @@ jobs:
             exit 1
           fi
           successful_run=""
-          for attempt in {1..180}; do
+          for attempt in {1..120}; do
             run="$(
               gh api --method GET \
                 "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
@@ -92,14 +92,14 @@ jobs:
                 --jq "[.workflow_runs[] | select(.head_sha == \"${tag_sha}\")][0] | [.id, .status, (.conclusion // \"\")] | @tsv"
             )"
             if [[ -z "${run}" ]]; then
-              echo "waiting for CI to start for ${TAG} (${attempt}/180)"
-              sleep 10
+              echo "waiting for CI to start for ${TAG} (${attempt}/120)"
+              sleep 30
               continue
             fi
             IFS=$'\t' read -r run_id run_status run_conclusion <<< "${run}"
             if [[ "${run_status}" != "completed" ]]; then
-              echo "waiting for CI run ${run_id} (${attempt}/180)"
-              sleep 10
+              echo "waiting for CI run ${run_id} (${attempt}/120)"
+              sleep 30
               continue
             fi
             if [[ "${run_conclusion}" != "success" ]]; then
@@ -110,7 +110,7 @@ jobs:
             break
           done
           if [[ -z "${successful_run}" ]]; then
-            echo "CI did not complete for ${TAG} within 30 minutes" >&2
+            echo "CI did not complete for ${TAG} within 60 minutes" >&2
             exit 1
           fi
           echo "sha=${tag_sha}" >> "${GITHUB_OUTPUT}"

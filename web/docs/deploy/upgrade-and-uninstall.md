@@ -5,6 +5,21 @@ title: Upgrade and uninstall
 
 # Upgrade and uninstall
 
+## Compatibility policy
+
+pgConsole is **pre-1.0**. Within 0.x there is no compatibility guarantee: a
+minor release may rename or remove environment variables, change route paths,
+or change the forwarded-header contract, without a deprecation period.
+
+- Pin an **exact** image tag (`v0.1.0`), never a floating one.
+- Read the [release notes](https://github.com/fyannk/pgConsole/releases) and
+  the [changelog](https://github.com/fyannk/pgConsole/blob/main/CHANGELOG.md)
+  before upgrading.
+- Re-check the [configuration reference](../reference/configuration.md) after
+  every upgrade: an environment variable the console no longer recognises is
+  ignored silently, so a setting can stop taking effect without an error.
+- Security fixes go to the most recent 0.x minor only; there are no backports.
+
 ## Upgrade
 
 pgConsole is stateless by default — no database, session store, or persistent

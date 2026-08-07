@@ -33,7 +33,7 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `HISTORY_PATH` | *empty* | Absolute bbolt journal path. Empty keeps history in memory only; a value requires `HISTORY_ENABLED=true`, a writable PVC, and one replica. |
 | `METRICS_ENABLED` | `true` | Sweeps the instance and pooler exporters and serves the metrics screens. Strict boolean. On by default, so the console makes direct HTTP requests to pod IPs on `9187` and `9127` unless you turn it off — the NetworkPolicy must allow that egress. |
 | `METRICS_INTERVAL` | `10s` | Sweep period, 5s–5m. The exporters refresh their own caches on the order of seconds, so a faster sweep only rereads the same claims. |
-| `METRICS_RETENTION` | `7d` | Retained window, 1h–30d. Bounds the rollup ring the window is stored in. |
+| `METRICS_RETENTION` | `168h` | Retained window, `1h`–`720h`. Bounds the rollup ring the window is stored in. |
 | `METRICS_PATH` | *empty* | Absolute snapshot path. Empty keeps the window in memory only; a value requires `METRICS_ENABLED=true`. An unusable path fails before listen; an unreadable snapshot merely starts the window empty. |
 | `OBJECTSTOREVIEWER_URL` | *empty* | ObjectStoreViewer link-out; empty hides it. |
 | `PGADMIN_URL` | *empty* | pgAdmin link-out; empty hides it. |
