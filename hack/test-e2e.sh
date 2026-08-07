@@ -416,4 +416,26 @@ done
 grep -qF "reader" "$OUT/review.html" || { log "review panel misses the role picker options"; exit 1; }
 log "review ok (poweruser 403, dba 200 with the pending request and role picker)"
 
+# The decision write: the only mutation this panel performs, and the one
+# the Role exists to authorize. Reading the panel proves nothing about
+# it. The write is a merge patch, so RBAC requires the patch verb; a Role
+# granting update instead is refused by the API server, the console
+# reports 502, and every read asserted above still passes.
+approve_token=$(sed -n '/action="\/access-requests\/alice-orders\/approve"/,/<\/form>/p' "$OUT/review.html" \
+  | sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' | head -1)
+[ -n "$approve_token" ] || { log "approve form carries no CSRF token"; exit 1; }
+decide=$(curl -s -o "$OUT/decision.html" -w '%{http_code}' --max-time 15 \
+  -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" \
+  -X POST --data "csrf=${approve_token}" --data "role=reader" \
+  "$base/access-requests/alice-orders/approve")
+[ "$decide" = "200" ] || { log "approve = $decide, want 200"; exit 1; }
+
+# The console reporting success is not the fact; the request status is.
+i=0
+until [ "$(kubectl -n payments get pgtoolboxaccessrequest alice-orders \
+    -o jsonpath='{.status.state}' 2>/dev/null)" = "approved" ]; do
+  i=$((i + 2)); [ "$i" -le 30 ] || { log "decision never reached the request status"; exit 1; }; sleep 2
+done
+log "decision ok (approve 200, request status recorded as approved)"
+
 log "end-to-end test passed; artifacts in $OUT/"
