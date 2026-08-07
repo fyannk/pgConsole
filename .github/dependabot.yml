@@ -51,6 +51,27 @@ updates:
           - minor
           - patch
 
+  # The browser checks pin playwright and axe-core exactly, so nothing moves
+  # them without a bump landing here.
+  - package-ecosystem: npm
+    directory: /hack/uitest
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:20"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      uitest-routine-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: docker
     directory: /
     schedule:
