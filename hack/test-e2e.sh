@@ -116,6 +116,27 @@ ID_LEVEL="X-PgToolBox-Level: poweruser"
 page() { curl -fsS --max-time 5 -H "$ID_USER" -H "$ID_LEVEL" "$base/cluster/overview" 2>/dev/null || true; }
 page_at() { curl -fsS --max-time 5 -H "$ID_USER" -H "$ID_LEVEL" "$base$1" 2>/dev/null || true; }
 
+# rollout status returns once the new replica is available, but the old
+# one is still terminating and the NodePort can keep routing to it for a
+# few seconds after its listener has closed. A probe landing there is
+# refused, and under set -e an unretried curl then kills the journey
+# with curl's own exit code. Settled means the old pod is gone — giving
+# kube-proxy time to drop its endpoint — and the console answers again;
+# only then are the unretried probes that follow trustworthy.
+settle_console_rollout() {
+  kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
+  i=0
+  until [ "$(kubectl -n payments get pods \
+      -l app.kubernetes.io/name=pgconsole,app.kubernetes.io/instance=orders \
+      --no-headers 2>/dev/null | wc -l)" -eq 1 ]; do
+    i=$((i + 2)); [ "$i" -le 120 ] || { log "old console replica never terminated $1"; exit 1; }; sleep 2
+  done
+  i=0
+  until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
+    i=$((i + 2)); [ "$i" -le 60 ] || { log "console unreachable $1"; exit 1; }; sleep 2
+  done
+}
+
 i=0
 until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
   i=$((i + 2))
@@ -305,11 +326,7 @@ log "day-2 operations: level-gated, confirmed, audited, RBAC-bounded"
 # Enable operations; the operations Role is deliberately not applied yet,
 # so RBAC must block the mutation even with the flag on and the level met.
 kubectl -n payments set env deployment/pgconsole-orders ALLOW_OPERATIONS=true > /dev/null
-kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
-i=0
-until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
-  i=$((i + 2)); [ "$i" -le 60 ] || { log "console unreachable after enabling operations"; exit 1; }; sleep 2
-done
+settle_console_rollout "after enabling operations"
 
 # Operations require the dba level: view is refused, and so is poweruser,
 # which reaches every read screen and stops short of the day-2 surface.
@@ -390,12 +407,8 @@ until kubectl apply -f hack/testdata/pgtoolbox-samples.yaml; do
   sleep 5
 done
 kubectl apply -f deploy/access-review-role.yaml
-kubectl -n payments set env deployment/pgconsole-orders ALLOW_ACCESS_REVIEW=true
-kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s
-i=0
-until curl -fsS --max-time 5 "$base/healthz" > /dev/null 2>&1; do
-  i=$((i + 2)); [ "$i" -le 60 ] || { log "console unreachable after enabling review"; exit 1; }; sleep 2
-done
+kubectl -n payments set env deployment/pgconsole-orders ALLOW_ACCESS_REVIEW=true > /dev/null
+settle_console_rollout "after enabling review"
 
 # The panel requires dba: a poweruser is refused.
 rev_low=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
