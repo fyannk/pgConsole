@@ -4,6 +4,15 @@
 # proxy in front of this Service and owns the exposure (Route, Ingress,
 # HTTPRoute, or ClusterIP); nothing here is reachable without it.
 #
+# Deploying this standalone means you own the trust boundary the console
+# assumes. Your proxy must SET X-Forwarded-User and X-PgToolBox-Level from
+# its own authentication result and DROP any copy the client sent. Most
+# proxies forward unrecognised request headers verbatim, so a header the
+# proxy does not explicitly overwrite is one an authenticated view-tier
+# user can set to "dba" from their own browser. The NetworkPolicy ingress
+# exception below is what makes those headers trustworthy at all: without
+# it, anything in the cluster can reach port 3000 and assert any level.
+#
 # The Role below is the application's entire authority: read-only, nothing
 # on the secret resource, no mutating verb. RBAC cannot pin list/watch by
 # resourceNames, so the namespace plus application-side selection is the
@@ -201,6 +210,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pgconsole
+          # CHANGE ME. pgconsole:dev exists only after a local
+          # `make docker-build`; applied as-is this Deployment stays in
+          # ImagePullBackOff. Use a released tag, for example
+          # ghcr.io/fyannk/pgconsole:v0.1.0.
           image: pgconsole:dev
           ports:
             - name: http

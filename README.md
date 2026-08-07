@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/static/img/favicon.svg" width="88" alt="pgConsole logo">
+  <img src="web/static/img/logo.png" width="150" alt="pgConsole logo">
 </p>
 
 <h1 align="center">pgConsole</h1>
@@ -14,6 +14,7 @@
   <a href="https://github.com/fyannk/pgConsole/actions/workflows/docs.yml"><img src="https://github.com/fyannk/pgConsole/actions/workflows/docs.yml/badge.svg" alt="Documentation status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache-2.0 license"></a>
   <img src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white" alt="Go 1.26">
+  <img src="https://img.shields.io/badge/status-0.x%20pre--1.0-orange.svg" alt="Pre-1.0">
 </p>
 
 pgConsole is a per-cluster operational console for one CloudNativePG
@@ -96,6 +97,22 @@ proxy, exposure, default-deny NetworkPolicy, and exact namespaced RBAC.
 > pgConsole intentionally provides no authentication or TLS. Its forwarded
 > identity and authorization-level headers are trustworthy only behind the
 > operator-managed proxy and network boundary. Never expose port 3000 directly.
+>
+> Deploying standalone means you own that boundary. Your proxy must **set**
+> `X-Forwarded-User` and `X-PgToolBox-Level` from its own authentication
+> result and **drop** any copy the client sent — most proxies forward
+> unrecognized request headers verbatim, so a header the proxy does not
+> explicitly overwrite is one an authenticated `view` user can set to `dba`
+> from their own browser. See
+> [Running behind a proxy](web/docs/guides/running-behind-a-proxy.md).
+
+## 📌 Project status
+
+pgConsole is **pre-1.0**. The capabilities above are implemented and covered
+by the test suites, but 0.x releases may change environment variables, route
+paths, and the forwarded-header contract without a deprecation period. Pin an
+exact image tag and read the release notes before upgrading. Security fixes go
+to the most recent 0.x minor only — see [`SECURITY.md`](SECURITY.md).
 
 ## 📚 Documentation
 

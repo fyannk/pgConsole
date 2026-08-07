@@ -7,7 +7,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'pgConsole',
   tagline: 'An operational console for one CloudNativePG cluster, read-only by default',
-  favicon: 'img/favicon.svg',
+  favicon: 'img/favicon.ico',
 
   // GitHub Pages for fyannk/pgConsole.
   url: 'https://fyannk.github.io',
@@ -40,10 +40,13 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           includeCurrentVersion: true,
           versions: {
+            // There is no versioned_docs snapshot yet, so "current" is the
+            // released documentation. It must not carry the "unreleased"
+            // banner, which would put that warning on every published page.
             current: {
-              label: 'Dev',
+              label: '0.1.0',
               badge: true,
-              banner: 'unreleased',
+              banner: 'none',
             },
           },
         },
@@ -70,8 +73,30 @@ const config: Config = {
     ],
   ],
   themeConfig: {
+    // The card unfurled by chat clients and social previews: the same
+    // lockup the console's own topbar shows, so a link to the docs is
+    // recognisably the product.
+    image: 'img/social-card.png',
+    metadata: [
+      {
+        name: 'description',
+        content:
+          'pgConsole is a per-cluster operational console for one CloudNativePG cluster: source-attributed, bounded, read-only by default.',
+      },
+    ],
+    colorMode: {
+      respectPrefersColorScheme: true,
+    },
     navbar: {
       title: 'pgConsole',
+      logo: {
+        alt: 'pgConsole',
+        src: 'img/logo.png',
+        // The navbar is navy in both themes, so the mark is the same file.
+        // Without srcDark, Docusaurus renders only a light-themed image and
+        // the logo disappears entirely in dark mode.
+        srcDark: 'img/logo.png',
+      },
       items: [
         {
           type: 'docSidebar',
@@ -83,17 +108,39 @@ const config: Config = {
           type: 'docsVersionDropdown',
           position: 'right',
         },
+        {
+          href: 'https://github.com/fyannk/pgConsole',
+          position: 'right',
+          className: 'navbar-github',
+          'aria-label': 'pgConsole on GitHub',
+        },
       ],
     },
     footer: {
       style: 'dark',
+      logo: {
+        alt: 'pgConsole',
+        src: 'img/logo.png',
+        srcDark: 'img/logo.png',
+        href: 'https://github.com/fyannk/pgConsole',
+        width: 84,
+      },
+      copyright: `Copyright © ${new Date().getFullYear()} pgConsole contributors. Apache-2.0 licensed.`,
       links: [
         {
-          title: 'pgtoolbox family',
+          title: 'Project',
           items: [
             {
-              label: 'pgToolBox operator',
-              href: 'https://fyannk.github.io/pgtoolbox/',
+              label: 'GitHub',
+              href: 'https://github.com/fyannk/pgConsole',
+            },
+            {
+              label: 'Releases',
+              href: 'https://github.com/fyannk/pgConsole/releases',
+            },
+            {
+              label: 'Report a vulnerability',
+              href: 'https://github.com/fyannk/pgConsole/security/policy',
             },
           ],
         },

@@ -2,8 +2,9 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest published release. Before the
-first release, reports should target the current `main` branch.
+Security fixes are provided for the latest published release. pgConsole is
+pre-1.0: only the most recent 0.x minor receives fixes, and there are no
+backports to earlier ones.
 
 ## Reporting a vulnerability
 

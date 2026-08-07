@@ -84,7 +84,7 @@ jobs:
             exit 1
           fi
           successful_run=""
-          for attempt in {1..180}; do
+          for attempt in {1..120}; do
             run="$(
               gh api --method GET \
                 "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
@@ -92,14 +92,14 @@ jobs:
                 --jq "[.workflow_runs[] | select(.head_sha == \"${tag_sha}\")][0] | [.id, .status, (.conclusion // \"\")] | @tsv"
             )"
             if [[ -z "${run}" ]]; then
-              echo "waiting for CI to start for ${TAG} (${attempt}/180)"
-              sleep 10
+              echo "waiting for CI to start for ${TAG} (${attempt}/120)"
+              sleep 30
               continue
             fi
             IFS=$'\t' read -r run_id run_status run_conclusion <<< "${run}"
             if [[ "${run_status}" != "completed" ]]; then
-              echo "waiting for CI run ${run_id} (${attempt}/180)"
-              sleep 10
+              echo "waiting for CI run ${run_id} (${attempt}/120)"
+              sleep 30
               continue
             fi
             if [[ "${run_conclusion}" != "success" ]]; then
@@ -110,7 +110,7 @@ jobs:
             break
           done
           if [[ -z "${successful_run}" ]]; then
-            echo "CI did not complete for ${TAG} within 30 minutes" >&2
+            echo "CI did not complete for ${TAG} within 60 minutes" >&2
             exit 1
           fi
           echo "sha=${tag_sha}" >> "${GITHUB_OUTPUT}"
@@ -124,10 +124,12 @@ jobs:
           platforms: arm64
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
-      - name: Build release assets and supply-chain reports
+      # Binaries only. The supply-chain reports run after the push, against
+      # the image the registry actually serves.
+      - name: Build release binaries
         env:
           TAG: ${{ steps.release.outputs.tag }}
-        run: make package supply-chain VERSION="${TAG}" IMAGE="pgconsole:${TAG}"
+        run: make package VERSION="${TAG}"
 
       - name: Attest release binaries
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -183,6 +185,16 @@ jobs:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
+
+      # Scans the pushed image by digest, so the SBOM, licence report, and
+      # vulnerability result published as release assets describe exactly
+      # what `docker pull` resolves. Vulnerabilities are already gated
+      # before this point: the tag's CI run builds and scans the same
+      # source, and this job refuses to start unless that run succeeded.
+      - name: Supply-chain reports for the published image
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: make supply-chain-published IMAGE="${IMAGE_NAME}@${DIGEST}"
 
       - name: Publish GitHub Release
         shell: bash

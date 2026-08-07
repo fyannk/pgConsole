@@ -54,7 +54,8 @@ enforced by scans and tests:
 3. **The console decides no authorization of its own.** Route admission is
    the trusted proxy's asserted `X-PgToolBox-Level`; there is no
    SubjectAccessReview and no cluster-scoped grant. A missing, empty, or
-   unknown level reaches only the read-only baseline.
+   unknown level reaches **nothing** — every content route is gated and
+   there is no ungated baseline. The fail-safe direction is closed.
 4. **Preserve uncertainty.** No layer may turn a broken watch, a forbidden
    response, or missing data into a healthy, current cluster: honest values
    are `unknown` and `stale`.

@@ -5,10 +5,17 @@ title: Installation
 
 # Installation
 
-pgConsole is one static binary serving HTTP on port 3000. It is normally
-deployed by the **pgToolBox operator**, which owns the proxy, exposure,
-NetworkPolicy, and RBAC. You can also deploy it standalone from the example
-manifests, provided you put a trusted, confining proxy in front of it.
+pgConsole is one static binary serving HTTP on port 3000. It is designed to
+be deployed by the **pgToolBox operator**, which owns the proxy, exposure,
+NetworkPolicy, and RBAC.
+
+:::info The operator is not published yet
+As of 0.1.0 the pgToolBox operator and its `PgConsole` API are not publicly
+available, so the standalone path below is the only way to install
+pgConsole. Deploying standalone means **you** own the trust boundary the
+console assumes — read
+[Running behind a proxy](../guides/running-behind-a-proxy.md) first.
+:::
 
 ## Prerequisites
 
@@ -44,21 +51,22 @@ manifest's `securityContext` encodes this, and its resource budget requests
 
 pgConsole is validated against specific tested CloudNativePG + Kubernetes
 tuples rather than open-ended version floors — the end-to-end test pins
-CloudNativePG 1.30.0 on Kubernetes 1.34.1. Status fields that an older
+CloudNativePG 1.30.0 on Kubernetes 1.34.0. Status fields that an older
 supported CloudNativePG version does not report render as `unknown`, never
 as errors.
-
-## With the pgToolBox operator (recommended)
-
-Declare one `PgConsole` object; the operator deploys the console, the
-`pgtoolbox-proxy`, the exposure, the default-deny NetworkPolicy with the
-proxy ingress exception, and the exact Role. See the pgToolBox
-documentation for the `PgConsole` API.
 
 ## Standalone (example manifests)
 
 `deploy/kubernetes-example.yaml` mirrors what the operator generates for a
 read-only console observing the cluster `orders` in namespace `payments`:
+
+:::caution Edit the manifest before applying it
+The example pins `image: pgconsole:dev`, which exists only after a local
+`make docker-build`. Replace it with a released image — see
+[Prerequisites](#prerequisites) — and change the `orders` / `payments`
+names to your own. Applied unedited, the Deployment stays in
+`ImagePullBackOff`.
+:::
 
 ```bash
 kubectl apply -f deploy/kubernetes-example.yaml
@@ -66,7 +74,7 @@ kubectl apply -f deploy/kubernetes-example.yaml
 
 It creates a ServiceAccount (token projected only into the container, no
 pod-wide automount), the read-only Role and binding, a Service, a
-**default-deny** NetworkPolicy, and the Deployment. Two exceptions are
+**default-deny** NetworkPolicy, and the Deployment. Three exceptions are
 intentionally absent because their selectors are deployment-specific — you
 must add them:
 

@@ -29,7 +29,7 @@ console. The fail-safe direction is closed, never an elevation.
 ## The confinement invariant
 
 The headers mean nothing without the network boundary. Deploy a
-default-deny NetworkPolicy and add exactly two exceptions:
+default-deny NetworkPolicy and add exactly three exceptions:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
