@@ -20,22 +20,43 @@ concurrency:
 
 jobs:
   analyze:
-    name: Analyze Go
+    name: Analyze ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
       security-events: write
+    strategy:
+      # One language failing to analyse should not hide the other's result.
+      fail-fast: false
+      matrix:
+        include:
+          # Go builds, so CodeQL needs the toolchain and a build to observe.
+          - language: go
+            name: Go
+            build-mode: autobuild
+          # The browser code is served as written, so there is nothing to
+          # build and nothing for CodeQL to wait on.
+          - language: javascript-typescript
+            name: JavaScript
+            build-mode: none
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: matrix.language == 'go'
         with:
           go-version-file: go.mod
           cache: true
       - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
-          languages: go
-      - uses: github/codeql-action/autobuild@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config: |
+            paths-ignore:
+              # Vendored upstream libraries, shipped minified and not edited
+              # here. Findings in them are upstream's to fix and would only
+              # crowd out findings in the code this repo writes.
+              - internal/web/static/*.min.js
       - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
-          category: "/language:go"
+          category: "/language:${{ matrix.language }}"
