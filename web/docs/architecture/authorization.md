@@ -8,8 +8,9 @@ title: Authorization
 pgConsole decides **no** authorization of its own. The trusted proxy
 authenticates the user and asserts a coarse level; the console reads that
 level and gates which routes the user reaches. There is no
-`SubjectAccessReview`, no capability probing, no cluster-scoped grant, and
-no user token inside the console.
+`SubjectAccessReview`, no capability probing, and no user token inside the
+console. The console's own authority is namespaced apart from one opt-in
+`ClusterRole` granting a single `get` on `clusterimagecatalogs`.
 
 > The trusted proxy authenticates you and asserts your level; the console
 > shows the routes that level admits, and the ServiceAccount's Role caps

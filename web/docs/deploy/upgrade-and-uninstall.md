@@ -40,6 +40,9 @@ Deleting the Deployment stops the process; deleting the Role removes its
 only authority. A default in-memory deployment has nothing else to clean up.
 If `HISTORY_PATH` was enabled, delete or retain its explicitly created PVC
 according to the site's retention policy. There is no CRD owned by the
-console and no cluster-scoped object. When the operator manages the
+console. The only cluster-scoped objects are the `ClusterRole` and
+`ClusterRoleBinding` from `deploy/cluster-catalog-role.yaml`, which exist
+only if you opted into `ALLOW_CLUSTER_CATALOGS`; delete them explicitly,
+since deleting the namespace will not. When the operator manages the
 console, deleting the `PgConsole` tears down the pod, its RBAC, its
 NetworkPolicy, and its exposure.

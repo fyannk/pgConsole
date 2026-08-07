@@ -45,9 +45,14 @@ small set of explicitly enabled day-2 actions.
 |---|---|
 | Cluster status, conditions, pods, roles, restarts, and events | ✅ Available |
 | Backup and ScheduledBackup catalog | ✅ Available |
-| Bounded, poweruser-gated instance log tail | ✅ Available |
+| Declared Database, DatabaseRole, Publication, and Subscription objects | ✅ Available |
+| Pooler overview, member pods, and PgBouncer metrics | ✅ Available |
+| Instance metrics windows, charted from the exporters | ✅ Available |
+| Bounded object-definition history with per-revision diffs | ✅ Available |
+| Bounded, poweruser-gated instance and pooler log tails | ✅ Available |
 | Backup, reload, restart, and promote operations | ✅ Opt-in |
 | DBA access-request review panel | ✅ Opt-in |
+| Cluster-wide image catalog reads | ✅ Opt-in |
 | pgObjectStoreViewer sidecar evidence correlation | ✅ Opt-in |
 | SQL queries, database contents, or Secret access | ⛔ Not provided |
 | Authentication, TLS termination, or user management | ⛔ Operator/proxy responsibility |
@@ -60,7 +65,7 @@ Go 1.26+, and `make`:
 
 ```bash
 git clone https://github.com/fyannk/pgConsole.git
-cd pgconsole
+cd pgConsole
 make dev-up
 ```
 

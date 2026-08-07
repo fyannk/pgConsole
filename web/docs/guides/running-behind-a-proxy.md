@@ -22,8 +22,9 @@ Your proxy must, on every request that reaches the console:
 4. Strip any client-supplied copies of those headers so a browser cannot
    inject them.
 
-The console treats a missing, empty, or unrecognized level as the
-read-only baseline — a fail-safe default, never an elevation.
+The console admits every screen by the forwarded level, so a missing,
+empty, or unrecognized level reaches nothing rather than a reduced
+console. The fail-safe direction is closed, never an elevation.
 
 ## The confinement invariant
 
@@ -49,11 +50,21 @@ spec:
       ports:
         - { protocol: TCP, port: 3000 }
   egress:
-    # Allow only the Kubernetes API server (adjust to your cluster).
+    # The Kubernetes API server (adjust to your cluster).
     - to:
         - ipBlock: { cidr: 10.0.0.1/32 }
       ports:
         - { protocol: TCP, port: 6443 }
+    # The instance and pooler exporters. With METRICS_ENABLED at its
+    # default of true the console scrapes these pod IPs directly, so
+    # omitting this leaves the metrics screens empty while every other
+    # screen looks healthy. Drop this rule only with METRICS_ENABLED=false.
+    - to:
+        - podSelector:
+            matchLabels: { cnpg.io/cluster: orders }
+      ports:
+        - { protocol: TCP, port: 9187 }
+        - { protocol: TCP, port: 9127 }
 ```
 
 If a request can reach the console without passing the proxy, the level

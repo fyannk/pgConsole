@@ -21,8 +21,9 @@ health, data integrity, or backup usability. A `Backup` in phase
 ## What it is, and is not
 
 - **Read-only by default.** Only `get`, `list`, `watch`, and bounded
-  `pods/log` reads. Two capabilities are opt-in behind their own flags and
-  Roles: day-2 operations and the access-request review panel.
+  `pods/log` reads. Three capabilities are opt-in behind their own flags
+  and Roles: day-2 operations, the access-request review panel, and
+  reading the cluster-wide image catalog its `Cluster` references.
 - **No SQL.** pgConsole never connects to PostgreSQL, never reads database
   credential Secrets, and never renders database contents. That is
   pgAdmin's job.
@@ -58,7 +59,7 @@ layering preference.
 |---|---|---|
 | **pgAdmin** | SQL-level questions *inside* the database | SQL |
 | **ObjectStoreViewer** | structural questions about the backup repository | object storage |
-| **pgConsole** | operator-level questions about one cluster | the Kubernetes API only |
+| **pgConsole** | operator-level questions about one cluster | the Kubernetes API, and the instance and pooler metrics endpoints |
 
 The pgToolBox operator owns everything outside the process: it deploys the
 container, puts an authentication proxy in front of it, exposes only the
