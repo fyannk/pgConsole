@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -43,38 +44,70 @@ import (
 var version = "dev"
 
 func main() {
+	os.Exit(cli(os.Args[1:], os.Stdout, os.Stderr, run))
+}
+
+// cli turns the command line and the outcome of runFn into an exit code.
+// It is separate from main so the argument contract can be exercised
+// without spawning a process: main hands it the real arguments, streams,
+// and run, and does nothing else.
+func cli(args []string, stdout, stderr io.Writer, runFn func() error) int {
 	// The console is configured entirely by environment, so the only
 	// argument it accepts is the one asking what it is. Anything else is
 	// refused rather than ignored: a misspelled flag that changes nothing
 	// silently is how an operator concludes the setting had no effect.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	// Write errors on the process streams are discarded throughout: the
+	// exit code is the real result, and there is nowhere left to report a
+	// failure to report.
+	if len(args) > 0 {
+		switch args[0] {
 		case "--version", "-version":
-			fmt.Println(version)
-			return
+			_, _ = fmt.Fprintln(stdout, version)
+			return 0
 		default:
-			fmt.Fprintf(os.Stderr,
+			_, _ = fmt.Fprintf(stderr,
 				"unknown argument %q: pgconsole is configured by environment variables\n",
-				os.Args[1])
-			os.Exit(2)
+				args[0])
+			return 2
 		}
 	}
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if err := runFn(); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
 	}
+	return 0
 }
 
 // run performs the whole lifecycle: validate, assemble, listen, serve.
 // Configuration errors are printed as variable names and constraints;
 // values never reach any output.
 func run() error {
-	cfg, err := config.Load(os.LookupEnv)
+	app, err := build(os.LookupEnv, os.Stdout)
 	if err != nil {
 		return err
 	}
+	if err := app.Listen(); err != nil {
+		return err
+	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	return app.Serve(ctx)
+}
+
+// build validates the environment and assembles the application, stopping
+// deliberately short of opening the listener. Every fail-before-listen
+// refusal lives in here — bad configuration, an unusable history journal,
+// an unusable metrics snapshot path, a malformed evidence token — so the
+// boundary those comments keep referring to is a real seam a test can
+// drive without binding a port.
+func build(lookup config.Lookup, logOut io.Writer) (*application.App, error) {
+	cfg, err := config.Load(lookup)
+	if err != nil {
+		return nil, err
+	}
+
+	logger := slog.New(slog.NewJSONHandler(logOut, nil))
 	// The identity is stated once, before anything can fail. The released
 	// image is distroless, so there is no shell to run --version in:
 	// `kubectl logs` is the operator's only route to the version a bug
@@ -113,11 +146,11 @@ func run() error {
 		if cfg.HistoryPath != "" {
 			journal, err := bolt.Open(cfg.HistoryPath, observe.RealClock{}, logger)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			store, err := history.NewPersistedStore(limits, observe.RealClock{}, journal)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			opts.Recorder = store
 			deps.HistorySource = store
@@ -147,7 +180,7 @@ func run() error {
 		if cfg.MetricsPath != "" {
 			persister, err := metrics.OpenPersister(cfg.MetricsPath, store, observe.RealClock{}, logger)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			deps.MetricsRunner = persister.Run
 		}
@@ -198,20 +231,10 @@ func run() error {
 				Namespace:    cfg.Namespace,
 			})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		deps.EvidenceFetcher = evidenceClient
 	}
 
-	app, err := application.New(cfg, deps, logger)
-	if err != nil {
-		return err
-	}
-	if err := app.Listen(); err != nil {
-		return err
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
-	return app.Serve(ctx)
+	return application.New(cfg, deps, logger)
 }
