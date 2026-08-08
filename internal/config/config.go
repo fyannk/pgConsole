@@ -512,17 +512,34 @@ func durationVar(lookup Lookup, name string, def, minimum, maximum time.Duration
 	return v
 }
 
-// linkVar reads an optional link-out base URL. Links must be https, or
-// http only when insecure links are explicitly allowed, and never carry
-// user information.
+// linkVar reads an optional link-out target. Two shapes are accepted.
+//
+// An absolute URL must be https — or http only when insecure links are
+// explicitly allowed — and never carries user information.
+//
+// A root-relative path such as "/pgadmin" names a sibling application
+// served from the console's own origin, which is how a single Route or
+// Ingress usually exposes the family. It is accepted without the scheme
+// argument applying at all: a relative reference inherits whatever scheme
+// the reader already has, so it cannot downgrade the way an http:// link
+// can, and ALLOW_INSECURE_LINKS has nothing to say about it. Behind a
+// proxy that terminates TLS and rewrites Host, it is also the more honest
+// value, because the console cannot know its own external URL.
 func linkVar(lookup Lookup, name string, allowInsecure bool, fail func(name, constraint string)) string {
 	raw, ok := lookup(name)
 	if !ok || raw == "" {
 		return ""
 	}
+	if strings.HasPrefix(raw, "/") {
+		if err := validateRelativeLink(raw); err != nil {
+			fail(name, err.Error())
+			return ""
+		}
+		return raw
+	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		fail(name, "must be an absolute URL")
+		fail(name, "must be an absolute URL or a root-relative path")
 		return ""
 	}
 	if u.User != nil {
@@ -541,6 +558,36 @@ func linkVar(lookup Lookup, name string, allowInsecure bool, fail func(name, con
 		return ""
 	}
 	return raw
+}
+
+// validateRelativeLink accepts a root-relative path on the console's own
+// origin and rejects everything that only looks like one.
+//
+// The trap it exists for is the protocol-relative form. Go parses
+// "//evil.com/x" as a relative reference carrying an authority — Host is
+// set, Scheme is empty — so a check that asks only "does it start with a
+// slash?" waves an entirely different origin straight through. Browsers
+// also normalise a backslash in that position, which makes "/\evil.com"
+// the same attack spelled differently. Both are refused on the second
+// byte, before any parsing, because a parser's opinion is not the thing a
+// browser will act on.
+func validateRelativeLink(raw string) error {
+	constraint := errors.New(`must be a root-relative path such as "/pgadmin", not protocol-relative`)
+	if len(raw) > 1 && (raw[1] == '/' || raw[1] == '\\') {
+		return constraint
+	}
+	for _, character := range raw {
+		if character < 0x20 || character == 0x7f || character == ' ' {
+			return errors.New("must not contain spaces or control characters; percent-encode them")
+		}
+	}
+	// Belt and braces: a relative reference must carry no authority, no
+	// scheme, and no user information once parsed either.
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
+		return constraint
+	}
+	return nil
 }
 
 // validateListenAddr accepts host:port with an optional host.

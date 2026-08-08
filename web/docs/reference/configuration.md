@@ -35,10 +35,10 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `METRICS_INTERVAL` | `10s` | Sweep period, 5s–5m. The exporters refresh their own caches on the order of seconds, so a faster sweep only rereads the same claims. |
 | `METRICS_RETENTION` | `168h` | Retained window, `1h`–`720h`. Bounds the rollup ring the window is stored in. |
 | `METRICS_PATH` | *empty* | Absolute snapshot path. Empty keeps the window in memory only; a value requires `METRICS_ENABLED=true`. An unusable path fails before listen; an unreadable snapshot merely starts the window empty. |
-| `OBJECTSTOREVIEWER_URL` | *empty* | ObjectStoreViewer link-out; empty hides it. |
-| `PGADMIN_URL` | *empty* | pgAdmin link-out; empty hides it. |
-| `MONITORING_URL` | *empty* | Monitoring link-out; empty hides it. |
-| `ALLOW_INSECURE_LINKS` | `false` | Permits `http://` link-outs (lab use only). |
+| `OBJECTSTOREVIEWER_URL` | *empty* | ObjectStoreViewer link-out, absolute or root-relative; empty hides it. |
+| `PGADMIN_URL` | *empty* | pgAdmin link-out, absolute or root-relative (`/pgadmin`); empty hides it. |
+| `MONITORING_URL` | *empty* | Monitoring link-out, absolute or root-relative; empty hides it. |
+| `ALLOW_INSECURE_LINKS` | `false` | Permits `http://` link-outs (lab use only). Does not apply to root-relative paths. |
 | `REPOSITORY_EVIDENCE_URL` | *empty* | Evidence sidecar socket — `unix://` URI or absolute path; loopback and TCP refuse to start. |
 | `REPOSITORY_EVIDENCE_TOKEN_FILE` | *empty* | Absolute path to the operator-mounted pod-local bearer token. |
 | `REPOSITORY_EXPECTED_FINGERPRINT` | *empty* | Expected `sha256:` destination fingerprint responses must carry. |
@@ -48,8 +48,17 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 
 - **Strict booleans** accept only the literals `"true"` and `"false"`; any
   other value fails startup.
-- **Link-outs** must be `https` and carry no user information, unless
-  `ALLOW_INSECURE_LINKS=true` permits `http`.
+- **Link-outs** take either an absolute URL or a root-relative path.
+  - An **absolute URL** must be `https` and carry no user information,
+    unless `ALLOW_INSECURE_LINKS=true` permits `http`.
+  - A **root-relative path** such as `/pgadmin` points at a sibling
+    application on the console's own origin, which is how a single Route or
+    Ingress usually exposes the family. It inherits the reader's scheme, so
+    it cannot downgrade and `ALLOW_INSECURE_LINKS` does not apply to it.
+    Prefer it behind a proxy that terminates TLS and rewrites `Host`, where
+    the console cannot know its own external URL. Protocol-relative values
+    (`//host/path`, and the `/\host` spelling browsers normalise to it) are
+    refused: they name a different origin.
 - The four **`REPOSITORY_*`** variables validate all-or-nothing: set any and
   all are required; set none and the evidence consumer is disabled entirely.
 - Setting `TRUSTED_USER_HEADER` or `TRUSTED_LEVEL_HEADER` to an explicit

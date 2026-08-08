@@ -409,9 +409,62 @@ func TestLoadMatrix(t *testing.T) {
 			wantErr: EnvMonitoringURL + ": must not contain user information",
 		},
 		{
-			name:    "relative link rejected",
+			name:    "bare host rejected",
 			mutate:  map[string]string{EnvMonitoringURL: "grafana.example.com"},
-			wantErr: EnvMonitoringURL + ": must be an absolute URL",
+			wantErr: EnvMonitoringURL + ": must be an absolute URL or a root-relative path",
+		},
+		{
+			name:   "root-relative path accepted",
+			mutate: map[string]string{EnvPgAdminURL: "/pgadmin"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.PgAdminURL != "/pgadmin" {
+					t.Errorf("PgAdminURL = %q, want /pgadmin", cfg.PgAdminURL)
+				}
+			},
+		},
+		{
+			name:   "root-relative path keeps its query and trailing slash",
+			mutate: map[string]string{EnvMonitoringURL: "/grafana/d/abc/?orgId=1"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.MonitoringURL != "/grafana/d/abc/?orgId=1" {
+					t.Errorf("MonitoringURL = %q, want it preserved verbatim", cfg.MonitoringURL)
+				}
+			},
+		},
+		{
+			// A relative reference inherits the reader's scheme, so it
+			// cannot downgrade and the insecure-link flag does not apply.
+			name:   "root-relative path needs no insecure-link flag",
+			mutate: map[string]string{EnvPgAdminURL: "/pgadmin", EnvAllowInsecureLinks: "false"},
+			check: func(t *testing.T, cfg Config) {
+				if cfg.PgAdminURL != "/pgadmin" {
+					t.Errorf("PgAdminURL = %q, want /pgadmin", cfg.PgAdminURL)
+				}
+			},
+		},
+		{
+			// Go parses this as a relative reference carrying an
+			// authority, so "starts with a slash" is not "same origin".
+			name:    "protocol-relative link rejected",
+			mutate:  map[string]string{EnvPgAdminURL: "//evil.example.com/pgadmin"},
+			wantErr: EnvPgAdminURL + `: must be a root-relative path such as "/pgadmin", not protocol-relative`,
+		},
+		{
+			// Browsers normalise the backslash, making this the same
+			// escape spelled differently.
+			name:    "backslash protocol-relative link rejected",
+			mutate:  map[string]string{EnvPgAdminURL: `/\evil.example.com`},
+			wantErr: EnvPgAdminURL + `: must be a root-relative path such as "/pgadmin", not protocol-relative`,
+		},
+		{
+			name:    "root-relative path with a space rejected",
+			mutate:  map[string]string{EnvPgAdminURL: "/pg admin"},
+			wantErr: EnvPgAdminURL + ": must not contain spaces or control characters; percent-encode them",
+		},
+		{
+			name:    "root-relative path with a control character rejected",
+			mutate:  map[string]string{EnvPgAdminURL: "/pgadmin\nSet-Cookie: x=1"},
+			wantErr: EnvPgAdminURL + ": must not contain spaces or control characters; percent-encode them",
 		},
 		{
 			name:    "ftp link rejected",
