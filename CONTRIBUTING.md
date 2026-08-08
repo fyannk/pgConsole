@@ -122,6 +122,17 @@ runtime, `test-multiarch` for both release architectures, `test-ui` for the
 console in a browser, and `test-e2e` for the pinned kind + CloudNativePG
 journey.
 
+`make audit` covers the two npm trees (`web/` and `hack/uitest/`) the way
+`make vuln` covers the Go one, resolving advisories from the lockfiles
+without installing either. It runs through
+[`hack/check-npm-audit.sh`](hack/check-npm-audit.sh), which subtracts the
+advisories listed in
+[`hack/npm-audit-accepted.txt`](hack/npm-audit-accepted.txt) and fails on
+everything else — including a new advisory in a package that already has an
+accepted entry. Prefer fixing; add an entry only when no fix exists, and say
+in it what the exposure is, why it does not apply, and what would let the
+entry be deleted.
+
 Changes to `internal/web/static/` or `internal/web/templates/` need
 `make test-ui`. It serves the fixture states from
 `internal/web/uiharness_test.go` and drives them with headless Chromium
