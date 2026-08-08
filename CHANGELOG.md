@@ -9,6 +9,54 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-08
+
+### Added
+
+- **Link-outs accept a root-relative path.** `PGADMIN_URL`,
+  `OBJECTSTOREVIEWER_URL`, and `MONITORING_URL` now take either an absolute
+  URL or a same-origin path such as `/pgadmin`, which is how a single Route
+  or Ingress usually exposes the pgtoolbox family. A relative reference
+  inherits the reader's scheme, so it cannot downgrade and
+  `ALLOW_INSECURE_LINKS` does not apply to it; behind a proxy that
+  terminates TLS and rewrites `Host` it is also the more honest value,
+  because the console cannot know its own external URL. Protocol-relative
+  values (`//host/path`, and the `/\host` spelling browsers normalise to
+  it) are refused: they name a different origin.
+
+### Fixed
+
+- `nanoid` in the documentation-site tree bumped to 3.3.18 for
+  GHSA-2v37-7h3g-55p8.
+
+### Changed
+
+- `make audit` runs through `hack/check-npm-audit.sh`, which keeps the
+  `high` threshold and subtracts only advisories reviewed and recorded in
+  `hack/npm-audit-accepted.txt`. Anything unlisted still fails, including a
+  new advisory in a package that already has an entry. Two unfixable
+  build-time `image-size` advisories are accepted there with their reasoning
+  and the condition that would remove them.
+- One error message: a link-out that is neither absolute nor root-relative
+  now reports `must be an absolute URL or a root-relative path`.
+
+### Internal
+
+No behaviour change from these, listed because they alter the shipped
+artifacts or the contributor contract:
+
+- `NOTICE` records the htmx, uPlot, and Alpine notices for the assets
+  embedded in the binary, and the image now carries `third_party/` licences
+  alongside `LICENSE`.
+- `CODEOWNERS` records ownership of the trust boundary and publishing path.
+- `CONTRIBUTING.md` is now the single canonical statement of the repository
+  invariants; `AGENTS.md` refers to them by number instead of restating
+  them. The two copies had diverged, with one describing the authorization
+  fail-safe backwards.
+- `cmd/pgconsole` gained tests for its fail-before-listen contracts:
+  invalid configuration, an unusable history journal, an unusable metrics
+  snapshot path, and an unreadable evidence token.
+
 ## [0.1.0] - 2026-08-07
 
 First public release.
@@ -61,5 +109,6 @@ First public release.
   independently prove replication health, data integrity, or restoreability,
   and it provides no SQL access, database contents, or Secret reads.
 
-[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/fyannk/pgConsole/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fyannk/pgConsole/releases/tag/v0.1.0
