@@ -2,6 +2,14 @@
 
 Thanks for considering a contribution. This page explains how to build the
 project, what the checks expect, and the invariants every change must keep.
+It is the canonical statement of all three.
+
+[`AGENTS.md`](AGENTS.md) sits beside it with the context this page does not
+carry: what the product is, where it sits in the pgtoolbox family, which
+non-goals are permanent, and why parts of the code are shaped the way they
+are. It defers to this page for every rule. Read both before a first change;
+the design rationale is what stops a locally reasonable change from
+violating something the linters cannot see.
 
 ## Development environment
 
@@ -35,7 +43,13 @@ must pass, and so must `make lint` and the boundary scans in
 ## Repository invariants
 
 These are hard rules — a change that violates one is a bug, and several are
-enforced by scans and tests:
+enforced by scans and tests.
+
+**This list is the canonical one.** [`AGENTS.md`](AGENTS.md) adds product and
+family context for AI agents but does not restate these rules; it refers to
+them by number. State an invariant in one place or it drifts, and a drifted
+invariant is worse than an absent one — an earlier copy of rule 3 in this
+file said the opposite of the code for several releases.
 
 1. **Read-only unless explicitly enabled.** Mutation-shaped calls
    (`Create`/`Update`/`Patch`/`Delete`/`Apply`) may exist **only** in
@@ -69,6 +83,26 @@ enforced by scans and tests:
    external data; condition and event messages are length-bounded.
 8. **License boilerplate** (`hack/boilerplate.go.txt`) on every new Go file;
    `hack/check-boilerplate.sh` enforces it.
+9. **The mutation surface is enumerated, or it does not exist.** Every day-2
+   operation maps to an exact verb, resource, and — where the verb supports
+   it — a `resourceNames`-pinned rule. No generic "apply YAML", no `Cluster`
+   spec editing, no free-form patch path.
+10. **Bounded log exposure.** Instance logs can contain query text. Tails are
+    bounded in lines and bytes, fetched on demand, never persisted, and
+    disappear entirely under `ALLOW_LOGS=false`.
+11. **No third-party content at runtime.** No embedded iframes, external
+    scripts, fonts, styles, or telemetry. Monitoring depth is a link-out to
+    an operator-configured URL; every asset is served from the binary. A new
+    vendored browser asset needs an entry in [`third_party/`](third_party)
+    with its pinned SHA-256 and licence, a matching pinning test, and a line
+    in [`NOTICE`](NOTICE) — the asset ships inside the binary, so its licence
+    has to travel with it.
+12. **Attribute every claim.** The UI keeps operator-reported,
+    Kubernetes-reported, and application-derived state distinct and never
+    blends the vocabularies. An operator's backup claim is never presented as
+    repository evidence. The one carve-out — the overview summary — and the
+    four conditions it must meet are described in
+    [`AGENTS.md`](AGENTS.md#the-overview-summary-carve-out).
 
 Planning vocabulary (slices, milestones, gates) lives in the docs and in
 issues — never in source code or comments.
@@ -171,5 +205,7 @@ built locally with `make package supply-chain`.
 - One focused change per commit; keep tests and docs with their source
   change.
 - Branch off `main`; do not commit generated build artifacts.
-- End commit messages with the project's `Co-Authored-By` trailer where
-  applicable.
+- Write the commit body for someone reading `git log` in a year: say what
+  changed and why it had to, not what the diff already shows.
+- Commits carry no tooling attribution. `Co-Authored-By` is for a human who
+  actually co-wrote the change.

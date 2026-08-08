@@ -138,7 +138,10 @@ make docs       # type-check and build the documentation site
 ```
 
 Docker-backed integration, scale, restricted-runtime, multiarch, and pinned
-CloudNativePG checks are described in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+CloudNativePG checks are described in [`CONTRIBUTING.md`](CONTRIBUTING.md),
+which also carries the repository invariants every change must keep.
+[`AGENTS.md`](AGENTS.md) adds the product and design context behind them —
+worth reading before a first change, whether you are a person or an agent.
 The Go code and tests are the source of truth; the site explains their behavior.
 
 ## 📄 License

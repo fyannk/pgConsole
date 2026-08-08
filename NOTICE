@@ -1,0 +1,42 @@
+pgConsole
+Copyright 2026 The pgConsole Authors
+
+This product includes software developed by the pgConsole Authors, licensed
+under the Apache License, Version 2.0. See the LICENSE file for the full
+text.
+
+--------------------------------------------------------------------------
+Third-party front-end assets embedded in the binary
+--------------------------------------------------------------------------
+
+The console serves its front-end from the binary itself: the files below
+are compiled in with go:embed and are therefore redistributed with every
+pgConsole binary and container image. Their licences and pinned checksums
+live in third_party/, and the container image carries copies under
+/licenses/pgconsole/third_party/.
+
+htmx 2.0.10
+  Zero-Clause BSD
+  https://github.com/bigskysoftware/htmx
+  See third_party/htmx/LICENSE
+
+uPlot 1.6.32
+  Copyright (c) 2022 Leon Sorokin
+  MIT License
+  https://github.com/leeoniya/uPlot
+  See third_party/uplot/LICENSE
+
+Alpine.js 3.15.12 (CSP build)
+  Copyright (c) 2019 Caleb Porzio and contributors
+  MIT License
+  https://github.com/alpinejs/alpine
+  See third_party/alpine/LICENSE
+
+--------------------------------------------------------------------------
+Go dependencies
+--------------------------------------------------------------------------
+
+Go module dependencies are linked into the binary rather than vendored in
+this repository. Every release publishes an SPDX SBOM and a licence report
+(licenses.csv) generated from the module graph; both are attached to the
+GitHub release and the SBOM is also attested to the published image.

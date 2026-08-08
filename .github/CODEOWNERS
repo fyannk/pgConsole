@@ -1,0 +1,27 @@
+# Every pull request gets @fyannk as a reviewer automatically.
+#
+# The repository rule on main requires zero approvals, so this does not
+# gate merging; it exists so review is requested without anyone having to
+# remember to ask, and so the owner of each area is written down rather
+# than known.
+*                           @fyannk
+
+# The trust boundary. Authorization, the forwarded-header contract, the
+# CSRF and operation guards, and the RBAC the console runs under are the
+# places where a wrong change is a security change rather than a bug.
+/internal/authz/            @fyannk
+/internal/identity/         @fyannk
+/internal/ops/              @fyannk
+/internal/redact/           @fyannk
+/deploy/                    @fyannk
+/SECURITY.md                @fyannk
+
+# Publishing and supply chain: anything here decides what gets built,
+# signed, attested, and pushed under the project's name.
+/.github/workflows/         @fyannk
+/Dockerfile                 @fyannk
+/Makefile                   @fyannk
+/hack/                      @fyannk
+/third_party/               @fyannk
+/NOTICE                     @fyannk
+/LICENSE                    @fyannk
