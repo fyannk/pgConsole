@@ -1,0 +1,29 @@
+# Advisories this repository has reviewed and accepted, one GHSA per line.
+#
+# An entry here is a decision, not a mute: it says the advisory was read,
+# the exposure was traced, and the risk was accepted with a reason. Anything
+# not listed still fails `make audit`, so a new advisory in the same package
+# is a build failure rather than something an existing line absorbs.
+#
+# Every entry must carry: what the package does here, why the exposure does
+# not apply, and what would let the entry be deleted. Delete entries the
+# moment a fix is available — an accepted advisory that could have been
+# fixed is just an unpatched one.
+#
+# Format: GHSA-id <tab or spaces> short reason
+
+# image-size, reached only through @docusaurus/mdx-loader, measures image
+# files at documentation-build time to emit width/height attributes. Both
+# advisories are denial of service in the ICNS and JXL/HEIF parsers.
+#
+# Not applicable here: the parser runs in CI while building the static site,
+# never in a browser and never on user input. Reaching it needs a malicious
+# image committed to this repository, which is already the point at which an
+# attacker can run anything in the build. Verified absent from the shipped
+# bundle: `grep -c ICNS web/build/assets/js/*.js` is 0.
+#
+# No fix exists to take: the advisories cover `*`, and the installed 2.0.2
+# is the newest published release. These come out when Docusaurus moves off
+# image-size or upstream patches it — re-check on any @docusaurus/core bump.
+GHSA-w3rx-r6r6-pgpr   image-size ICNS parser DoS; docs-build only, no fix published
+GHSA-5p2g-fcmc-qvqq   image-size JXL/HEIF parser DoS; docs-build only, no fix published

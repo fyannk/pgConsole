@@ -66,9 +66,13 @@ vuln:
 # govulncheck reads the Go tree; these are the other two dependency trees
 # that ship. Both resolve from the lockfile alone, so neither installs.
 # NPM_AUDIT_LEVEL=moderate tightens it when you want the fuller picture.
+#
+# The wrapper subtracts the advisories reviewed and accepted in
+# hack/npm-audit-accepted.txt. It does not lower the threshold: anything
+# unlisted still fails, including a new advisory in an accepted package.
 audit:
-	cd web && npm audit --audit-level=$(NPM_AUDIT_LEVEL)
-	cd hack/uitest && npm audit --audit-level=$(NPM_AUDIT_LEVEL)
+	./hack/check-npm-audit.sh web $(NPM_AUDIT_LEVEL)
+	./hack/check-npm-audit.sh hack/uitest $(NPM_AUDIT_LEVEL)
 
 check: lint test test-race vuln audit
 
