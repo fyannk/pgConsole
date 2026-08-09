@@ -124,8 +124,8 @@ func TestCadenceIgnoresACorrectSchedule(t *testing.T) {
 	if len(result.Findings) != 0 {
 		t.Fatalf("a correct daily schedule was flagged: %+v", result.Findings)
 	}
-	if len(result.Checks) != 1 || result.Checks[0].Outcome != CheckClear {
-		t.Fatalf("checks = %+v, want one clear", result.Checks)
+	if got := outcomeOf(t, result, "backup-cadence"); got != CheckClear {
+		t.Fatalf("backup-cadence outcome = %v, want clear", got)
 	}
 }
 
@@ -159,11 +159,15 @@ func TestUnobservedInputIsNotAClearResult(t *testing.T) {
 		if len(result.Findings) != 0 {
 			t.Errorf("%s: reported findings from unusable input: %+v", name, result.Findings)
 		}
-		if len(result.Checks) != 1 || result.Checks[0].Outcome != CheckUnavailable {
-			t.Fatalf("%s: checks = %+v, want one unavailable", name, result.Checks)
-		}
-		if result.Checks[0].Because == "" {
-			t.Errorf("%s: unavailable check gave no reason", name)
+		// Every detector here reads an input the case withholds, so all
+		// of them must report that they could not run — with a reason.
+		for _, check := range result.Checks {
+			if check.Outcome != CheckUnavailable {
+				t.Errorf("%s: %s = %v, want could-not-run", name, check.Name, check.Outcome)
+			}
+			if check.Because == "" {
+				t.Errorf("%s: %s gave no reason", name, check.Name)
+			}
 		}
 	}
 }
@@ -205,4 +209,17 @@ func TestFindingsOrderMostSevereFirst(t *testing.T) {
 		t.Errorf("equal severities not ordered by ID: %q then %q",
 			result.Findings[0].ID, result.Findings[1].ID)
 	}
+}
+
+// outcomeOf finds one named check in a result, failing if it is absent —
+// every registered detector must account for itself on every run.
+func outcomeOf(t *testing.T, result Result, name string) CheckOutcome {
+	t.Helper()
+	for _, check := range result.Checks {
+		if check.Name == name {
+			return check.Outcome
+		}
+	}
+	t.Fatalf("check %q did not account for itself: %+v", name, result.Checks)
+	return CheckClear
 }

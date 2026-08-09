@@ -125,3 +125,30 @@ func TestDiagnosticsRendersAFindingWithItsEvidence(t *testing.T) {
 		}
 	}
 }
+
+// TestDiagnosticsRendersAnEventBackedFinding proves the screen carries a
+// refusal the API server already explained, quoted with its numbers
+// intact — which is why the quota finding needs no ResourceQuota read.
+func TestDiagnosticsRendersAnEventBackedFinding(t *testing.T) {
+	t.Parallel()
+	const message = `pods "orders-3" is forbidden: exceeded quota: compute, used: pods=8, limited: pods=8`
+	snapshots := staticSnapshots{
+		events: observe.EventsSnapshot{Generation: 1, ObservedAt: testNow,
+			Events: []observe.EventFacts{{
+				Kind: "Cluster", Object: "orders", Type: "Warning",
+				Reason: "FailedCreate", Message: message, Count: 1, LastSeen: testNow,
+			}}},
+		eventsOK: true,
+	}
+	body := getWithHeaders(t, newDiagnosticsHandler(t, true, snapshots), "/diagnostics", dba).Body.String()
+	for _, want := range []string{
+		"namespace quota is refusing",
+		"used: pods=8", // the headroom, straight from the refusal
+		"limited: pods=8",
+		"resource-quota",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("event-backed finding page misses %q", want)
+		}
+	}
+}

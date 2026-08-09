@@ -164,6 +164,22 @@ type Input struct {
 	// observed at all.
 	Backups    observe.BackupsSnapshot
 	HasBackups bool
+	// Events is the namespace's event window, filtered to this cluster's
+	// objects. It is where Kubernetes has already written down why it
+	// refused something, which is why several detectors quote it rather
+	// than reasoning their own way to a cause.
+	Events    observe.EventsSnapshot
+	HasEvents bool
+	// Pods is the instance roster, including per-container state.
+	Pods    observe.PodsSnapshot
+	HasPods bool
+	// Cluster is the operator's report, read only for the declared
+	// instance count.
+	Cluster    observe.Snapshot
+	HasCluster bool
+	// Infrastructure carries the cluster's volumes.
+	Infrastructure    observe.InfrastructureSnapshot
+	HasInfrastructure bool
 }
 
 // Result is one complete run: what was found, and what was checked.
@@ -193,6 +209,10 @@ type Detector interface {
 // Detectors is the registered set, in the order their checks are listed.
 func Detectors() []Detector {
 	return []Detector{
+		quotaDetector{},
+		schedulingDetector{},
+		imagePullDetector{},
+		volumeDetector{},
 		backupCadenceDetector{},
 	}
 }

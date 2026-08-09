@@ -75,10 +75,24 @@ type CheckView struct {
 // function of the snapshots already published, so this handler makes no
 // API call: it is not a request-time exception, it is ordinary rendering.
 func (h *Handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
+	// Every source is optional and each is paired with its own flag: a
+	// detector must be able to tell "not observed" from "observed and
+	// empty", because only the second licenses a clear result.
 	in := diagnose.Input{Now: h.now()}
 	if h.sources.Backups != nil {
-		snap, ok := h.sources.Backups.CurrentBackups()
-		in.Backups, in.HasBackups = snap, ok
+		in.Backups, in.HasBackups = h.sources.Backups.CurrentBackups()
+	}
+	if h.sources.Events != nil {
+		in.Events, in.HasEvents = h.sources.Events.CurrentEvents()
+	}
+	if h.sources.Pods != nil {
+		in.Pods, in.HasPods = h.sources.Pods.CurrentPods()
+	}
+	if h.sources.Cluster != nil {
+		in.Cluster, in.HasCluster = h.sources.Cluster.Current()
+	}
+	if h.sources.Infrastructure != nil {
+		in.Infrastructure, in.HasInfrastructure = h.sources.Infrastructure.CurrentInfrastructure()
 	}
 
 	result := diagnose.Run(in)
