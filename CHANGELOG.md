@@ -9,6 +9,44 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-09
+
+### Changed
+
+- **The access-request review panel grants a level, not a role.** pgToolBox
+  dropped the `PgToolBoxRole` kind: access is granted as one of the closed
+  levels `view`, `poweruser`, `dba` — the same ladder the console admits
+  routes by. Three parts of the contract move with it, and none is
+  backwards compatible with 0.2.0:
+  - the console writes **`status.requestedLevel`** (a plain string) on an
+    approval, where it previously wrote `status.requestedRoleRef.name`;
+  - the approval form field is **`level`**, previously `role`;
+  - the approval picker is a constant, not a listing. It offers the three
+    levels in every deployment, so it can no longer be emptied by a
+    forbidden or slow read — which previously left a reviewer with a picker
+    of no options and no way to approve anything.
+
+  An approval is validated against the closed set and matched exactly, so
+  a value the operator's `RoleLevel` enum would reject never reaches the
+  API server.
+
+### Removed
+
+- **The review Role no longer needs `pgtoolboxroles`.** Drop the
+  `get`/`list`/`watch` grant on that resource from any Role you maintain by
+  hand; `deploy/access-review-role.yaml` no longer contains it. The panel's
+  entire authority is now reading access requests and patching their
+  status. Leaving the old grant in place is harmless but grants access to
+  a kind that no longer exists.
+
+### Upgrading
+
+Nothing to do beyond the usual tag bump unless you maintain the review Role
+yourself, in which case remove the `pgtoolboxroles` rule. Requests decided
+under 0.2.0 keep their recorded `requestedRoleRef`; the panel reads
+`requestedLevel`, so an older decision renders its level as `—`. The
+decision itself, its reviewer, and its audit line are unaffected.
+
 ## [0.2.0] - 2026-08-08
 
 ### Added
@@ -109,6 +147,7 @@ First public release.
   independently prove replication health, data integrity, or restoreability,
   and it provides no SQL access, database contents, or Secret reads.
 
-[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/fyannk/pgConsole/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fyannk/pgConsole/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fyannk/pgConsole/releases/tag/v0.1.0
