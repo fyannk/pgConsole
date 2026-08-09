@@ -34,10 +34,10 @@
             <td>
               <form method="POST" action="/access-requests/{{.Name}}/approve" hx-boost="false">
                 <input type="hidden" name="csrf" value="{{.ApproveToken}}">
-                <label>Role
-                  <select name="role" required>
-                    <option value="" disabled selected>choose a role</option>
-                    {{- range $.Roles}}
+                <label>Level
+                  <select name="level" required>
+                    <option value="" disabled selected>choose a level</option>
+                    {{- range $.Levels}}
                     <option value="{{.}}">{{.}}</option>
                     {{- end}}
                   </select>
@@ -62,10 +62,10 @@
       <h2>Decided requests</h2>
       {{- if .Decided}}
       <table>
-        <thead><tr><th>Subject</th><th>State</th><th>Role</th><th>Decided by</th><th>Age</th></tr></thead>
+        <thead><tr><th>Subject</th><th>State</th><th>Level</th><th>Decided by</th><th>Age</th></tr></thead>
         <tbody>
           {{- range .Decided}}
-          <tr><td>{{.Subject}}</td><td>{{.State}}</td><td>{{if .RequestedRole}}{{.RequestedRole}}{{else}}—{{end}}</td><td>{{.DecidedBy}}</td><td>{{.DecidedAge}}</td></tr>
+          <tr><td>{{.Subject}}</td><td>{{.State}}</td><td>{{if .RequestedLevel}}{{.RequestedLevel}}{{else}}—{{end}}</td><td>{{.DecidedBy}}</td><td>{{.DecidedAge}}</td></tr>
           {{- end}}
         </tbody>
       </table>

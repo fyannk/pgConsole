@@ -27,6 +27,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/authz"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/ops"
 	"github.com/fyannk/pgConsole/internal/redact"
@@ -34,25 +35,26 @@ import (
 
 // The review actions, the closed set the routes and CSRF bind to.
 const (
-	// ActionApprove records an approval with a chosen role.
+	// ActionApprove records an approval with a chosen level.
 	ActionApprove = "approve"
-	// ActionDeny records a denial without a role.
+	// ActionDeny records a denial without a level.
 	ActionDeny = "deny"
 )
 
 // ErrInvalidAction reports a review action outside the closed set.
 var ErrInvalidAction = errors.New("invalid review action")
 
-// ErrUnknownRole reports an approval naming a role not in the observed
-// role set — the picker's own options are the only acceptable values.
-var ErrUnknownRole = errors.New("unknown role")
+// ErrUnknownLevel reports an approval naming a level outside the closed
+// grantable set — the picker's own options are the only acceptable
+// values, so a tampered form cannot mint one the operator would refuse.
+var ErrUnknownLevel = errors.New("unknown level")
 
 // Writer performs the single status-subresource write. The Kubernetes
 // client implements it; it is the only mutation this package can cause.
 type Writer interface {
 	// WriteAccessRequestStatus records the decision on the named
-	// request's status subresource. roleName is empty for a denial.
-	WriteAccessRequestStatus(ctx context.Context, name, state, roleName, decidedBy string, decidedAt time.Time) error
+	// request's status subresource. level is empty for a denial.
+	WriteAccessRequestStatus(ctx context.Context, name, state, level, decidedBy string, decidedAt time.Time) error
 }
 
 // Executor validates and records access-request decisions, issuing and
@@ -82,40 +84,40 @@ func (e *Executor) Verify(name, action, token string) bool {
 func tokenContext(name, action string) string { return action + "\x00" + name }
 
 // Decide validates and records one decision. An approval must name a
-// role present in knownRoles — the observed picker options — so a
-// tampered form cannot mint an off-menu role. decidedBy is the reviewer
-// identity, recorded as supplied and never used to authorize here; the
-// level gate already did that. The outcome is a stable category for the
-// result page.
-func (e *Executor) Decide(ctx context.Context, name, action, role, decidedBy string, knownRoles []string) (outcome string, err error) {
-	var state, roleName string
+// level in the closed grantable set, so a tampered form cannot mint one
+// the operator's enum would refuse. decidedBy is the reviewer identity,
+// recorded as supplied and never used to authorize here; the level gate
+// already did that. The outcome is a stable category for the result page.
+func (e *Executor) Decide(ctx context.Context, name, action, level, decidedBy string) (outcome string, err error) {
+	var state, granted string
 	switch action {
 	case ActionApprove:
-		if !knownRole(role, knownRoles) {
-			e.audit(name, action, "", decidedBy, "rejected: unknown role")
-			return "", ErrUnknownRole
+		if !grantable(level) {
+			e.audit(name, action, "", decidedBy, "rejected: unknown level")
+			return "", ErrUnknownLevel
 		}
-		state, roleName = string(observe.AccessRequestApproved), role
+		state, granted = string(observe.AccessRequestApproved), level
 	case ActionDeny:
 		state = string(observe.AccessRequestDenied)
 	default:
 		return "", ErrInvalidAction
 	}
 
-	if err := e.writer.WriteAccessRequestStatus(ctx, name, state, roleName, decidedBy, e.clock.Now()); err != nil {
-		e.audit(name, action, roleName, decidedBy, "write failed: "+redact.Safe(err))
+	if err := e.writer.WriteAccessRequestStatus(ctx, name, state, granted, decidedBy, e.clock.Now()); err != nil {
+		e.audit(name, action, granted, decidedBy, "write failed: "+redact.Safe(err))
 		return "", err
 	}
-	e.audit(name, action, roleName, decidedBy, "recorded")
+	e.audit(name, action, granted, decidedBy, "recorded")
 	return state, nil
 }
 
-func knownRole(role string, known []string) bool {
-	if role == "" {
-		return false
-	}
-	for _, r := range known {
-		if r == role {
+// grantable reports whether the level is one the console may record.
+// The set comes from internal/authz rather than from anything observed:
+// it is the same closed ladder the console admits routes by, and it
+// matches the operator's RoleLevel enum value for value.
+func grantable(level string) bool {
+	for _, allowed := range authz.GrantableLevels() {
+		if level == allowed {
 			return true
 		}
 	}

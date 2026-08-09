@@ -55,16 +55,19 @@ There is no `delete`, no spec-replace, and nothing on `secrets`.
 
 ## Access-review Role (`ALLOW_ACCESS_REVIEW=true`)
 
-Reads on the two pgToolBox CRDs plus one status write.
+Reads on one pgToolBox CRD plus one status write.
 
 | Purpose | API group | Resources | Verbs |
 |---|---|---|---|
 | List and follow access requests | `pgtoolbox.fyannk.dev` | `pgtoolboxaccessrequests` | `get`, `list`, `watch` |
 | Record a decision | `pgtoolbox.fyannk.dev` | `pgtoolboxaccessrequests/status` | `patch` |
-| Populate the role picker | `pgtoolbox.fyannk.dev` | `pgtoolboxroles` | `get`, `list`, `watch` |
 
-The console never creates or modifies users, roles, or proxy configuration;
-the operator's controller materializes the `PgToolBoxUser` after an
+The approval picker needs no grant: the grantable levels are the closed
+set `view`/`poweruser`/`dba`, hardcoded on both sides of the operator's
+contract, so there is nothing to list.
+
+The console never creates or modifies users or proxy configuration; the
+operator's controller materializes the `PgToolBoxUser` after an
 approval.
 
 ## Cluster-catalog ClusterRole (`ALLOW_CLUSTER_CATALOGS=true`)

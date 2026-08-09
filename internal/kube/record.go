@@ -55,7 +55,6 @@ const (
 	scopePublications     = "publications"
 	scopeSubscriptions    = "subscriptions"
 	scopeAccessRequests   = "access requests"
-	scopeAccessRoles      = "access roles"
 	scopeServices         = "services"
 	scopeVolumes          = "volumes"
 	scopeSnapshots        = "snapshots"

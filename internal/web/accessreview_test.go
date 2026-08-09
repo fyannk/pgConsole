@@ -40,15 +40,15 @@ func (reviewClock) Wait(_ context.Context, _ time.Duration) error { return nil }
 
 // reviewWriter records the one decision write.
 type reviewWriter struct {
-	calls             int
-	name, state, role string
-	by                string
-	failWith          error
+	calls              int
+	name, state, level string
+	by                 string
+	failWith           error
 }
 
-func (w *reviewWriter) WriteAccessRequestStatus(_ context.Context, name, state, roleName, decidedBy string, _ time.Time) error {
+func (w *reviewWriter) WriteAccessRequestStatus(_ context.Context, name, state, level, decidedBy string, _ time.Time) error {
 	w.calls++
-	w.name, w.state, w.role, w.by = name, state, roleName, decidedBy
+	w.name, w.state, w.level, w.by = name, state, level, decidedBy
 	return w.failWith
 }
 
@@ -117,10 +117,9 @@ func pendingSnapshot() fakeAccessReview {
 		snap: observe.AccessReviewSnapshot{
 			Generation: 3,
 			ObservedAt: testNow.Add(-2 * time.Second),
-			Roles:      []string{"admin", "reader"},
 			Requests: []observe.AccessRequestFacts{
 				{Name: "req-alice", UID: "u1", Subject: "alice@corp", Message: "need read access", State: observe.AccessRequestPending, CreatedAt: created},
-				{Name: "req-bob", UID: "u2", Subject: "bob@corp", State: observe.AccessRequestApproved, RequestedRole: "reader", DecidedBy: "carol@corp", DecidedAt: &decided},
+				{Name: "req-bob", UID: "u2", Subject: "bob@corp", State: observe.AccessRequestApproved, RequestedLevel: "poweruser", DecidedBy: "carol@corp", DecidedAt: &decided},
 			},
 		},
 	}
@@ -184,7 +183,9 @@ func TestAccessReviewDisabledHasNoRoutes(t *testing.T) {
 }
 
 // TestAccessReviewListsPendingAndDecided proves the panel renders pending
-// requests with role options and forms, and decided requests read-only.
+// requests with the closed level options and forms, and decided requests
+// read-only. The picker is asserted in full: it comes from the console's
+// own ladder, so all three levels must be offered in every deployment.
 func TestAccessReviewListsPendingAndDecided(t *testing.T) {
 	t.Parallel()
 	h, _, _, _ := newReviewHandler(t, pendingSnapshot())
@@ -193,8 +194,9 @@ func TestAccessReviewListsPendingAndDecided(t *testing.T) {
 		"alice@corp", "need read access",
 		`action="/access-requests/req-alice/approve"`,
 		`action="/access-requests/req-alice/deny"`,
-		`<option value="reader">reader</option>`,
-		`<option value="admin">admin</option>`,
+		`<option value="view">view</option>`,
+		`<option value="poweruser">poweruser</option>`,
+		`<option value="dba">dba</option>`,
 		"bob@corp", "approved", "carol@corp",
 	} {
 		if !strings.Contains(body, want) {
@@ -208,16 +210,16 @@ func TestAccessReviewListsPendingAndDecided(t *testing.T) {
 }
 
 // TestAccessReviewApproveFlow proves a dba approval with a valid token
-// and an offered role writes the decision with the reviewer identity.
+// and an offered level writes the decision with the reviewer identity.
 func TestAccessReviewApproveFlow(t *testing.T) {
 	t.Parallel()
 	h, w, exec, _ := newReviewHandler(t, pendingSnapshot())
 	token := exec.Issue("req-alice", review.ActionApprove)
-	rec := postReview(t, h, "/access-requests/req-alice/approve", url.Values{"csrf": {token}, "role": {"reader"}}, nil)
+	rec := postReview(t, h, "/access-requests/req-alice/approve", url.Values{"csrf": {token}, "level": {"poweruser"}}, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("approve status = %d", rec.Code)
 	}
-	if w.calls != 1 || w.name != "req-alice" || w.state != "approved" || w.role != "reader" || w.by != "dba@corp" {
+	if w.calls != 1 || w.name != "req-alice" || w.state != "approved" || w.level != "poweruser" || w.by != "dba@corp" {
 		t.Fatalf("write = %+v", w)
 	}
 }
@@ -230,7 +232,7 @@ func TestAccessReviewDenyFlow(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("deny status = %d", rec.Code)
 	}
-	if w.calls != 1 || w.state != "denied" || w.role != "" {
+	if w.calls != 1 || w.state != "denied" || w.level != "" {
 		t.Fatalf("deny write = %+v", w)
 	}
 }
@@ -240,7 +242,7 @@ func TestAccessReviewDenyFlow(t *testing.T) {
 func TestAccessReviewRejectsMissingOrForgedCSRF(t *testing.T) {
 	t.Parallel()
 	h, w, _, _ := newReviewHandler(t, pendingSnapshot())
-	for _, form := range []url.Values{{}, {"csrf": {"forged"}, "role": {"reader"}}} {
+	for _, form := range []url.Values{{}, {"csrf": {"forged"}, "level": {"poweruser"}}} {
 		if rec := postReview(t, h, "/access-requests/req-alice/approve", form, nil); rec.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", rec.Code)
 		}
@@ -263,15 +265,15 @@ func TestAccessReviewRejectsCrossOrigin(t *testing.T) {
 	}
 }
 
-// TestAccessReviewApproveOffMenuRoleRejected proves a tampered role is a
+// TestAccessReviewApproveOffMenuLevelRejected proves a tampered level is a
 // 400 and no write happens.
-func TestAccessReviewApproveOffMenuRoleRejected(t *testing.T) {
+func TestAccessReviewApproveOffMenuLevelRejected(t *testing.T) {
 	t.Parallel()
 	h, w, exec, _ := newReviewHandler(t, pendingSnapshot())
 	token := exec.Issue("req-alice", review.ActionApprove)
-	rec := postReview(t, h, "/access-requests/req-alice/approve", url.Values{"csrf": {token}, "role": {"superuser"}}, nil)
+	rec := postReview(t, h, "/access-requests/req-alice/approve", url.Values{"csrf": {token}, "level": {"superuser"}}, nil)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("off-menu role status = %d, want 400", rec.Code)
+		t.Fatalf("off-menu level status = %d, want 400", rec.Code)
 	}
 	if w.calls != 0 {
 		t.Error("off-menu approval wrote a decision")

@@ -24,27 +24,32 @@ absent (404). The routes require the `dba` level.
 snapshot:
 
 - **Pending requests** — subject, message, and age, each with an
-  **Approve** form (a role picker populated from the observed
-  `PgToolBoxRole` names) and a **Deny** form.
-- **Decided requests** — a read-only audit list showing state, chosen role,
-  reviewer, and age. Only pending requests accept actions.
+  **Approve** form carrying a level picker, and a **Deny** form.
+- **Decided requests** — a read-only audit list showing state, granted
+  level, reviewer, and age. Only pending requests accept actions.
+
+The picker offers the closed level set — `view`, `poweruser`, `dba` — the
+same ladder the console admits routes by. It is a constant, not a listing:
+there is no role object to enumerate, so the options are identical in every
+deployment and cannot be emptied by a failed or forbidden read.
 
 ## Recording a decision
 
 Approving or denying is a CSRF-guarded, same-origin POST:
 
-- **Approve** must name a role that is one of the *observed picker
-  options* — a tampered form naming an off-menu role is refused with a 400
-  and no write happens.
+- **Approve** must name one of the three grantable levels — a tampered
+  form naming anything else is refused with a 400 and no write happens.
+  The match is exact: trailing space or different case is off-menu, so a
+  value the operator's enum would reject never reaches the API server.
 - The write is a merge patch on the request **status subresource** only:
-  `state`, `requestedRoleRef.name` (approve), `decidedBy` (the reviewer's
+  `state`, `requestedLevel` (approve), `decidedBy` (the reviewer's
   `X-Forwarded-User`), and `decidedAt`.
 - It is fire-and-observe: the panel reflects the decision once the informer
   catches up. After approval, the operator's controller creates the user.
 
 Every decision writes one structured **audit** line: the action, the
-request, the role, the outcome category, and the reviewer identity labeled
-proxy-asserted.
+request, the granted level, the outcome category, and the reviewer identity
+labeled proxy-asserted.
 
 ## What stays out of scope
 

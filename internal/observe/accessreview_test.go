@@ -100,7 +100,6 @@ func TestAccessReviewCollectorSeedsWatchesAndRetainsStale(t *testing.T) {
 		{
 			state: AccessReviewState{
 				Requests: []AccessRequestFacts{{Name: "req-1", UID: "u1", Subject: "a", State: AccessRequestPending, CreatedAt: created}},
-				Roles:    []string{"reader"},
 			},
 			changes: []AccessRequestChange{{Put: &AccessRequestFacts{Name: "req-2", UID: "u2", Subject: "b", State: AccessRequestPending, CreatedAt: created.Add(time.Minute)}}},
 		},
@@ -110,7 +109,7 @@ func TestAccessReviewCollectorSeedsWatchesAndRetainsStale(t *testing.T) {
 	if !ok || !snap.Stale {
 		t.Fatalf("last-good review not retained stale: %+v ok=%v", snap, ok)
 	}
-	if len(snap.Requests) != 2 || len(snap.Roles) != 1 {
+	if len(snap.Requests) != 2 {
 		t.Fatalf("view lost content: %+v", snap)
 	}
 }
@@ -144,7 +143,7 @@ func TestAccessReviewStoreOrdersPendingFirst(t *testing.T) {
 		{Name: "pending-new", State: AccessRequestPending, CreatedAt: base.Add(-10 * time.Minute)},
 		{Name: "decided-new", State: AccessRequestDenied, DecidedAt: &newDecision},
 		{Name: "pending-old", State: AccessRequestPending, CreatedAt: base.Add(-30 * time.Minute)},
-	}, nil, base, false)
+	}, base, false)
 
 	snap, _ := store.CurrentAccessReview()
 	got := make([]string, len(snap.Requests))
@@ -159,26 +158,19 @@ func TestAccessReviewStoreOrdersPendingFirst(t *testing.T) {
 	}
 }
 
-// TestAccessReviewStoreBoundsAndFlagsTruncation proves the request and
-// role bounds hold and the truncation flag surfaces.
+// TestAccessReviewStoreBoundsAndFlagsTruncation proves the request bound
+// holds and the truncation flag surfaces.
 func TestAccessReviewStoreBoundsAndFlagsTruncation(t *testing.T) {
 	t.Parallel()
 	requests := make([]AccessRequestFacts, MaxAccessRequests+50)
 	for i := range requests {
 		requests[i] = AccessRequestFacts{Name: fmt.Sprintf("req-%04d", i), State: AccessRequestPending, CreatedAt: time.Unix(int64(i), 0)}
 	}
-	roles := make([]string, MaxAccessRoles+50)
-	for i := range roles {
-		roles[i] = fmt.Sprintf("role-%04d", i)
-	}
 	store := NewAccessReviewStore()
-	store.publish(requests, roles, time.Unix(1000, 0), false)
+	store.publish(requests, time.Unix(1000, 0), false)
 	snap, _ := store.CurrentAccessReview()
 	if len(snap.Requests) != MaxAccessRequests || !snap.RequestsTruncated {
 		t.Fatalf("request bound not visible: len=%d truncated=%v", len(snap.Requests), snap.RequestsTruncated)
-	}
-	if len(snap.Roles) != MaxAccessRoles {
-		t.Fatalf("role bound not applied: len=%d", len(snap.Roles))
 	}
 }
 
@@ -194,7 +186,7 @@ func TestAccessReviewStorePublishesATruncatedSetBelowTheBound(t *testing.T) {
 		{Name: "req-b", State: AccessRequestPending, CreatedAt: time.Unix(2, 0)},
 	}
 	store := NewAccessReviewStore()
-	store.publish(requests, []string{"reader"}, time.Unix(1000, 0), true)
+	store.publish(requests, time.Unix(1000, 0), true)
 
 	snap, ok := store.CurrentAccessReview()
 	if !ok {

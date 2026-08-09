@@ -1,23 +1,9 @@
-# Sample review objects for the dba panel: two roles for the approval
-# picker and one freshly created (no status = pending) access request.
-# Apply after the CRDs are established. Namespace matches the example
-# deployment's target cluster (payments).
-apiVersion: pgtoolbox.fyannk.dev/v1alpha1
-kind: PgToolBoxRole
-metadata:
-  name: reader
-  namespace: payments
-spec:
-  description: Read-only access to the orders console.
----
-apiVersion: pgtoolbox.fyannk.dev/v1alpha1
-kind: PgToolBoxRole
-metadata:
-  name: operator
-  namespace: payments
-spec:
-  description: Day-2 operations on the orders cluster.
----
+# Sample review object for the dba panel: one freshly created access
+# request (no status = pending). Apply after the CRD is established.
+# Namespace matches the example deployment's target cluster (payments).
+#
+# No roles are seeded: the approval picker offers the closed level set
+# view/poweruser/dba from the console's own ladder, not objects.
 apiVersion: pgtoolbox.fyannk.dev/v1alpha1
 kind: PgToolBoxAccessRequest
 metadata:
