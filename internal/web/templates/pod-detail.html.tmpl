@@ -39,7 +39,7 @@
         <dt>Phase</dt><dd data-state="{{.PhaseState}}">{{.Phase}}</dd>
         <dt>{{.RoleLabel}}</dt><dd>{{.Role}}</dd>
         <dt>Ready</dt><dd>{{.Ready}}</dd>
-        <dt>Restarts</dt><dd>{{.Restarts}}</dd>
+        <dt>Restarts</dt><dd>{{.Restarts}}<span class="hint"> (postgres container)</span></dd>
         <dt>Node</dt><dd>{{.Node}}</dd>
         <dt>Pod IP</dt><dd>{{.IP}}</dd>
         <dt>Started</dt><dd>{{template "stamp" .Started}}</dd>
@@ -49,6 +49,25 @@
         <dt>Timeline</dt><dd>{{.Timeline}}</dd>
         {{- end}}
       </dl>
+      {{- if .Containers}}
+      <h3>Containers</h3>
+      <table>
+        <thead><tr><th>Container</th><th>Kind</th><th>State</th><th>Reason</th><th>Ready</th><th>Restarts</th><th>Image</th></tr></thead>
+        <tbody>
+          {{- range .Containers}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{.Kind}}</td>
+            <td{{if .Faulted}} data-state="bad"{{end}}>{{.State}}</td>
+            <td>{{if .Reason}}{{.Reason}}{{else}}—{{end}}</td>
+            <td>{{.Ready}}</td>
+            <td>{{.Restarts}}</td>
+            <td>{{.Image}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+      {{- end}}
       <p class="origin">source: Pod/{{.Name}} (Kubernetes-observed){{if .IsPrimary}}; write endpoint and timeline are operator-reported{{end}}, snapshot: <span data-state="{{stateToken .Meta.State}}">{{.Meta.State}} — age {{.Meta.Age}} (generation {{.Meta.Generation}})</span></p>
     </div>
   </section>

@@ -60,7 +60,7 @@ func newLogsTestClient(t *testing.T, pods ...map[string]any) (*Client, *bytes.Bu
 func TestTailLogsForVerifiedMember(t *testing.T) {
 	t.Parallel()
 	c, _ := newLogsTestClient(t, ownedPod("orders-1", "u1", "primary"))
-	tail, err := c.TailLogs(context.Background(), "orders-1")
+	tail, err := c.TailLogs(context.Background(), "orders-1", "")
 	if err != nil {
 		t.Fatalf("TailLogs: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestTailLogsRefusesNonMember(t *testing.T) {
 	intruder := ownedPod("orders-api-1", "ux", "primary")
 	delete(intruder["metadata"].(map[string]any), "ownerReferences")
 	c, logs := newLogsTestClient(t, intruder)
-	_, err := c.TailLogs(context.Background(), "orders-api-1")
+	_, err := c.TailLogs(context.Background(), "orders-api-1", "")
 	if redact.Categorize(err) != redact.CategoryNotFound {
 		t.Fatalf("category = %v, want notfound", redact.Categorize(err))
 	}
@@ -96,7 +96,7 @@ func TestTailLogsRefusesNonMember(t *testing.T) {
 func TestTailLogsAbsentPodIsNotFound(t *testing.T) {
 	t.Parallel()
 	c, _ := newLogsTestClient(t)
-	_, err := c.TailLogs(context.Background(), "orders-9")
+	_, err := c.TailLogs(context.Background(), "orders-9", "")
 	if redact.Categorize(err) != redact.CategoryNotFound {
 		t.Fatalf("category = %v, want notfound", redact.Categorize(err))
 	}
@@ -109,9 +109,49 @@ func TestTailLogsRefusalMatchesAbsence(t *testing.T) {
 	intruder := ownedPod("orders-api-1", "ux", "primary")
 	delete(intruder["metadata"].(map[string]any), "ownerReferences")
 	c, _ := newLogsTestClient(t, intruder)
-	_, errMember := c.TailLogs(context.Background(), "orders-api-1")
-	_, errAbsent := c.TailLogs(context.Background(), "orders-9")
+	_, errMember := c.TailLogs(context.Background(), "orders-api-1", "")
+	_, errAbsent := c.TailLogs(context.Background(), "orders-9", "")
 	if errMember.Error() != errAbsent.Error() {
 		t.Fatalf("refusal %q differs from absence %q", errMember.Error(), errAbsent.Error())
+	}
+}
+
+// TestTailLogsReadsADeclaredSidecar proves the container is addressable:
+// CNPG-I moves backup and WAL archiving into plugin sidecars, so pinning
+// the tail to postgres would make exactly those failures unreadable.
+func TestTailLogsReadsADeclaredSidecar(t *testing.T) {
+	t.Parallel()
+	c, _ := newLogsTestClient(t, sidecarPod())
+	if _, err := c.TailLogs(context.Background(), "orders-1", "plugin-barman-cloud"); err != nil {
+		t.Fatalf("declared sidecar refused: %v", err)
+	}
+	// An init container counts too: it is often the only place the
+	// reason a pod never started is written down.
+	if _, err := c.TailLogs(context.Background(), "orders-1", "bootstrap-controller"); err != nil {
+		t.Fatalf("declared init container refused: %v", err)
+	}
+}
+
+// TestTailLogsRefusesAContainerThePodDoesNotDeclare proves the name is
+// checked against the pod rather than passed through. The pod is the
+// boundary, but an arbitrary string would hand the API server the job of
+// deciding what "not found" means, and the console states its own
+// refusals. The refusal is not-found, matching a non-member pod, so a
+// caller learns nothing from the difference.
+func TestTailLogsRefusesAContainerThePodDoesNotDeclare(t *testing.T) {
+	t.Parallel()
+	c, logs := newLogsTestClient(t, sidecarPod())
+	for _, container := range []string{"istio-proxy", "postgres-", "..", "POSTGRES"} {
+		_, err := c.TailLogs(context.Background(), "orders-1", container)
+		if err == nil {
+			t.Errorf("container %q was tailed but the pod does not declare it", container)
+			continue
+		}
+		if got := redact.Categorize(err); got != redact.CategoryNotFound {
+			t.Errorf("container %q: category = %v, want not-found", container, got)
+		}
+	}
+	if !strings.Contains(logs.String(), "log tail container excluded") {
+		t.Error("refusal was not logged with its reason")
 	}
 }

@@ -26,15 +26,29 @@ import (
 	"github.com/fyannk/pgConsole/internal/redact"
 )
 
-// TailLogs fetches a bounded tail of the member pod's PostgreSQL
-// container. Membership is re-verified live, immediately before the log
-// request: the pod is fetched and its controller ownership checked, so
-// a pod that stopped being a member between page render and click is
-// refused. A non-member and a nonexistent pod are indistinguishable to
-// the caller — both are not-found — while the exclusion is logged with
-// its stable reason. The fetch runs on the request's context: a client
-// disconnect cancels it. Nothing is cached or persisted.
-func (c *Client) TailLogs(ctx context.Context, pod string) (observe.LogTail, error) {
+// TailLogs fetches a bounded tail of one container in a member pod. An
+// empty container name means the PostgreSQL container.
+//
+// Membership is re-verified live, immediately before the log request:
+// the pod is fetched and its controller ownership checked, so a pod that
+// stopped being a member between page render and click is refused. A
+// non-member and a nonexistent pod are indistinguishable to the caller —
+// both are not-found — while the exclusion is logged with its stable
+// reason. The fetch runs on the request's context: a client disconnect
+// cancels it. Nothing is cached or persisted.
+//
+// The boundary is the pod, not the container. Once controller ownership
+// proves the pod is this cluster's, every container in it is in scope:
+// the PostgreSQL container's log is the most sensitive stream in the pod
+// — it can carry query text — so a caller already allowed that is not
+// escalated by reading a plugin sidecar beside it. Restricting to
+// postgres would instead hide the sidecars CNPG-I moves backup and WAL
+// archiving into, which is where those failures are now reported.
+//
+// The name must still be one the pod declares. That is not a privilege
+// check but an honesty one: an arbitrary string would let the API server
+// decide what "not found" means, and the console states its own refusals.
+func (c *Client) TailLogs(ctx context.Context, pod, container string) (observe.LogTail, error) {
 	getCtx, cancel := context.WithTimeout(ctx, c.opts.RequestTimeout)
 	obj, err := c.dyn.Resource(podGVR).Namespace(c.opts.Namespace).Get(getCtx, pod, metav1.GetOptions{})
 	cancel()
@@ -52,11 +66,18 @@ func (c *Client) TailLogs(ctx context.Context, pod string) (observe.LogTail, err
 		c.logExcludedPod(facts.Name)
 		return observe.LogTail{}, redact.NewError("log tail", redact.CategoryNotFound, nil)
 	}
+	if container == "" {
+		container = postgresContainer
+	}
+	if !declaresContainer(facts.Containers, container) {
+		c.logExcludedContainer(facts.Name, container)
+		return observe.LogTail{}, redact.NewError("log tail", redact.CategoryNotFound, nil)
+	}
 
 	lines := int64(c.opts.LogTailLines)
 	limit := c.opts.LogTailMaxBytes
 	req := c.typed.CoreV1().Pods(c.opts.Namespace).GetLogs(pod, &corev1.PodLogOptions{
-		Container:  postgresContainer,
+		Container:  container,
 		TailLines:  &lines,
 		LimitBytes: &limit,
 	})
@@ -78,4 +99,16 @@ func (c *Client) TailLogs(ctx context.Context, pod string) (observe.LogTail, err
 		LineLimit:        c.opts.LogTailLines,
 		ByteLimit:        limit,
 	}, nil
+}
+
+// declaresContainer reports whether the pod declares the named
+// container. Init containers count: an init container that failed is
+// often the only place the reason a pod never started is written down.
+func declaresContainer(containers []observe.ContainerFacts, name string) bool {
+	for _, container := range containers {
+		if container.Name == name {
+			return true
+		}
+	}
+	return false
 }

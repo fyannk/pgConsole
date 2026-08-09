@@ -169,24 +169,93 @@ func (c *Client) convertPod(content map[string]any) (observe.PodFacts, bool, err
 			break
 		}
 	}
-	if len(pod.Status.ContainerStatuses) > 0 {
-		restarts := 0
-		for _, cs := range pod.Status.ContainerStatuses {
-			restarts += int(cs.RestartCount)
-		}
-		facts.Restarts = &restarts
-	}
-	for _, container := range pod.Spec.Containers {
-		if container.Name == postgresContainer {
+	facts.Containers = convertContainers(&pod)
+	for _, container := range facts.Containers {
+		if container.Name == postgresContainer && !container.Init {
+			facts.Restarts = container.Restarts
 			facts.Image = container.Image
 			break
 		}
 	}
-	if facts.Image == "" && len(pod.Spec.Containers) > 0 {
-		facts.Image = pod.Spec.Containers[0].Image
+	// A pod with no container named postgres is not one this console
+	// expects, but membership has already been proven, so it is shown
+	// rather than hidden. The first regular container's image is the
+	// least misleading stand-in available.
+	if facts.Image == "" {
+		for _, container := range facts.Containers {
+			if !container.Init {
+				facts.Image = container.Image
+				break
+			}
+		}
 	}
 
 	return facts, c.podIsMember(&pod), nil
+}
+
+// convertContainers pairs each declared container with the kubelet's
+// status for it, init containers first and each group in spec order.
+//
+// The spec is the source of the list, not the status: a container that
+// has never started has no status at all, and dropping it would hide
+// exactly the pod that cannot start. Such a container reports its name
+// and image with an empty state, which renders as unknown rather than as
+// healthy.
+func convertContainers(pod *corev1.Pod) []observe.ContainerFacts {
+	total := len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
+	if total == 0 {
+		return nil
+	}
+	status := make(map[string]corev1.ContainerStatus, total)
+	for _, cs := range pod.Status.InitContainerStatuses {
+		status["init/"+cs.Name] = cs
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		status["run/"+cs.Name] = cs
+	}
+
+	facts := make([]observe.ContainerFacts, 0, total)
+	add := func(spec corev1.Container, init bool) {
+		key := "run/"
+		if init {
+			key = "init/"
+		}
+		container := observe.ContainerFacts{Name: spec.Name, Image: spec.Image, Init: init}
+		if cs, ok := status[key+spec.Name]; ok {
+			ready := cs.Ready
+			restarts := int(cs.RestartCount)
+			container.Ready = &ready
+			container.Restarts = &restarts
+			container.State, container.Reason, container.ExitCode = containerState(cs.State)
+		}
+		facts = append(facts, container)
+	}
+	for _, spec := range pod.Spec.InitContainers {
+		add(spec, true)
+	}
+	for _, spec := range pod.Spec.Containers {
+		add(spec, false)
+	}
+	return facts
+}
+
+// containerState reduces the kubelet's three-way state union to a state
+// name, its machine reason, and an exit code where one exists. A running
+// container has no reason: the reason field exists to name a fault, and
+// filling it for a healthy container would make "has a reason" useless
+// as a signal.
+func containerState(state corev1.ContainerState) (name, reason string, exitCode *int32) {
+	switch {
+	case state.Running != nil:
+		return "running", "", nil
+	case state.Waiting != nil:
+		return "waiting", state.Waiting.Reason, nil
+	case state.Terminated != nil:
+		code := state.Terminated.ExitCode
+		return "terminated", state.Terminated.Reason, &code
+	default:
+		return "", "", nil
+	}
 }
 
 // podIsMember verifies the controller owner reference names the
@@ -217,4 +286,16 @@ func (c *Client) logExcludedPod(name string) {
 	c.logger.Info("pod excluded",
 		slog.String("reason", "membership"),
 		slog.String("pod", name))
+}
+
+// logExcludedContainer records a log tail refused because the pod does
+// not declare the container. The pod was a proven member, so this is a
+// bad request rather than a boundary breach; it is logged because a
+// legitimate reader hitting it means the page offered a container the
+// pod no longer has.
+func (c *Client) logExcludedContainer(pod, container string) {
+	c.logger.Info("log tail container excluded",
+		slog.String("reason", "not declared by the pod"),
+		slog.String("pod", pod),
+		slog.String("container", container))
 }

@@ -22,6 +22,7 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/authz"
@@ -29,6 +30,30 @@ import (
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
 )
+
+// ContainerView is one container's row on the pod detail screen.
+type ContainerView struct {
+	// Name is the container name.
+	Name string
+	// Kind reads "init" or "container", so an init container's failure
+	// is not mistaken for a sidecar's.
+	Kind string
+	// Image is the declared image.
+	Image string
+	// Ready, Restarts and State read "unknown" when the kubelet has
+	// reported nothing for the container yet — which is the state of a
+	// container that has never started, and the reason it is listed at
+	// all rather than dropped.
+	Ready    string
+	Restarts string
+	State    string
+	// Reason is the kubelet's machine reason for a fault, empty when the
+	// container is running. It is the field that names what is wrong.
+	Reason string
+	// Faulted marks a row the reader should look at: a reason is set, or
+	// the container terminated with a non-zero exit code.
+	Faulted bool
+}
 
 // PodDetailView is one instance pod's screen: its observed status, the
 // merged per-pod timeline, and — above the same gates the standalone
@@ -74,6 +99,10 @@ type PodDetailView struct {
 	Raw template.HTML
 	// RawSeq is the revision the raw definition came from.
 	RawSeq uint64
+	// Containers is every container in the pod, init first. An instance
+	// pod is no longer one container, and a failing plugin sidecar is
+	// invisible on a screen that only describes postgres.
+	Containers []ContainerView
 	// CanTailLogs gates the logs tab, same tier as the log routes.
 	CanTailLogs bool
 	// LogsGate states why the logs tab is absent when it is.
@@ -232,6 +261,7 @@ func (h *Handler) renderPodDetail(w http.ResponseWriter, r *http.Request, roster
 	if pod.Ready != nil {
 		view.Ready = fmt.Sprintf("%t", *pod.Ready)
 	}
+	view.Containers = buildContainerViews(pod.Containers)
 	if pod.Restarts != nil {
 		view.Restarts = fmt.Sprintf("%d", *pod.Restarts)
 	}
@@ -281,23 +311,23 @@ func (h *Handler) renderPodDetail(w http.ResponseWriter, r *http.Request, roster
 // closed request-time exception as the standalone route: request-scoped,
 // bounded, never cached.
 func (h *Handler) podLogs(r *http.Request, pod string) *PodLogsView {
-	return h.podLogsFrom(r, pod, "/logs/"+pod+"?raw=1", h.tailer.TailLogs)
+	return h.podLogsFrom(r, pod, "", "/logs/"+pod+"?raw=1", h.tailer.TailLogs)
 }
 
 // poolerPodLogs takes the same bounded tail through the pooler roster's
 // own membership proof, which is a different ownership chain and so a
 // different call.
 func (h *Handler) poolerPodLogs(r *http.Request, pod string) *PodLogsView {
-	return h.podLogsFrom(r, pod, "/poolers/logs/"+pod+"?raw=1", h.tailer.TailPoolerLogs)
+	return h.podLogsFrom(r, pod, "", "/poolers/logs/"+pod+"?raw=1", h.tailer.TailPoolerLogs)
 }
 
-func (h *Handler) podLogsFrom(r *http.Request, pod, rawURL string, tail func(context.Context, string) (observe.LogTail, error)) *PodLogsView {
+func (h *Handler) podLogsFrom(r *http.Request, pod, container, rawURL string, tail func(context.Context, string, string) (observe.LogTail, error)) *PodLogsView {
 	logs := &PodLogsView{RawURL: rawURL}
 	if h.tailer == nil {
 		logs.State = "unavailable: no Kubernetes access"
 		return logs
 	}
-	tailed, err := tail(r.Context(), pod)
+	tailed, err := tail(r.Context(), pod, container)
 	switch {
 	case err == nil:
 		logs.Bounds = fmt.Sprintf("last %d lines, at most %d bytes", tailed.LineLimit, tailed.ByteLimit)
@@ -441,4 +471,46 @@ func podRevisionEntry(e history.Entry) PodTimelineEntry {
 		entry.Seq = e.Seq
 	}
 	return entry
+}
+
+// buildContainerViews renders each container as a row. A container the
+// kubelet has not reported on stays explicitly unknown rather than
+// reading as healthy, and only a stated fault sets Faulted: the console
+// marks what a source reports, never what it infers from silence.
+func buildContainerViews(containers []observe.ContainerFacts) []ContainerView {
+	if len(containers) == 0 {
+		return nil
+	}
+	views := make([]ContainerView, 0, len(containers))
+	for _, container := range containers {
+		view := ContainerView{
+			Name:     container.Name,
+			Kind:     "container",
+			Image:    orUnknown(container.Image),
+			Ready:    unknown,
+			Restarts: unknown,
+			State:    orUnknown(container.State),
+			Reason:   container.Reason,
+		}
+		if container.Init {
+			view.Kind = "init"
+		}
+		if container.Ready != nil {
+			view.Ready = fmt.Sprintf("%t", *container.Ready)
+		}
+		if container.Restarts != nil {
+			view.Restarts = strconv.Itoa(*container.Restarts)
+		}
+		// A non-zero exit is a fault even when the kubelet gives it no
+		// reason; a zero exit on a completed init container is not.
+		view.Faulted = container.Reason != "" && container.Reason != "Completed"
+		if container.ExitCode != nil && *container.ExitCode != 0 {
+			view.Faulted = true
+			if view.Reason == "" {
+				view.Reason = fmt.Sprintf("exit %d", *container.ExitCode)
+			}
+		}
+		views = append(views, view)
+	}
+	return views
 }

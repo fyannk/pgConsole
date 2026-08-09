@@ -312,7 +312,7 @@ func (c *Client) logOwnershipUnavailable(op string, err error) {
 // are indistinguishable to the caller — both are not-found — while the
 // exclusion is logged with its stable reason. The fetch runs on the
 // request's context; nothing is cached or persisted.
-func (c *Client) TailPoolerLogs(ctx context.Context, pod string) (observe.LogTail, error) {
+func (c *Client) TailPoolerLogs(ctx context.Context, pod, container string) (observe.LogTail, error) {
 	getCtx, cancel := context.WithTimeout(ctx, c.opts.RequestTimeout)
 	obj, err := c.dyn.Resource(podGVR).Namespace(c.opts.Namespace).Get(getCtx, pod, metav1.GetOptions{})
 	cancel()
@@ -330,11 +330,18 @@ func (c *Client) TailPoolerLogs(ctx context.Context, pod string) (observe.LogTai
 		c.logExcludedPod(facts.Name)
 		return observe.LogTail{}, redact.NewError("pooler log tail", redact.CategoryNotFound, nil)
 	}
+	if container == "" {
+		container = pgBouncerContainer
+	}
+	if !declaresContainer(facts.Containers, container) {
+		c.logExcludedContainer(facts.Name, container)
+		return observe.LogTail{}, redact.NewError("pooler log tail", redact.CategoryNotFound, nil)
+	}
 
 	lines := int64(c.opts.LogTailLines)
 	limit := c.opts.LogTailMaxBytes
 	req := c.typed.CoreV1().Pods(c.opts.Namespace).GetLogs(pod, &corev1.PodLogOptions{
-		Container:  pgBouncerContainer,
+		Container:  container,
 		TailLines:  &lines,
 		LimitBytes: &limit,
 	})

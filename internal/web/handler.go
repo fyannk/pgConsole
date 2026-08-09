@@ -199,9 +199,12 @@ type MetricsSource interface {
 type LogTailer interface {
 	// TailPoolerLogs performs the same bounded fetch for a pod proven to
 	// belong to one of the cluster's connection poolers.
-	TailPoolerLogs(ctx context.Context, pod string) (observe.LogTail, error)
-	// TailLogs fetches the bounded tail; a non-member pod is not found.
-	TailLogs(ctx context.Context, pod string) (observe.LogTail, error)
+	TailPoolerLogs(ctx context.Context, pod, container string) (observe.LogTail, error)
+	// TailLogs fetches the bounded tail of one container in a member
+	// pod; an empty container means the default one for the roster. A
+	// non-member pod, and a container the pod does not declare, are both
+	// not-found.
+	TailLogs(ctx context.Context, pod, container string) (observe.LogTail, error)
 }
 
 // Auth bundles the identity capability of the handler. The authorization
@@ -347,6 +350,10 @@ func (h *Handler) Routes() http.Handler {
 	// poweruser level or above, and the affordance is hidden below it.
 	if h.cfg.AllowLogs {
 		mux.HandleFunc("GET /logs/{pod}", h.requireLevel(authz.TierPowerUser, requirePowerLevel, h.handleLogs))
+		// The container-addressed form. CNPG-I moves backup and WAL
+		// archiving into plugin sidecars, so the failures an operator
+		// needs are no longer all in the postgres container.
+		mux.HandleFunc("GET /logs/{pod}/{container}", h.requireLevel(authz.TierPowerUser, requirePowerLevel, h.handleLogs))
 		mux.HandleFunc("GET /poolers/logs/{pod}", h.requireLevel(authz.TierPowerUser, requirePowerLevel, h.handlePoolerLogs))
 	}
 	// Operation routes exist only in operations mode with a wired
@@ -758,12 +765,12 @@ var podNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`
 // tail is the roster's own membership-proving fetch: the two rosters
 // are separate ownership chains, and the raw route must not be the way
 // round one of them.
-func (h *Handler) serveRawTail(w http.ResponseWriter, r *http.Request, pod string, tail func(context.Context, string) (observe.LogTail, error)) {
+func (h *Handler) serveRawTail(w http.ResponseWriter, r *http.Request, pod, container string, tail func(context.Context, string, string) (observe.LogTail, error)) {
 	if h.tailer == nil {
 		http.Error(w, "no Kubernetes access", http.StatusServiceUnavailable)
 		return
 	}
-	tailed, err := tail(r.Context(), pod)
+	tailed, err := tail(r.Context(), pod, container)
 	if err != nil {
 		if redact.Categorize(err) == redact.CategoryNotFound {
 			http.NotFound(w, r)
@@ -789,8 +796,17 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// An absent container means the roster's default. A malformed one is
+	// refused here rather than sent to the API server, so the console
+	// states its own refusal; the name is then checked against what the
+	// pod actually declares, which is the check that matters.
+	container := r.PathValue("container")
+	if container != "" && !podNamePattern.MatchString(container) {
+		http.NotFound(w, r)
+		return
+	}
 	if r.URL.Query().Get("raw") == "1" {
-		h.serveRawTail(w, r, pod, h.tailer.TailLogs)
+		h.serveRawTail(w, r, pod, container, h.tailer.TailLogs)
 		return
 	}
 	view := LogsView{
@@ -804,7 +820,7 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 		view.State = "unavailable: no Kubernetes access"
 	} else {
-		tail, err := h.tailer.TailLogs(r.Context(), pod)
+		tail, err := h.tailer.TailLogs(r.Context(), pod, container)
 		switch {
 		case err == nil:
 			view.Bounds = fmt.Sprintf("last %d lines, at most %d bytes", tail.LineLimit, tail.ByteLimit)
@@ -849,7 +865,7 @@ func (h *Handler) handlePoolerLogs(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.serveRawTail(w, r, pod, h.tailer.TailPoolerLogs)
+	h.serveRawTail(w, r, pod, "", h.tailer.TailPoolerLogs)
 }
 
 // handleHealthz proves process liveness and nothing else.
