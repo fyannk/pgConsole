@@ -30,17 +30,17 @@ func TestConvertAccessRequestReadsReviewFields(t *testing.T) {
 		"metadata":   map[string]any{"name": "req-1", "uid": "u-1", "creationTimestamp": "2026-07-29T08:00:00Z"},
 		"spec":       map[string]any{"subject": "alice@corp", "message": "need access"},
 		"status": map[string]any{
-			"state":            "approved",
-			"requestedRoleRef": map[string]any{"name": "reader"},
-			"decidedBy":        "dba@corp",
-			"decidedAt":        "2026-07-29T09:30:00Z",
+			"state":          "approved",
+			"requestedLevel": "poweruser",
+			"decidedBy":      "dba@corp",
+			"decidedAt":      "2026-07-29T09:30:00Z",
 		},
 	}}
 	got := convertAccessRequest(u)
 	if got.Name != "req-1" || got.UID != "u-1" || got.Subject != "alice@corp" || got.Message != "need access" {
 		t.Errorf("metadata/spec = %+v", got)
 	}
-	if got.State != observe.AccessRequestApproved || got.RequestedRole != "reader" || got.DecidedBy != "dba@corp" {
+	if got.State != observe.AccessRequestApproved || got.RequestedLevel != "poweruser" || got.DecidedBy != "dba@corp" {
 		t.Errorf("status = %+v", got)
 	}
 	if got.DecidedAt == nil || got.DecidedAt.Hour() != 9 {
@@ -80,7 +80,7 @@ func TestConvertAccessRequestPendingWhenNoStatus(t *testing.T) {
 	if !got.Pending() {
 		t.Errorf("state = %q, want pending", got.State)
 	}
-	if got.DecidedAt != nil || got.DecidedBy != "" || got.RequestedRole != "" {
+	if got.DecidedAt != nil || got.DecidedBy != "" || got.RequestedLevel != "" {
 		t.Errorf("undecided request carries decision fields: %+v", got)
 	}
 }

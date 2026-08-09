@@ -1,30 +1,15 @@
-# Minimal stand-ins for the pgToolBox operator's CRDs — enough to exercise
+# Minimal stand-in for the pgToolBox operator's CRD — enough to exercise
 # pgConsole's dba access-request review panel without the operator present.
-# The operator owns the real, richer schemas; pgConsole reads only
-# spec.subject / spec.message and the role names, and writes only the
-# request status subresource, so a preserve-unknown-fields schema with a
-# status subresource is a sufficient, honest stand-in for local dev and the
-# e2e test. Not for production.
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: pgtoolboxroles.pgtoolbox.fyannk.dev
-spec:
-  group: pgtoolbox.fyannk.dev
-  scope: Namespaced
-  names:
-    plural: pgtoolboxroles
-    singular: pgtoolboxrole
-    kind: PgToolBoxRole
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          x-kubernetes-preserve-unknown-fields: true
----
+# The operator owns the real, richer schema; pgConsole reads only
+# spec.subject / spec.message and writes only the request status
+# subresource, so a preserve-unknown-fields schema with a status
+# subresource is a sufficient, honest stand-in for local dev and the e2e
+# test. Not for production.
+#
+# There is deliberately no role kind here. pgToolBox dropped
+# PgToolBoxRole: the levels an approval may grant are the closed set
+# view/poweruser/dba, hardcoded on both sides, so there is nothing to
+# list and nothing to stand in for.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:

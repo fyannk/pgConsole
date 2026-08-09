@@ -53,6 +53,23 @@ const (
 	LevelDBA = "dba"
 )
 
+// GrantableLevels lists the closed level set in ascending order, for the
+// one caller that has to offer a choice between them: the access-request
+// review panel's approval picker.
+//
+// The set is hardcoded on both sides of the contract — the operator's
+// RoleLevel enum and this constant block — because there is nothing an
+// operator could add. That is why the picker enumerates a constant here
+// rather than listing objects from the API: there is no PgToolBoxRole kind
+// to list, and a level that is not one of these three means nothing to
+// either side.
+//
+// The returned slice is a copy, so a caller cannot reorder the set for
+// everyone else.
+func GrantableLevels() []string {
+	return []string{LevelView, LevelPowerUser, LevelDBA}
+}
+
 // String names the tier for logs and display.
 func (t Tier) String() string {
 	switch t {

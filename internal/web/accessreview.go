@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/fyannk/pgConsole/internal/authz"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
 	"github.com/fyannk/pgConsole/internal/review"
@@ -40,7 +41,7 @@ type ReviewExecutor interface {
 	// Verify checks a confirmation token for an action and request name.
 	Verify(name, action, token string) bool
 	// Decide validates and records the decision, auditing it.
-	Decide(ctx context.Context, name, action, role, decidedBy string, knownRoles []string) (outcome string, err error)
+	Decide(ctx context.Context, name, action, level, decidedBy string) (outcome string, err error)
 }
 
 // AccessReviewView is the dba review panel's view model.
@@ -55,8 +56,11 @@ type AccessReviewView struct {
 	HasSnapshot bool
 	// Truncated reports a source or display safety ceiling.
 	Truncated bool
-	// Roles are the approval picker options, name-sorted.
-	Roles []string
+	// Levels are the approval picker options: the closed grantable set,
+	// in ascending order. They come from the console's own ladder rather
+	// than from anything observed, so the picker is identical in every
+	// deployment and cannot be emptied by a failed read.
+	Levels []string
 	// Pending are undecided requests, each with confirmation tokens.
 	Pending []PendingRequestView
 	// Decided are the read-only audit rows for resolved requests.
@@ -87,8 +91,8 @@ type DecidedRequestView struct {
 	Subject string
 	// State is the decision state.
 	State string
-	// RequestedRole is the role recorded on an approval, else empty.
-	RequestedRole string
+	// RequestedLevel is the level granted by an approval, else empty.
+	RequestedLevel string
 	// DecidedBy is the reviewer identity recorded on the decision.
 	DecidedBy string
 	// DecidedAge is the time since the decision.
@@ -129,7 +133,7 @@ func (h *Handler) buildAccessReviewView(snap observe.AccessReviewSnapshot, ok bo
 		Meta:        buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, h.now()),
 		HasSnapshot: ok,
 		Truncated:   snap.RequestsTruncated,
-		Roles:       snap.Roles,
+		Levels:      authz.GrantableLevels(),
 	}
 	if !ok {
 		return view
@@ -148,12 +152,12 @@ func (h *Handler) buildAccessReviewView(snap observe.AccessReviewSnapshot, ok bo
 			continue
 		}
 		view.Decided = append(view.Decided, DecidedRequestView{
-			Name:          req.Name,
-			Subject:       boundMessage(req.Subject),
-			State:         string(req.State),
-			RequestedRole: req.RequestedRole,
-			DecidedBy:     boundMessage(req.DecidedBy),
-			DecidedAge:    formatTimeAge(req.DecidedAt, req.CreatedAt, now),
+			Name:           req.Name,
+			Subject:        boundMessage(req.Subject),
+			State:          string(req.State),
+			RequestedLevel: req.RequestedLevel,
+			DecidedBy:      boundMessage(req.DecidedBy),
+			DecidedAge:     formatTimeAge(req.DecidedAt, req.CreatedAt, now),
 		})
 	}
 	return view
@@ -192,12 +196,7 @@ func (h *Handler) handleAccessDecision(action string) http.HandlerFunc {
 				decidedBy = id.User
 			}
 		}
-		var roles []string
-		if snap, ok := h.sources.AccessReview.CurrentAccessReview(); ok {
-			roles = snap.Roles
-		}
-
-		outcome, err := h.reviewer.Decide(r.Context(), name, action, r.PostForm.Get("role"), decidedBy, roles)
+		outcome, err := h.reviewer.Decide(r.Context(), name, action, r.PostForm.Get("level"), decidedBy)
 		view := AccessDecisionResultView{
 			Shell:       h.shell(r, "access"),
 			ClusterName: h.cfg.ClusterName,
@@ -209,9 +208,9 @@ func (h *Handler) handleAccessDecision(action string) http.HandlerFunc {
 		status := http.StatusOK
 		switch {
 		case err == nil:
-		case errors.Is(err, review.ErrUnknownRole) || errors.Is(err, review.ErrInvalidAction):
+		case errors.Is(err, review.ErrUnknownLevel) || errors.Is(err, review.ErrInvalidAction):
 			status = http.StatusBadRequest
-			view.Outcome = "rejected: the chosen role is not one of the offered options"
+			view.Outcome = "rejected: the chosen level is not one of the offered options"
 		default:
 			status = http.StatusBadGateway
 			view.Outcome = "the decision could not be recorded"

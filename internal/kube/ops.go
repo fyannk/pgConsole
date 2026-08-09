@@ -130,10 +130,13 @@ func (c *Client) patchCluster(ctx context.Context, op string, patch []byte, subr
 
 // WriteAccessRequestStatus records a reviewer's decision on the named
 // PgToolBoxAccessRequest by merge-patching only its status subresource:
-// the state, the chosen role (approvals only), and the reviewer identity
-// and time. It never creates or modifies users, roles, or spec — the
+// the state, the granted level (approvals only), and the reviewer
+// identity and time. It never creates or modifies users or spec — the
 // operator's controller materializes the PgToolBoxUser after approval.
-func (c *Client) WriteAccessRequestStatus(ctx context.Context, name, state, roleName, decidedBy string, decidedAt time.Time) error {
+//
+// The level is a value from the operator's closed RoleLevel enum, not a
+// reference to an object: there is no role kind to point at.
+func (c *Client) WriteAccessRequestStatus(ctx context.Context, name, state, level, decidedBy string, decidedAt time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, c.opts.RequestTimeout)
 	defer cancel()
 	status := map[string]any{
@@ -141,8 +144,8 @@ func (c *Client) WriteAccessRequestStatus(ctx context.Context, name, state, role
 		"decidedBy": decidedBy,
 		"decidedAt": decidedAt.UTC().Format(time.RFC3339),
 	}
-	if roleName != "" {
-		status["requestedRoleRef"] = map[string]any{"name": roleName}
+	if level != "" {
+		status["requestedLevel"] = level
 	}
 	patch, _ := json.Marshal(map[string]any{"status": status})
 	_, err := c.dyn.Resource(accessRequestGVR).Namespace(c.opts.Namespace).Patch(

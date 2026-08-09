@@ -391,11 +391,11 @@ grep -qF '"outcome":"accepted"' "$OUT/op-audit.log" || { log "operation audit ou
 log "operations ok (index 200, tokenless 403, RBAC-blocked refusal, granted+confirmed reload recorded and audited)"
 
 log "access-request review: dba-gated panel over the pgToolBox CRDs"
-# Stand in for the operator's CRDs and seed one pending request plus a
-# role picker, then enable the review panel and its Role.
+# Stand in for the operator's CRD and seed one pending request, then
+# enable the review panel and its Role. The approval picker needs no
+# seeded objects: it offers the closed level set from the console itself.
 kubectl apply -f hack/testdata/pgtoolbox-crds.yaml
 kubectl wait --for=condition=established --timeout=60s \
-  crd/pgtoolboxroles.pgtoolbox.fyannk.dev \
   crd/pgtoolboxaccessrequests.pgtoolbox.fyannk.dev
 # The Established condition can precede the API server actually serving the new
 # kinds, so retry the custom-resource apply until discovery catches up rather
@@ -415,8 +415,8 @@ rev_low=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
   -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: poweruser" "$base/access-requests")
 [ "$rev_low" = "403" ] || { log "poweruser review = $rev_low, want 403"; exit 1; }
 
-# dba reaches it; the observed pending request and role picker render once
-# the collector has seeded.
+# dba reaches it; the observed pending request and the level picker
+# render once the collector has seeded.
 i=0
 while :; do
   rev_dba=$(curl -s -o "$OUT/review.html" -w '%{http_code}' --max-time 10 \
@@ -426,8 +426,13 @@ while :; do
   fi
   i=$((i + 2)); [ "$i" -le 60 ] || { log "dba review = $rev_dba without the pending request"; exit 1; }; sleep 2
 done
-grep -qF "reader" "$OUT/review.html" || { log "review panel misses the role picker options"; exit 1; }
-log "review ok (poweruser 403, dba 200 with the pending request and role picker)"
+# The picker is the console's own closed ladder, so every level must be
+# offered regardless of what the API server holds.
+for level in view poweruser dba; do
+  grep -qF "value=\"$level\"" "$OUT/review.html" ||
+    { log "review panel misses the $level picker option"; exit 1; }
+done
+log "review ok (poweruser 403, dba 200 with the pending request and all three levels offered)"
 
 # The decision write: the only mutation this panel performs, and the one
 # the Role exists to authorize. Reading the panel proves nothing about
@@ -439,7 +444,7 @@ approve_token=$(sed -n '/action="\/access-requests\/alice-orders\/approve"/,/<\/
 [ -n "$approve_token" ] || { log "approve form carries no CSRF token"; exit 1; }
 decide=$(curl -s -o "$OUT/decision.html" -w '%{http_code}' --max-time 15 \
   -H "X-Forwarded-User: fanch" -H "X-PgToolBox-Level: dba" \
-  -X POST --data "csrf=${approve_token}" --data "role=reader" \
+  -X POST --data "csrf=${approve_token}" --data "level=poweruser" \
   "$base/access-requests/alice-orders/approve")
 [ "$decide" = "200" ] || { log "approve = $decide, want 200"; exit 1; }
 

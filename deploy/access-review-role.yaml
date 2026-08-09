@@ -6,9 +6,13 @@
 # console's generated Role instead.
 #
 # The write surface is exactly one verb on one subresource: recording a
-# reviewer's decision on a request status. The console reads requests and
-# role names to render the panel; it never creates or modifies users,
-# roles, proxy configuration, or the request spec.
+# reviewer's decision on a request status. The console reads requests to
+# render the panel; it never creates or modifies users, proxy
+# configuration, or the request spec.
+#
+# The approval picker needs no grant of its own. The levels it offers are
+# the closed set view/poweruser/dba, hardcoded on both sides of the
+# operator's contract, so there is no role kind to list.
 #
 # There is no create, delete, deletecollection, spec-write, or
 # cluster-scoped grant, and nothing on secrets. The operator's controller
@@ -30,10 +34,6 @@ rules:
   - apiGroups: ["pgtoolbox.fyannk.dev"]
     resources: ["pgtoolboxaccessrequests/status"]
     verbs: ["patch"]
-  # Read the role names to populate the approval picker.
-  - apiGroups: ["pgtoolbox.fyannk.dev"]
-    resources: ["pgtoolboxroles"]
-    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -51,8 +51,7 @@ console can and cannot do.
 |---|---|---|
 | An operation returns 502 | The pinned CNPG interaction was rejected by the API — usually RBAC. | Apply the operations Role, pinned to the cluster by `resourceNames`. |
 | An operation reports success but the cluster looks unchanged | Operations are fire-and-observe: the write is recorded, and progress appears on the status page as the operator reports it — not on the result page. | Return to the console and watch the cluster section. |
-| The approval picker lists no roles | No `PgToolBoxRole` is visible, or the review Role lacks `get`/`list`/`watch` on `pgtoolboxroles`. | Apply `deploy/access-review-role.yaml` and confirm roles exist. |
-| An approval returns 400 "not one of the offered options" | The submitted role was not an observed `PgToolBoxRole`. | Reload the panel and pick a listed role. |
+| An approval returns 400 "not one of the offered options" | The submitted level was not one of `view`, `poweruser`, `dba`. The match is exact, so trailing space or different case is refused. | Reload the panel and pick a listed level. |
 | A recorded decision does not show in the list | The status write is fire-and-observe; the panel reflects it once the informer catches up. | Wait and reload. |
 
 ## Repository evidence

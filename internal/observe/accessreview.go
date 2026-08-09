@@ -23,12 +23,10 @@ import (
 
 // Access-review bounds. One extra request is retained internally as a
 // truncation sentinel, so neither memory nor the rendered page grows
-// with a namespace-wide flood of requests or roles.
+// with a namespace-wide flood of requests.
 const (
 	// MaxAccessRequests bounds retained and rendered access requests.
 	MaxAccessRequests = 500
-	// MaxAccessRoles bounds retained and rendered role names.
-	MaxAccessRoles = 200
 )
 
 // AccessRequestState is the operator-reported decision state of one
@@ -64,9 +62,11 @@ type AccessRequestFacts struct {
 	State AccessRequestState
 	// CreatedAt is the resource creation time.
 	CreatedAt time.Time
-	// RequestedRole is the role recorded on the decided request
-	// (status.requestedRoleRef.name); empty until approved.
-	RequestedRole string
+	// RequestedLevel is the authorization level recorded on the decided
+	// request (status.requestedLevel); empty until approved. It is one of
+	// the operator's closed RoleLevel set, which is the console's own
+	// level set: there is no role object to reference.
+	RequestedLevel string
 	// DecidedBy is the reviewer identity recorded on a decided request.
 	DecidedBy string
 	// DecidedAt is the decision time recorded on a decided request.
@@ -82,9 +82,6 @@ func (f AccessRequestFacts) Pending() bool { return f.State == AccessRequestPend
 type AccessReviewState struct {
 	// Requests is the bounded selected access-request seed.
 	Requests []AccessRequestFacts
-	// Roles is the bounded selected role-name seed for the approval
-	// picker.
-	Roles []string
 	// RequestsTruncated reports a source safety ceiling.
 	RequestsTruncated bool
 	// RequestsResourceVersion starts the request watch.
@@ -117,8 +114,11 @@ type AccessReviewWatch interface {
 }
 
 // AccessReviewSource produces the namespace's PgToolBoxAccessRequest
-// resources and the PgToolBoxRole names. The Kubernetes adapter performs
-// namespace-scoped listing; roles are seeded and refresh on reseed.
+// resources. The Kubernetes adapter performs namespace-scoped listing.
+//
+// It produces no picker options: the levels an approval may grant are the
+// closed set in internal/authz, hardcoded on both sides of the operator's
+// contract, so there is nothing to observe.
 type AccessReviewSource interface {
 	// FetchAccessReview returns a complete bounded seed.
 	FetchAccessReview(ctx context.Context) (AccessReviewState, error)
@@ -139,8 +139,6 @@ type AccessReviewSnapshot struct {
 	// Requests are pending-first (oldest first), then decided
 	// (newest-first), bounded by MaxAccessRequests.
 	Requests []AccessRequestFacts
-	// Roles are name-sorted and bounded by MaxAccessRoles.
-	Roles []string
 }
 
 // AccessReviewStore holds the current review snapshot for concurrent
@@ -161,15 +159,13 @@ func (s *AccessReviewStore) CurrentAccessReview() (AccessReviewSnapshot, bool) {
 	return s.snap, s.has
 }
 
-func (s *AccessReviewStore) publish(requests []AccessRequestFacts, roles []string, observedAt time.Time, sourceTruncated bool) {
+func (s *AccessReviewStore) publish(requests []AccessRequestFacts, observedAt time.Time, sourceTruncated bool) {
 	// The cut is decided by the length, never by the flag. Cutting on
 	// the flag panicked: sourceTruncated is sticky for the life of a
 	// seed, so once eviction set it, deletions bringing the retained set
 	// back under the bound left a slice shorter than the cut.
 	requestCopy, cut := bounded(requests, lessAccessRequest, MaxAccessRequests)
 	truncated := sourceTruncated || cut
-
-	roleCopy, _ := bounded(roles, func(a, b string) bool { return a < b }, MaxAccessRoles)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -178,7 +174,6 @@ func (s *AccessReviewStore) publish(requests []AccessRequestFacts, roles []strin
 		ObservedAt:        observedAt,
 		RequestsTruncated: truncated,
 		Requests:          requestCopy,
-		Roles:             roleCopy,
 	}
 	s.has = true
 }
@@ -235,14 +230,13 @@ var accessRequestRetention = retention[AccessRequestFacts]{
 
 // AccessReviewCollector maintains a bounded review view using seed,
 // watch, immutable publication, stale retention, and bounded retry
-// backoff. Roles are carried on the seed and refresh on each reseed.
+// backoff.
 type AccessReviewCollector struct {
 	source    AccessReviewSource
 	store     *AccessReviewStore
 	clock     Clock
 	logger    *slog.Logger
 	requests  keyed[AccessRequestFacts]
-	roles     []string
 	truncated bool
 }
 
@@ -259,13 +253,9 @@ func (c *AccessReviewCollector) Run(ctx context.Context) error {
 // op names this resource in contact-loss logs.
 func (c *AccessReviewCollector) op() string { return "access review" }
 
-// seed replaces the retained requests and the role list. The cursor is
-// the whole seed state rather than a resource version: the review watch
-// resumes two kinds and needs both.
-//
-// Roles are carried on the seed and refreshed on each reseed, not
-// watched: the approval picker needs the names that exist now, and a
-// stale name there would offer a role that cannot be granted.
+// seed replaces the retained requests. The cursor is the whole seed
+// state rather than a bare resource version, so the shape survives the
+// watch resuming from it.
 func (c *AccessReviewCollector) seed(ctx context.Context) (AccessReviewState, error) {
 	state, err := c.source.FetchAccessReview(ctx)
 	if err != nil {
@@ -278,7 +268,6 @@ func (c *AccessReviewCollector) seed(ctx context.Context) (AccessReviewState, er
 			c.truncated = true
 		}
 	}
-	c.roles = append([]string(nil), state.Roles...)
 	return state, nil
 }
 
@@ -307,9 +296,9 @@ func (c *AccessReviewCollector) apply(change AccessRequestChange) bool {
 	return true
 }
 
-// publish snapshots the retained requests and roles into the store.
+// publish snapshots the retained requests into the store.
 func (c *AccessReviewCollector) publish(observedAt time.Time) {
-	c.store.publish(c.requests.list(), c.roles, observedAt, c.truncated)
+	c.store.publish(c.requests.list(), observedAt, c.truncated)
 }
 
 // markStale marks the retained snapshot stale, if one exists.

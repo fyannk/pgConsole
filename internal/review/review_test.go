@@ -38,15 +38,15 @@ type recordingWriter struct {
 	calls    int
 	name     string
 	state    string
-	role     string
+	level    string
 	by       string
 	at       time.Time
 	failWith error
 }
 
-func (w *recordingWriter) WriteAccessRequestStatus(_ context.Context, name, state, roleName, decidedBy string, decidedAt time.Time) error {
+func (w *recordingWriter) WriteAccessRequestStatus(_ context.Context, name, state, level, decidedBy string, decidedAt time.Time) error {
 	w.calls++
-	w.name, w.state, w.role, w.by, w.at = name, state, roleName, decidedBy, decidedAt
+	w.name, w.state, w.level, w.by, w.at = name, state, level, decidedBy, decidedAt
 	return w.failWith
 }
 
@@ -61,18 +61,18 @@ func newExecutor(t *testing.T, writer Writer) (*Executor, *bytes.Buffer) {
 	return NewExecutor(writer, csrf, clock, slog.New(slog.NewJSONHandler(logs, nil))), logs
 }
 
-func TestDecideApproveWritesChosenRole(t *testing.T) {
+func TestDecideApproveWritesChosenLevel(t *testing.T) {
 	t.Parallel()
 	w := &recordingWriter{}
 	e, _ := newExecutor(t, w)
-	outcome, err := e.Decide(context.Background(), "req-1", ActionApprove, "reader", "alice@corp", []string{"reader", "admin"})
+	outcome, err := e.Decide(context.Background(), "req-1", ActionApprove, "poweruser", "alice@corp")
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 	if outcome != "approved" {
 		t.Errorf("outcome = %q", outcome)
 	}
-	if w.calls != 1 || w.name != "req-1" || w.state != "approved" || w.role != "reader" || w.by != "alice@corp" {
+	if w.calls != 1 || w.name != "req-1" || w.state != "approved" || w.level != "poweruser" || w.by != "alice@corp" {
 		t.Errorf("write = %+v", w)
 	}
 	if !w.at.Equal(time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC)) {
@@ -80,30 +80,32 @@ func TestDecideApproveWritesChosenRole(t *testing.T) {
 	}
 }
 
-func TestDecideDenyWritesNoRole(t *testing.T) {
+func TestDecideDenyWritesNoLevel(t *testing.T) {
 	t.Parallel()
 	w := &recordingWriter{}
 	e, _ := newExecutor(t, w)
-	outcome, err := e.Decide(context.Background(), "req-2", ActionDeny, "", "bob@corp", []string{"reader"})
+	outcome, err := e.Decide(context.Background(), "req-2", ActionDeny, "", "bob@corp")
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
-	if outcome != "denied" || w.state != "denied" || w.role != "" || w.by != "bob@corp" {
+	if outcome != "denied" || w.state != "denied" || w.level != "" || w.by != "bob@corp" {
 		t.Errorf("deny write = %+v, outcome %q", w, outcome)
 	}
 }
 
-// TestDecideApproveRejectsOffMenuRole proves a tampered form naming a
-// role outside the observed picker options is refused, and no write
-// happens.
-func TestDecideApproveRejectsOffMenuRole(t *testing.T) {
+// TestDecideApproveRejectsOffMenuLevel proves a tampered form naming a
+// level outside the closed grantable set is refused, and no write
+// happens. The whitespace and case cases matter: the operator's enum is
+// exact, so a level that only looks right must not reach the API server
+// and be refused there instead.
+func TestDecideApproveRejectsOffMenuLevel(t *testing.T) {
 	t.Parallel()
 	w := &recordingWriter{}
 	e, _ := newExecutor(t, w)
-	for _, role := range []string{"", "superuser", "admin "} {
-		_, err := e.Decide(context.Background(), "req-3", ActionApprove, role, "mallory", []string{"reader", "admin"})
-		if !errors.Is(err, ErrUnknownRole) {
-			t.Errorf("role %q: err = %v, want ErrUnknownRole", role, err)
+	for _, level := range []string{"", "superuser", "reader", "poweruser ", "DBA", "admin"} {
+		_, err := e.Decide(context.Background(), "req-3", ActionApprove, level, "mallory")
+		if !errors.Is(err, ErrUnknownLevel) {
+			t.Errorf("level %q: err = %v, want ErrUnknownLevel", level, err)
 		}
 	}
 	if w.calls != 0 {
@@ -115,7 +117,7 @@ func TestDecideRejectsUnknownAction(t *testing.T) {
 	t.Parallel()
 	w := &recordingWriter{}
 	e, _ := newExecutor(t, w)
-	if _, err := e.Decide(context.Background(), "req-4", "escalate", "reader", "eve", []string{"reader"}); !errors.Is(err, ErrInvalidAction) {
+	if _, err := e.Decide(context.Background(), "req-4", "escalate", "view", "eve"); !errors.Is(err, ErrInvalidAction) {
 		t.Errorf("err = %v, want ErrInvalidAction", err)
 	}
 	if w.calls != 0 {
@@ -130,7 +132,7 @@ func TestDecideWriteFailurePropagatesRedacted(t *testing.T) {
 	const canary = "sekret-canary"
 	w := &recordingWriter{failWith: redact.NewError("access request decide "+canary, redact.CategoryForbidden, nil)}
 	e, logs := newExecutor(t, w)
-	if _, err := e.Decide(context.Background(), "req-5", ActionDeny, "", "carol", nil); err == nil {
+	if _, err := e.Decide(context.Background(), "req-5", ActionDeny, "", "carol"); err == nil {
 		t.Fatal("write failure not returned")
 	}
 	if strings.Contains(logs.String(), canary) {
@@ -164,7 +166,7 @@ func TestDecideAuditsReviewerAndOutcome(t *testing.T) {
 	t.Parallel()
 	w := &recordingWriter{}
 	e, logs := newExecutor(t, w)
-	if _, err := e.Decide(context.Background(), "req-8", ActionApprove, "reader", "dana@corp", []string{"reader"}); err != nil {
+	if _, err := e.Decide(context.Background(), "req-8", ActionApprove, "dba", "dana@corp"); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 	line := logs.String()

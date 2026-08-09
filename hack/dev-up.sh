@@ -479,7 +479,6 @@ YAML
   log "installing the sample pgToolBox review CRDs and objects"
   kubectl apply -f hack/testdata/pgtoolbox-crds.yaml > /dev/null
   kubectl wait --for=condition=established --timeout=60s \
-    crd/pgtoolboxroles.pgtoolbox.fyannk.dev \
     crd/pgtoolboxaccessrequests.pgtoolbox.fyannk.dev > /dev/null
   kubectl apply -f hack/testdata/pgtoolbox-samples.yaml > /dev/null
 
