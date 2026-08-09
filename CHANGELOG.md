@@ -9,6 +9,76 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-09
+
+### Added
+
+- **Diagnostics** (`ALLOW_DIAGNOSTICS=true`, `poweruser`). A screen that
+  correlates facts the other screens already carry into findings: what is
+  wrong, where, and the claim it rests on. It observes nothing of its own
+  and needs **no Role** — every detector is a pure function over the
+  snapshots the console already publishes.
+
+  Every finding quotes its evidence verbatim with the origin named, and
+  links to a screen rather than offering an action. The page also lists
+  **what was checked**, including anything that could not run and why: an
+  empty result means no detector matched, never that the cluster is
+  healthy.
+
+  Five detectors ship:
+
+  | Detector | Reports |
+  |---|---|
+  | `backup-cadence` | a schedule running far more often than its author is likely to have meant |
+  | `resource-quota` | a create the API server refused against a namespace quota |
+  | `pod-scheduling` | a pod the scheduler cannot place |
+  | `image-pull` | a container whose image cannot be pulled, naming the container |
+  | `volume-binding` | a claim that never bound |
+
+  `backup-cadence` is the one that finds something otherwise invisible.
+  CloudNativePG takes a six-field cron, seconds first, so a five-field
+  expression written from habit becomes valid and usually means hourly.
+  Nothing reports it: the backups succeed and the cluster is healthy while
+  a full base backup runs twenty-four times a day.
+
+- **Container-addressable log tails.** `GET /logs/{pod}/{container}` reads
+  any container the pod declares, including init containers and plugin
+  sidecars; `GET /logs/{pod}` keeps its meaning, so no existing link
+  changes. CNPG-I moves backup and WAL archiving into sidecars, and those
+  failures were previously unreadable.
+
+- **Per-container pod facts.** The pod detail screen lists every
+  container with its image, state, the kubelet's reason, restarts, and
+  readiness. This is where `ImagePullBackOff`, `CrashLoopBackOff`, and
+  `OOMKilled` now surface.
+
+### Fixed
+
+- **A pod's restart count was the sum across every container**, so a
+  crash-looping sidecar reported an unstable instance that had never
+  restarted. It is now the PostgreSQL container's own count, with
+  per-container counts listed beside it. `kubectl` shows the sum; kubectl
+  is not making a claim about a database.
+
+### Security
+
+- The log tail's boundary moved from the container to the **pod**,
+  deliberately. Once controller ownership proves the pod belongs to this
+  cluster, restricting reads to the PostgreSQL container bought nothing —
+  that container's log is the most sensitive stream in the pod, since it
+  can carry query text, which is why the tail is `poweruser`-gated and
+  byte-bounded. Meanwhile the restriction hid the sidecars the failures
+  moved into. The container name is still checked against what the pod
+  declares, and a name it does not declare is refused as not-found,
+  matching a non-member pod.
+
+### Upgrading
+
+Nothing to do. `ALLOW_DIAGNOSTICS` defaults to `false`, so the screen is
+absent until you ask for it, and it needs no RBAC change when you do. The
+only behaviour an existing deployment sees is the corrected restart count
+and the new log route.
+
 ## [0.3.0] - 2026-08-09
 
 ### Changed
@@ -147,7 +217,8 @@ First public release.
   independently prove replication health, data integrity, or restoreability,
   and it provides no SQL access, database contents, or Secret reads.
 
-[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/fyannk/pgConsole/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fyannk/pgConsole/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fyannk/pgConsole/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/fyannk/pgConsole/releases/tag/v0.1.0
