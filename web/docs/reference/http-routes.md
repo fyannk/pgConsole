@@ -41,6 +41,7 @@ endpoints and the static assets, and nothing else.
 | GET | `/poolers/pods/{pod}` | `poweruser` | always | The same screen for a pod one of this cluster's poolers owns. |
 | GET | `/healthz` | none | always | Liveness — a constant `ok`. Proves the process is alive, nothing more. |
 | GET | `/readyz` | none | always | Readiness — reaches the API (and a required sidecar). A constant body; probe detail is logged as a category only. |
+| GET | `/diagnostics` | `poweruser` | `ALLOW_DIAGNOSTICS=true` | Findings correlated from the published snapshots, plus the account of what was checked. Reads no API: it renders what the other screens already observe. |
 | GET | `/logs/{pod}` | `poweruser` | `ALLOW_LOGS=true` | One bounded, on-demand log tail for a membership-verified pod, reading its PostgreSQL container. A non-member pod is indistinguishable from a nonexistent one. |
 | GET | `/logs/{pod}/{container}` | `poweruser` | `ALLOW_LOGS=true` | The same tail for a named container in that pod — a plugin sidecar, or an init container. A container the pod does not declare is refused as not found. |
 | GET | `/poolers/logs/{pod}` | `poweruser` | `ALLOW_LOGS=true` | One bounded, on-demand tail for a live-verified Pooler member pod. |

@@ -19,6 +19,7 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `TRUSTED_LEVEL_HEADER` | `X-PgToolBox-Level` | Proxy level header carrying `view`, `poweruser`, or `dba`; empty closes the console entirely — every screen answers 503, because a deployment that forwards no level can admit nobody. |
 | `ALLOW_OPERATIONS` | `false` | Enables the enumerated day-2 operation routes. Strict boolean. |
 | `ALLOW_ACCESS_REVIEW` | `false` | Enables the dba access-request review panel. Strict boolean; needs its own Role. |
+| `ALLOW_DIAGNOSTICS` | `false` | Enables the diagnostics screen, which correlates facts the other screens already carry into findings. Strict boolean; needs no Role, because it observes nothing of its own. |
 | `ALLOW_CLUSTER_CATALOGS` | `false` | Lets the console read the one cluster-scoped `ClusterImageCatalog` its Cluster references. Strict boolean; needs its own ClusterRole. The only setting that grants authority outside the namespace. |
 | `ALLOW_LOGS` | `true` | Master switch for the bounded log tail; when on, the tail still requires the `poweruser` level. |
 | `LOG_TAIL_LINES` | `200` | Lines per log request, 1–2000. |
