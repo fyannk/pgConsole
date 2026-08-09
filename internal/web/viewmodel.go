@@ -700,6 +700,9 @@ type ShellView struct {
 	// CanOperate reports that this request carries both a usable forwarded
 	// identity and the poweruser-or-higher level needed by the route.
 	CanOperate bool
+	// DiagnosticsAvailable reports that this deployment serves the
+	// diagnostics route.
+	DiagnosticsAvailable bool
 	// AccessReviewAvailable reports that this deployment serves the access
 	// review route.
 	AccessReviewAvailable bool

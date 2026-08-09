@@ -166,6 +166,12 @@
     <span class="sidebar-link" aria-disabled="true" title="Operations — disabled in this deployment"><svg><use href="#i-operations"></use></svg><span class="sidebar-label">Operations</span></span>
     {{- end}}
 
+    {{- if and .DiagnosticsAvailable .CanBrowse}}
+    <a class="sidebar-link" href="/diagnostics"{{if eq .Current "diagnostics"}} aria-current="page"{{end}} title="Diagnostics"><svg><use href="#i-operations"></use></svg><span class="sidebar-label">Diagnostics</span></a>
+    {{- else if not .DiagnosticsAvailable}}
+    <span class="sidebar-link" aria-disabled="true" title="Diagnostics — disabled in this deployment"><svg><use href="#i-operations"></use></svg><span class="sidebar-label">Diagnostics</span></span>
+    {{- end}}
+
     {{- if .CanReviewAccess}}
     <a class="sidebar-link" href="/access-requests"{{if eq .Current "access"}} aria-current="page"{{end}} title="Access requests"><svg><use href="#i-access"></use></svg><span class="sidebar-label">Access requests</span></a>
     {{- else if not .AccessReviewAvailable}}

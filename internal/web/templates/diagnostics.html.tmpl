@@ -1,0 +1,62 @@
+{{- /*
+  Diagnostics. Renders web.DiagnosticsView: findings correlated from the
+  snapshots the other screens already render, and — equally load-bearing
+  — the account of what was checked.
+
+  The second panel is not decoration. Findings alone would make an empty
+  screen read as "nothing is wrong", which is a claim derived from the
+  absence of a match rather than from anything a source reported. The
+  checks list turns that into "these were looked at, and these could not
+  be", which is what the console actually knows.
+*/ -}}
+{{template "page-head" "diagnostics"}}
+{{template "shell-open" .Shell}}
+  <header>
+    <div class="header-bar">
+      <h1>Diagnostics</h1>
+    </div>
+    <p class="lede">Every finding restates what a source reported and quotes it. None concludes anything a source did not say.</p>
+  </header>
+
+  <section class="panel">
+    <h2>Findings</h2>
+    {{- if .Findings}}
+    {{- range .Findings}}
+    <article class="finding">
+      <h3 data-state="{{if eq .Severity "critical"}}bad{{else if eq .Severity "warning"}}warn{{else}}ok{{end}}">{{.Summary}}</h3>
+      {{- if .Detail}}
+      <p>{{.Detail}}</p>
+      {{- end}}
+      <dl class="facts">
+        {{- range .Evidence}}
+        <dt>{{.Object}} ({{.Origin}})</dt><dd>{{.Detail}}</dd>
+        {{- end}}
+      </dl>
+      {{- if .Link}}
+      <p><a href="{{.Link}}">{{.LinkLabel}}</a></p>
+      {{- end}}
+    </article>
+    {{- end}}
+    {{- else}}
+    <div class="empty"><strong>No check matched</strong>This is not a statement that the cluster is healthy: it means none of the checks below found what it looks for. What was actually examined is listed underneath.</div>
+    {{- end}}
+  </section>
+
+  <section class="panel">
+    <h2>What was checked</h2>
+    <p class="lede">{{len .Checks}} checks ran{{if .Unavailable}}; {{.Unavailable}} could not run{{end}}. A check that could not run rules nothing out.</p>
+    <table>
+      <thead><tr><th>Check</th><th>Looks for</th><th>Result</th></tr></thead>
+      <tbody>
+        {{- range .Checks}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>{{.Describes}}</td>
+          <td data-state="{{.State}}">{{.Outcome}}{{if .Because}} — {{.Because}}{{end}}</td>
+        </tr>
+        {{- end}}
+      </tbody>
+    </table>
+    <p class="origin">source: application-derived from the snapshots the other screens render; each quoted claim names its own origin above.</p>
+  </section>
+{{template "shell-close"}}

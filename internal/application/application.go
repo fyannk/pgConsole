@@ -280,6 +280,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		LevelHeader:       cfg.TrustedLevelHeader,
 		AllowOperations:   cfg.AllowOperations,
 		AllowAccessReview: cfg.AllowAccessReview,
+		AllowDiagnostics:  cfg.AllowDiagnostics,
 		Links: web.Links{
 			ObjectStoreViewer: cfg.ObjectStoreViewerURL,
 			PgAdmin:           cfg.PgAdminURL,

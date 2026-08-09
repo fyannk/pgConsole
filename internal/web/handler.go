@@ -234,6 +234,8 @@ type Config struct {
 	// AllowOperations enables the enumerated day-2 operation routes.
 	// Disabled, no operation route is registered and no writer exists.
 	AllowOperations bool
+	// AllowDiagnostics enables the diagnostics screen.
+	AllowDiagnostics bool
 	// AllowAccessReview enables the dba access-request review panel.
 	// Disabled, no review route is registered and no writer exists.
 	AllowAccessReview bool
@@ -377,6 +379,15 @@ func (h *Handler) Routes() http.Handler {
 		mux.HandleFunc("GET /access-requests", review(h.handleAccessRequestsIndex))
 		mux.HandleFunc("POST /access-requests/{name}/approve", review(h.handleAccessDecision(reviewpkg.ActionApprove)))
 		mux.HandleFunc("POST /access-requests/{name}/deny", review(h.handleAccessDecision(reviewpkg.ActionDeny)))
+	}
+	// Diagnostics exists only when enabled: disabled mode registers no
+	// route, the same shape as the other opt-in panels. It reads only
+	// snapshots that exist regardless, so it grants no authority; the
+	// poweruser gate is because findings quote evidence the ladder
+	// already gates at that level, notably log-tail links.
+	if h.cfg.AllowDiagnostics {
+		mux.HandleFunc("GET /diagnostics", h.requireLevel(authz.TierPowerUser,
+			"diagnostics requires the poweruser level", h.handleDiagnostics))
 	}
 	mux.Handle("GET /static/", http.FileServerFS(assets))
 	return securityHeaders(mux)
@@ -617,6 +628,7 @@ func (h *Handler) shell(r *http.Request, current string) ShellView {
 		OperationsAvailable:    h.cfg.AllowOperations && h.executor != nil,
 		CanOperate:             access.canOperate(h),
 		AccessReviewAvailable:  h.cfg.AllowAccessReview && h.reviewer != nil && h.sources.AccessReview != nil,
+		DiagnosticsAvailable:   h.cfg.AllowDiagnostics,
 		CanReviewAccess:        access.canReviewAccess(h),
 		HistoryAvailable:       h.sources.History != nil,
 		CanRead:                access.hasIdentity && access.level >= authz.TierView,

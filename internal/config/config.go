@@ -57,6 +57,8 @@ const (
 	EnvAllowClusterCatalogs = "ALLOW_CLUSTER_CATALOGS"
 	// EnvAllowAccessReview enables the dba access-request review panel.
 	EnvAllowAccessReview = "ALLOW_ACCESS_REVIEW"
+	// EnvAllowDiagnostics enables the diagnostics screen.
+	EnvAllowDiagnostics = "ALLOW_DIAGNOSTICS"
 	// EnvAllowLogs enables the bounded instance log tail.
 	EnvAllowLogs = "ALLOW_LOGS"
 	// EnvLogTailLines bounds the lines returned per log request.
@@ -241,6 +243,10 @@ type Config struct {
 	AllowOperations bool
 	// AllowClusterCatalogs enables the cluster-scoped catalog read.
 	AllowClusterCatalogs bool
+	// AllowDiagnostics enables the diagnostics screen, which correlates
+	// facts the other screens already carry into findings. It grants no
+	// authority: every detector reads snapshots that exist regardless.
+	AllowDiagnostics bool
 	// AllowAccessReview enables the dba access-request review panel.
 	AllowAccessReview bool
 	// AllowLogs enables the bounded instance log tail.
@@ -399,6 +405,7 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.AllowOperations = boolVar(lookup, EnvAllowOperations, false, fail)
 	cfg.AllowClusterCatalogs = boolVar(lookup, EnvAllowClusterCatalogs, false, fail)
 	cfg.AllowAccessReview = boolVar(lookup, EnvAllowAccessReview, false, fail)
+	cfg.AllowDiagnostics = boolVar(lookup, EnvAllowDiagnostics, false, fail)
 	cfg.AllowInsecureLinks = boolVar(lookup, EnvAllowInsecureLinks, false, fail)
 	cfg.AllowLogs = boolVar(lookup, EnvAllowLogs, true, fail)
 
