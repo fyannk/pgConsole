@@ -178,7 +178,7 @@ func TestTailPoolerLogsRefusesAnUnverifiedPod(t *testing.T) {
 	c.dyn = fake.NewSimpleDynamicClientWithCustomListKinds(poolerPodScheme(), poolerPodListKinds(),
 		poolerPodObject("impostor-1", "orders-rw-pooler", ""))
 
-	if _, err := c.TailPoolerLogs(context.Background(), "impostor-1"); err == nil {
+	if _, err := c.TailPoolerLogs(context.Background(), "impostor-1", ""); err == nil {
 		t.Fatal("a pod with no ownership chain was tailed")
 	}
 }

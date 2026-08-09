@@ -180,3 +180,134 @@ func TestExcludedPodLogsStableReason(t *testing.T) {
 		t.Fatalf("exclusion log misses the stable reason: %s", logs.String())
 	}
 }
+
+// sidecarPod is an instance pod shaped the way CNPG-I produces one: an
+// init container that has already completed, a healthy postgres
+// container, and a plugin sidecar that is crash-looping.
+func sidecarPod() map[string]any {
+	pod := ownedPod("orders-1", "u1", "primary")
+	spec := pod["spec"].(map[string]any)
+	spec["initContainers"] = []any{
+		map[string]any{"name": "bootstrap-controller", "image": "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"},
+	}
+	spec["containers"] = []any{
+		map[string]any{"name": "postgres", "image": "ghcr.io/cloudnative-pg/postgresql:16.4"},
+		map[string]any{"name": "plugin-barman-cloud", "image": "ghcr.io/cloudnative-pg/plugin-barman-cloud:0.5.0"},
+	}
+	status := pod["status"].(map[string]any)
+	status["initContainerStatuses"] = []any{
+		map[string]any{
+			"name": "bootstrap-controller", "restartCount": int64(0), "ready": true,
+			"image": "x", "imageID": "y",
+			"state": map[string]any{"terminated": map[string]any{"exitCode": int64(0), "reason": "Completed"}},
+		},
+	}
+	status["containerStatuses"] = []any{
+		map[string]any{
+			"name": "postgres", "restartCount": int64(0), "ready": true,
+			"image": "x", "imageID": "y",
+			"state": map[string]any{"running": map[string]any{}},
+		},
+		map[string]any{
+			"name": "plugin-barman-cloud", "restartCount": int64(14), "ready": false,
+			"image": "x", "imageID": "y",
+			"state": map[string]any{"waiting": map[string]any{"reason": "CrashLoopBackOff"}},
+		},
+	}
+	return pod
+}
+
+// TestConvertPodAttributesRestartsToPostgresNotTheSum proves a
+// crash-looping sidecar does not read as an unstable instance. Summing
+// across containers — which is what kubectl shows — would report 14
+// restarts for a database that has never restarted.
+func TestConvertPodAttributesRestartsToPostgresNotTheSum(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t)
+	facts, _, err := c.convertPod(sidecarPod())
+	if err != nil {
+		t.Fatalf("convertPod: %v", err)
+	}
+	if facts.Restarts == nil || *facts.Restarts != 0 {
+		t.Errorf("Restarts = %v, want the postgres container's 0, not the summed 14", facts.Restarts)
+	}
+	if facts.Image != "ghcr.io/cloudnative-pg/postgresql:16.4" {
+		t.Errorf("Image = %q, want the postgres container's", facts.Image)
+	}
+}
+
+// TestConvertPodCarriesEveryContainerInOrder proves the whole pod is
+// observable: init containers first, then regular ones in spec order,
+// each with the reason that names what is wrong with it.
+func TestConvertPodCarriesEveryContainerInOrder(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t)
+	facts, _, err := c.convertPod(sidecarPod())
+	if err != nil {
+		t.Fatalf("convertPod: %v", err)
+	}
+	if len(facts.Containers) != 3 {
+		t.Fatalf("containers = %d, want 3: %+v", len(facts.Containers), facts.Containers)
+	}
+	want := []struct {
+		name     string
+		init     bool
+		state    string
+		reason   string
+		restarts int
+	}{
+		{"bootstrap-controller", true, "terminated", "Completed", 0},
+		{"postgres", false, "running", "", 0},
+		{"plugin-barman-cloud", false, "waiting", "CrashLoopBackOff", 14},
+	}
+	for i, w := range want {
+		got := facts.Containers[i]
+		if got.Name != w.name || got.Init != w.init || got.State != w.state || got.Reason != w.reason {
+			t.Errorf("container %d = %+v, want %+v", i, got, w)
+		}
+		if got.Restarts == nil || *got.Restarts != w.restarts {
+			t.Errorf("container %d restarts = %v, want %d", i, got.Restarts, w.restarts)
+		}
+	}
+	// The completed init container carries its exit code; the running
+	// one carries none, because there is nothing to report.
+	if facts.Containers[0].ExitCode == nil || *facts.Containers[0].ExitCode != 0 {
+		t.Errorf("init exit code = %v, want 0", facts.Containers[0].ExitCode)
+	}
+	if facts.Containers[1].ExitCode != nil {
+		t.Errorf("running container reported an exit code: %v", facts.Containers[1].ExitCode)
+	}
+}
+
+// TestConvertPodKeepsContainersTheKubeletHasNotStarted proves a
+// container with no status is listed as unknown rather than dropped.
+// Dropping it would hide exactly the pod that cannot start: a container
+// stuck before first run has no status at all.
+func TestConvertPodKeepsContainersTheKubeletHasNotStarted(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t)
+	pod := sidecarPod()
+	// The kubelet has reported nothing for the sidecar yet.
+	status := pod["status"].(map[string]any)
+	status["containerStatuses"] = []any{
+		map[string]any{
+			"name": "postgres", "restartCount": int64(0), "ready": true,
+			"image": "x", "imageID": "y",
+			"state": map[string]any{"running": map[string]any{}},
+		},
+	}
+	facts, _, err := c.convertPod(pod)
+	if err != nil {
+		t.Fatalf("convertPod: %v", err)
+	}
+	if len(facts.Containers) != 3 {
+		t.Fatalf("a container without status was dropped: %+v", facts.Containers)
+	}
+	sidecar := facts.Containers[2]
+	if sidecar.Name != "plugin-barman-cloud" || sidecar.Image == "" {
+		t.Errorf("sidecar lost its declared identity: %+v", sidecar)
+	}
+	if sidecar.State != "" || sidecar.Reason != "" || sidecar.Ready != nil || sidecar.Restarts != nil {
+		t.Errorf("unreported container did not stay unknown: %+v", sidecar)
+	}
+}

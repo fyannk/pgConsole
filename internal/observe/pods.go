@@ -39,8 +39,14 @@ type PodFacts struct {
 	Phase string
 	// Ready reports the pod Ready condition; nil when unreported.
 	Ready *bool
-	// Restarts is the summed container restart count; nil when
+	// Restarts is the PostgreSQL container's restart count; nil when
 	// unreported.
+	//
+	// Deliberately not the sum across containers, which is what kubectl
+	// shows. On an instance row the number is read as "the database
+	// restarted this many times", and once plugin sidecars exist a
+	// summed count makes a crash-looping backup sidecar look like an
+	// unstable instance. Per-container counts are in Containers.
 	Restarts *int
 	// Node is the assigned node name.
 	Node string
@@ -53,6 +59,45 @@ type PodFacts struct {
 	Image string
 	// Deleting reports a set deletion timestamp.
 	Deleting bool
+	// Containers is every container the pod declares, init containers
+	// first and each group in spec order. An instance pod is no longer
+	// one container: CNPG-I ships capabilities as plugin sidecars, so
+	// the backup half of the pod can be failing while postgres is
+	// perfectly healthy. The pod-level fields above describe the
+	// instance; this describes the pod.
+	Containers []ContainerFacts
+}
+
+// ContainerFacts is the Kubernetes-observed state of one container in an
+// instance pod. Empty strings and nil numerics are unreported facts and
+// render as unknown.
+type ContainerFacts struct {
+	// Name is the container name, unique within the pod.
+	Name string
+	// Image is the container's declared image.
+	Image string
+	// Init reports an init container. Its failure blocks the pod from
+	// starting at all, which reads very differently from a sidecar that
+	// is merely unhealthy.
+	Init bool
+	// Ready reports the container's readiness; nil when the kubelet has
+	// reported no status for it yet.
+	Ready *bool
+	// Restarts is this container's own restart count; nil when
+	// unreported. Per container, never summed: a crash-looping sidecar
+	// is not the instance restarting.
+	Restarts *int
+	// State is the reported state — "running", "waiting", or
+	// "terminated" — and empty when the kubelet has reported none.
+	State string
+	// Reason is the kubelet's machine reason for a waiting or terminated
+	// state: ImagePullBackOff, CrashLoopBackOff, CreateContainerConfigError,
+	// OOMKilled, and so on. It is the field that names what is actually
+	// wrong, and it is empty for a running container.
+	Reason string
+	// ExitCode is the last termination's exit code; nil unless the
+	// container has terminated.
+	ExitCode *int32
 }
 
 // PodDeletion identifies a removed pod incarnation. The UID guards

@@ -605,11 +605,11 @@ type fakeTailer struct {
 
 // TailPoolerLogs answers on the same terms as TailLogs: the fake does
 // not model the ownership chain, only the call.
-func (f fakeTailer) TailPoolerLogs(ctx context.Context, pod string) (observe.LogTail, error) {
-	return f.TailLogs(ctx, pod)
+func (f fakeTailer) TailPoolerLogs(ctx context.Context, pod, container string) (observe.LogTail, error) {
+	return f.TailLogs(ctx, pod, "")
 }
 
-func (f fakeTailer) TailLogs(_ context.Context, _ string) (observe.LogTail, error) {
+func (f fakeTailer) TailLogs(_ context.Context, _, _ string) (observe.LogTail, error) {
 	if f.err != nil {
 		return observe.LogTail{}, f.err
 	}
