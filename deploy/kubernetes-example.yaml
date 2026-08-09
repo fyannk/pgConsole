@@ -213,7 +213,7 @@ spec:
           # CHANGE ME. pgconsole:dev exists only after a local
           # `make docker-build`; applied as-is this Deployment stays in
           # ImagePullBackOff. Use a released tag, for example
-          # ghcr.io/fyannk/pgconsole:v0.3.0.
+          # ghcr.io/fyannk/pgconsole:v0.4.0.
           image: pgconsole:dev
           ports:
             - name: http

@@ -11,7 +11,7 @@ pgConsole is **pre-1.0**. Within 0.x there is no compatibility guarantee: a
 minor release may rename or remove environment variables, change route paths,
 or change the forwarded-header contract, without a deprecation period.
 
-- Pin an **exact** image tag (`v0.3.0`), never a floating one.
+- Pin an **exact** image tag (`v0.4.0`), never a floating one.
 - Read the [release notes](https://github.com/fyannk/pgConsole/releases) and
   the [changelog](https://github.com/fyannk/pgConsole/blob/main/CHANGELOG.md)
   before upgrading.
