@@ -175,8 +175,10 @@ func TestStaticAssetsAreServed(t *testing.T) {
 		"/static/history-timeline.js",
 		// Without this the browser requests /favicon.ico on every page
 		// load, takes a 404, and logs a console error. img-src 'self'
-		// rules out a data: URI, so it has to be a served asset.
-		"/static/favicon.svg",
+		// rules out a data: URI, so it has to be a served asset. The file
+		// is the product mark — the same multi-resolution icon the
+		// documentation site serves — not a placeholder.
+		"/static/favicon.ico",
 	} {
 		rec := get(t, h, http.MethodGet, path)
 		if rec.Code != http.StatusOK {
@@ -196,7 +198,7 @@ func TestEveryPageReferencesTheFavicon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read shared shell: %v", err)
 	}
-	const want = `<link rel="icon" href="/static/favicon.svg">`
+	const want = `<link rel="icon" type="image/x-icon" href="/static/favicon.ico">`
 	if !strings.Contains(string(raw), want) {
 		t.Error("shared page head does not reference the favicon")
 	}

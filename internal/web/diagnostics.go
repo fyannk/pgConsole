@@ -185,7 +185,7 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, result diagnose.Result) 
 			rendered.Evidence = append(rendered.Evidence, EvidenceView{
 				Origin: evidence.Origin,
 				Object: evidence.Object,
-				Detail: boundMessage(evidence.Detail),
+				Detail: boundEvidence(evidence.Detail),
 			})
 		}
 		view.Findings = append(view.Findings, rendered)
