@@ -9,6 +9,8 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-10
+
 ### Added
 
 - **A version-aware diagnostic rule catalog.** A diagnostic is now data:
@@ -58,6 +60,39 @@ period. Pin an exact image tag and read the notes before upgrading.
   every match. Previously a single matched line kept its finding until
   restart.
 
+- **Continuous log following** (`LOG_STREAM_ENABLED`, default `false`).
+  The console follows every container of every member pod — sidecars and
+  init containers included — and the diagnostics matcher analyses each
+  line as it arrives, keeping only what matched: one bounded observation
+  per rule per container, so memory does not grow with log volume.
+  Following is best effort and says so: a stream breaks on every
+  container restart, Kubernetes cannot report what was missed, and each
+  break is recorded as an explicit gap rather than joined across.
+  Membership is proven per stream by the same check the on-demand tail
+  uses, on the same `pods/log` grant — no new RBAC.
+
+- **Retained log screens** (`LOG_BUFFER_BYTES`, default `0`;
+  `LOG_BUFFER_TOTAL_BYTES`, `LOG_BUFFER_MAX_AGE`). With retention on,
+  `/logs/{pod}/{container}` serves the stream the console observed —
+  which **outlives the container**, so a crash-looping sidecar's
+  explanation stays readable after the live tail answers not-found —
+  with gaps rendered between the runs they separate and the live tail
+  one click away. `/logs/{pod}` keeps its meaning and lists the streams
+  the console holds; `?raw=1` stays live so the follow poll keeps
+  getting fresh lines. Retention is a deliberate exposure decision —
+  PostgreSQL logs can carry statement text — so it is off unless asked
+  for, bounded per container and in total, aged out, and never written
+  to disk. The pod detail's containers table links each container to its
+  tail.
+
+- **Every observed source reaches the detectors.** The diagnostic input
+  carries all fifteen snapshots the console publishes — poolers and
+  their pods, failover quorum, image catalogs, declared database
+  objects, the object-definition history, repository evidence, and both
+  metrics windows joined the original five — each with its own flag so
+  "not observed" stays distinct from "observed and empty". A reflective
+  test holds the wiring: a source added and forgotten fails it.
+
 ### Changed
 
 - **The log matcher's rules come from the catalog.** A log line is
@@ -67,6 +102,53 @@ period. Pin an exact image tag and read the notes before upgrading.
   field instead of a bare `FATAL:`, so they see real server records and
   stop counting quoted noise; FATAL reports as a warning, because
   routine failures — a wrong password — log at that severity too.
+
+- **The diagnostics screen grew a face worth reading.** Findings are
+  cards whose left edge and chip carry the severity in the console's
+  status colours — the word stays, the colour restates — with evidence
+  rendered as what it is, a quotation: origin and object on a meta line,
+  the verbatim text in a monospace block. The checks panel stopped being
+  a seventy-row wall: a counted summary strip, then one collapsible
+  group per outcome, with matches and could-not-run expanded and the
+  clear majority folded under one honest line. Plain markup throughout —
+  a reader without script opens the groups the same way.
+
+- **Repository invariant 10 rewritten.** It said tails are never
+  persisted, which was true of the only log path that then existed. It
+  now describes all three — the on-demand tail retaining nothing, the
+  matcher retaining only matches, the buffer retaining lines and off by
+  default — and states that nothing writes log text to disk.
+
+### Fixed
+
+- **Log rules can carve out known-benign lines.** Rules gain `Except`:
+  substrings any one of which withdraws a match, with the same guarantee
+  as `Contains` — a substring cannot be made pathological by a hostile
+  line. `postgres-fatal` names the five lifecycle refusals PostgreSQL
+  stamps FATAL — a connection during startup, shutdown, or crash
+  recovery, and the backends an orderly switchover terminates — which
+  the operator's own probes provoke on every start. Without the
+  carve-out the rule fired on every restart of every cluster, forever.
+
+- **Evidence quotes no longer end where their content begins.** Quoted
+  evidence went through the ordinary 512-rune message bound, and the
+  operator's JSON log envelope alone runs past five hundred characters
+  before the message field — so every quoted record was cut exactly
+  there. Evidence now has its own display bound, equal to the matcher's
+  storage bound of 2048.
+
+- **The console wears its own mark.** The favicon was still the
+  placeholder from before the branding pass, which restyled the
+  documentation site and never touched the console's. Every tab now
+  carries the same multi-resolution product icon the site serves.
+
+### Upgrading
+
+Nothing to do. `LOG_STREAM_ENABLED` and `LOG_BUFFER_BYTES` default to
+off and zero, so an existing deployment follows nothing and retains
+nothing until asked — the console can hold log text now, but only opted
+into twice. Diagnostics stays behind `ALLOW_DIAGNOSTICS`, and none of it
+needs an RBAC change.
 
 ## [0.4.0] - 2026-08-09
 
@@ -276,7 +358,8 @@ First public release.
   independently prove replication health, data integrity, or restoreability,
   and it provides no SQL access, database contents, or Secret reads.
 
-[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/fyannk/pgConsole/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/fyannk/pgConsole/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fyannk/pgConsole/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fyannk/pgConsole/compare/v0.1.0...v0.2.0
