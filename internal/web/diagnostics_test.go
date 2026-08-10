@@ -18,11 +18,13 @@ import (
 	"bytes"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
@@ -225,5 +227,33 @@ func TestDiagnosticsInputDistinguishesUnobservedFromEmpty(t *testing.T) {
 		if strings.HasPrefix(name, "Has") && value.Field(i).Bool() {
 			t.Errorf("%s is true with nothing observed", name)
 		}
+	}
+}
+
+// TestEvidenceQuotesSurviveTheEnvelope is the truncation regression: the
+// operator's log envelope alone runs past five hundred characters, so
+// bounding evidence like an ordinary message cut every quoted record
+// exactly before its message field — the part the reader came for.
+func TestEvidenceQuotesSurviveTheEnvelope(t *testing.T) {
+	t.Parallel()
+	envelope := `{"level":"info","logger":"postgres","record":{` +
+		strings.Repeat(`"padding":"the operator envelope is long",`, 14) +
+		`"error_severity":"FATAL","message":"database \"absent_db\" does not exist"}}`
+	if len(envelope) <= 512 {
+		t.Fatalf("fixture too short to prove anything: %d", len(envelope))
+	}
+
+	h := newDiagnosticsHandler(t, true, staticSnapshots{})
+	view := h.buildDiagnosticsView(
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil),
+		diagnose.Result{Findings: []diagnose.Finding{{
+			ID: "postgres-fatal", Severity: diagnose.SeverityWarning,
+			Summary:  "PostgreSQL logged a FATAL-severity record.",
+			Evidence: []diagnose.Evidence{{Origin: "container log (best effort)", Object: "Pod/orders-1", Detail: envelope}},
+		}}})
+
+	got := view.Findings[0].Evidence[0].Detail
+	if !strings.Contains(got, `database \"absent_db\" does not exist`) {
+		t.Errorf("the message field did not survive the display bound; quote ends %q", got[max(0, len(got)-60):])
 	}
 }

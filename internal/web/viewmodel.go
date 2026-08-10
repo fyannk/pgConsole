@@ -56,6 +56,14 @@ const unknown = "unknown"
 // maxDisplayMessage bounds rendered operator messages in runes.
 const maxDisplayMessage = 512
 
+// maxDisplayEvidence bounds a quoted evidence line, and is deliberately
+// the matcher's own storage bound rather than the message bound above.
+// Evidence is a quotation in a scrollable block, and the operator's log
+// envelope alone runs past five hundred characters — a message-sized
+// bound cut every quoted record exactly before its message field, which
+// is the part the reader came for.
+const maxDisplayEvidence = 2048
+
 // templateFuncs are the helpers the templates may call. They classify
 // text that is already rendered; none of them produce a fact, and none
 // may hide one.
@@ -2294,6 +2302,16 @@ func boundMessage(s string) string {
 		return s
 	}
 	return string(runes[:maxDisplayMessage]) + "…"
+}
+
+// boundEvidence truncates a quoted evidence line to its own, wider
+// display bound, rune-safe.
+func boundEvidence(s string) string {
+	runes := []rune(s)
+	if len(runes) <= maxDisplayEvidence {
+		return s
+	}
+	return string(runes[:maxDisplayEvidence]) + "…"
 }
 
 // formatAge renders a coarse, human age. Negative values — a clock skew
