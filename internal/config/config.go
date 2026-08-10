@@ -59,6 +59,24 @@ const (
 	EnvAllowAccessReview = "ALLOW_ACCESS_REVIEW"
 	// EnvAllowDiagnostics enables the diagnostics screen.
 	EnvAllowDiagnostics = "ALLOW_DIAGNOSTICS"
+	// EnvLogStreamEnabled follows the member containers' logs
+	// continuously so the diagnostics matcher can analyse each line as
+	// it arrives. The matcher keeps only what matched, so this retains
+	// no log text on its own.
+	EnvLogStreamEnabled = "LOG_STREAM_ENABLED"
+	// EnvLogBufferBytes retains recent log lines per container so the
+	// screens can show what happened before the reader arrived, and so
+	// a container that has died still has an account of itself.
+	//
+	// Zero — the default — retains nothing. A non-zero value is a
+	// deliberate exposure decision: PostgreSQL logs can contain
+	// statement text and its literal values, so this holds a standing
+	// corpus of it in memory.
+	EnvLogBufferBytes = "LOG_BUFFER_BYTES"
+	// EnvLogBufferTotalBytes caps the buffer across every container.
+	EnvLogBufferTotalBytes = "LOG_BUFFER_TOTAL_BYTES"
+	// EnvLogBufferMaxAge drops retained lines older than this.
+	EnvLogBufferMaxAge = "LOG_BUFFER_MAX_AGE"
 	// EnvAllowLogs enables the bounded instance log tail.
 	EnvAllowLogs = "ALLOW_LOGS"
 	// EnvLogTailLines bounds the lines returned per log request.
@@ -146,6 +164,19 @@ const (
 	MinAPIRequestTimeout = time.Second
 	// MaxAPIRequestTimeout is the longest accepted API_REQUEST_TIMEOUT.
 	MaxAPIRequestTimeout = time.Minute
+	// MaxLogBufferBytes is the highest accepted LOG_BUFFER_BYTES per
+	// container. The ceiling exists because retained log text shares the
+	// process memory budget with every snapshot store.
+	MaxLogBufferBytes = 8 * 1024 * 1024
+	// DefaultLogBufferTotalBytes and MaxLogBufferTotalBytes bound the
+	// buffer across every container.
+	DefaultLogBufferTotalBytes = 32 * 1024 * 1024
+	MaxLogBufferTotalBytes     = 128 * 1024 * 1024
+	// The retained-line age bounds. Log value decays quickly: an old
+	// line is a question for a log system, not for this console.
+	DefaultLogBufferMaxAge = time.Hour
+	MinLogBufferMaxAge     = time.Minute
+	MaxLogBufferMaxAge     = 24 * time.Hour
 	// MinHistoryMaxRevisions is the lowest accepted HISTORY_MAX_REVISIONS.
 	MinHistoryMaxRevisions = 100
 	// MaxHistoryMaxRevisions is the highest accepted HISTORY_MAX_REVISIONS.
@@ -243,6 +274,15 @@ type Config struct {
 	AllowOperations bool
 	// AllowClusterCatalogs enables the cluster-scoped catalog read.
 	AllowClusterCatalogs bool
+	// LogStreamEnabled follows container logs continuously for the
+	// diagnostics matcher. It retains no log text by itself.
+	LogStreamEnabled bool
+	// LogBufferBytes retains recent lines per container, 0 for none.
+	LogBufferBytes int
+	// LogBufferTotalBytes caps retention across all containers.
+	LogBufferTotalBytes int
+	// LogBufferMaxAge drops retained lines older than this.
+	LogBufferMaxAge time.Duration
 	// AllowDiagnostics enables the diagnostics screen, which correlates
 	// facts the other screens already carry into findings. It grants no
 	// authority: every detector reads snapshots that exist regardless.
@@ -406,6 +446,12 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.AllowClusterCatalogs = boolVar(lookup, EnvAllowClusterCatalogs, false, fail)
 	cfg.AllowAccessReview = boolVar(lookup, EnvAllowAccessReview, false, fail)
 	cfg.AllowDiagnostics = boolVar(lookup, EnvAllowDiagnostics, false, fail)
+	cfg.LogStreamEnabled = boolVar(lookup, EnvLogStreamEnabled, false, fail)
+	cfg.LogBufferBytes = intVar(lookup, EnvLogBufferBytes, 0, 0, MaxLogBufferBytes, fail)
+	cfg.LogBufferTotalBytes = intVar(lookup, EnvLogBufferTotalBytes,
+		DefaultLogBufferTotalBytes, 0, MaxLogBufferTotalBytes, fail)
+	cfg.LogBufferMaxAge = durationVar(lookup, EnvLogBufferMaxAge,
+		DefaultLogBufferMaxAge, MinLogBufferMaxAge, MaxLogBufferMaxAge, fail)
 	cfg.AllowInsecureLinks = boolVar(lookup, EnvAllowInsecureLinks, false, fail)
 	cfg.AllowLogs = boolVar(lookup, EnvAllowLogs, true, fail)
 
@@ -430,6 +476,19 @@ func Load(lookup Lookup) (Config, error) {
 		default:
 			cfg.HistoryPath = raw
 		}
+	}
+
+	// Following logs with the tail switched off, or retaining lines with
+	// nothing following them, is conflicting intent rather than a silent
+	// no-op — the same reading the history and metrics paths get below.
+	if cfg.LogStreamEnabled && !cfg.AllowLogs {
+		fail(EnvLogStreamEnabled, "requires "+EnvAllowLogs+"=true")
+	}
+	if cfg.LogBufferBytes > 0 && !cfg.LogStreamEnabled {
+		fail(EnvLogBufferBytes, "requires "+EnvLogStreamEnabled+"=true")
+	}
+	if cfg.LogBufferBytes > cfg.LogBufferTotalBytes {
+		fail(EnvLogBufferBytes, "must not exceed "+EnvLogBufferTotalBytes)
 	}
 
 	cfg.MetricsEnabled = boolVar(lookup, EnvMetricsEnabled, true, fail)

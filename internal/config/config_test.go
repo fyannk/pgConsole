@@ -703,3 +703,77 @@ func TestBoundsAreTheDocumentedContract(t *testing.T) {
 		t.Error("log tail byte bounds diverge from the documented contract")
 	}
 }
+
+// TestLogStreamingCrossValidation proves the documented dependencies are
+// enforced rather than merely written down: following with the tail off,
+// or retaining lines with nothing following, is conflicting intent and
+// fails startup instead of silently doing nothing.
+func TestLogStreamingCrossValidation(t *testing.T) {
+	t.Parallel()
+	base := map[string]string{EnvClusterName: "orders", EnvNamespace: "payments"}
+	with := func(extra map[string]string) Lookup {
+		merged := map[string]string{}
+		for k, v := range base {
+			merged[k] = v
+		}
+		for k, v := range extra {
+			merged[k] = v
+		}
+		return func(name string) (string, bool) { v, ok := merged[name]; return v, ok }
+	}
+
+	cases := map[string]struct {
+		env  map[string]string
+		want string
+	}{
+		"following with the tail off": {
+			env:  map[string]string{EnvLogStreamEnabled: "true", EnvAllowLogs: "false"},
+			want: EnvLogStreamEnabled,
+		},
+		"retaining with nothing following": {
+			env:  map[string]string{EnvLogBufferBytes: "1048576"},
+			want: EnvLogBufferBytes,
+		},
+		"per-container bound above the total": {
+			env: map[string]string{
+				EnvLogStreamEnabled: "true", EnvLogBufferBytes: "8388608",
+				EnvLogBufferTotalBytes: "1048576",
+			},
+			want: EnvLogBufferBytes,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := Load(with(tc.env)); err == nil {
+				t.Fatal("conflicting configuration was accepted")
+			} else if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to name %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestLogRetentionDefaultsToNothing proves the default posture: the
+// console follows nothing and retains no log text unless asked.
+func TestLogRetentionDefaultsToNothing(t *testing.T) {
+	t.Parallel()
+	cfg, err := Load(func(name string) (string, bool) {
+		switch name {
+		case EnvClusterName:
+			return "orders", true
+		case EnvNamespace:
+			return "payments", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LogStreamEnabled {
+		t.Error("log streaming is on by default")
+	}
+	if cfg.LogBufferBytes != 0 {
+		t.Errorf("LogBufferBytes = %d by default, want 0", cfg.LogBufferBytes)
+	}
+}

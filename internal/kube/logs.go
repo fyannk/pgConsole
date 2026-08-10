@@ -49,29 +49,9 @@ import (
 // check but an honesty one: an arbitrary string would let the API server
 // decide what "not found" means, and the console states its own refusals.
 func (c *Client) TailLogs(ctx context.Context, pod, container string) (observe.LogTail, error) {
-	getCtx, cancel := context.WithTimeout(ctx, c.opts.RequestTimeout)
-	obj, err := c.dyn.Resource(podGVR).Namespace(c.opts.Namespace).Get(getCtx, pod, metav1.GetOptions{})
-	cancel()
-	if apierrors.IsNotFound(err) {
-		return observe.LogTail{}, redact.NewError("log tail", redact.CategoryNotFound, err)
-	}
-	if err != nil {
-		return observe.LogTail{}, categorize("log tail pod get", err)
-	}
-	facts, member, err := c.convertPod(obj.Object)
+	container, err := c.verifyMemberContainer(ctx, pod, container)
 	if err != nil {
 		return observe.LogTail{}, err
-	}
-	if !member {
-		c.logExcludedPod(facts.Name)
-		return observe.LogTail{}, redact.NewError("log tail", redact.CategoryNotFound, nil)
-	}
-	if container == "" {
-		container = postgresContainer
-	}
-	if !declaresContainer(facts.Containers, container) {
-		c.logExcludedContainer(facts.Name, container)
-		return observe.LogTail{}, redact.NewError("log tail", redact.CategoryNotFound, nil)
 	}
 
 	lines := int64(c.opts.LogTailLines)
@@ -111,4 +91,39 @@ func declaresContainer(containers []observe.ContainerFacts, name string) bool {
 		}
 	}
 	return false
+}
+
+// verifyMemberContainer re-checks live that the pod belongs to this
+// cluster and declares the container, returning the container to read.
+// An empty name means the PostgreSQL container.
+//
+// Both the on-demand tail and the continuous follower go through here,
+// deliberately: two copies of a membership check are two chances for one
+// of them to drift, and this is the check the whole log surface rests on.
+func (c *Client) verifyMemberContainer(ctx context.Context, pod, container string) (string, error) {
+	getCtx, cancel := context.WithTimeout(ctx, c.opts.RequestTimeout)
+	obj, err := c.dyn.Resource(podGVR).Namespace(c.opts.Namespace).Get(getCtx, pod, metav1.GetOptions{})
+	cancel()
+	if apierrors.IsNotFound(err) {
+		return "", redact.NewError("log tail", redact.CategoryNotFound, err)
+	}
+	if err != nil {
+		return "", categorize("log tail pod get", err)
+	}
+	facts, member, err := c.convertPod(obj.Object)
+	if err != nil {
+		return "", err
+	}
+	if !member {
+		c.logExcludedPod(facts.Name)
+		return "", redact.NewError("log tail", redact.CategoryNotFound, nil)
+	}
+	if container == "" {
+		container = postgresContainer
+	}
+	if !declaresContainer(facts.Containers, container) {
+		c.logExcludedContainer(facts.Name, container)
+		return "", redact.NewError("log tail", redact.CategoryNotFound, nil)
+	}
+	return container, nil
 }

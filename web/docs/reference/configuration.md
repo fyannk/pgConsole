@@ -22,6 +22,10 @@ naming the variable and the constraint, never the value. `CLUSTER_NAME` and
 | `ALLOW_DIAGNOSTICS` | `false` | Enables the diagnostics screen, which correlates facts the other screens already carry into findings. Strict boolean; needs no Role, because it observes nothing of its own. |
 | `ALLOW_CLUSTER_CATALOGS` | `false` | Lets the console read the one cluster-scoped `ClusterImageCatalog` its Cluster references. Strict boolean; needs its own ClusterRole. The only setting that grants authority outside the namespace. |
 | `ALLOW_LOGS` | `true` | Master switch for the bounded log tail; when on, the tail still requires the `poweruser` level. |
+| `LOG_STREAM_ENABLED` | `false` | Follows the member containers' logs continuously so the diagnostics matcher can analyse each line as it arrives. Retains no log text of its own — only what matched, bounded per rule per container. Requires `ALLOW_LOGS=true`. |
+| `LOG_BUFFER_BYTES` | `0` | Retained log text **per container**, 0–8 MiB. `0` retains nothing, which is the default. A non-zero value is a deliberate exposure decision: it holds recent PostgreSQL log lines, which can include statements and their literal values, in the console's memory. Requires `LOG_STREAM_ENABLED=true`. |
+| `LOG_BUFFER_TOTAL_BYTES` | `33554432` | Cap across every container, 0–128 MiB, so one noisy container cannot consume the whole budget. |
+| `LOG_BUFFER_MAX_AGE` | `1h` | Retained lines older than this are dropped, `1m`–`24h`. |
 | `LOG_TAIL_LINES` | `200` | Lines per log request, 1–2000. |
 | `LOG_TAIL_MAX_BYTES` | `1048576` | Bytes per log request, 4 KiB–8 MiB. |
 | `EVENTS_MAX_AGE` | `1h` | Event age window, 1m–24h. |
