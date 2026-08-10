@@ -105,6 +105,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	if h.sources.Infrastructure != nil {
 		in.Infrastructure, in.HasInfrastructure = h.sources.Infrastructure.CurrentInfrastructure()
 	}
+	if h.sources.KubeVersion != nil {
+		in.KubeVersion, in.HasKubeVersion = h.sources.KubeVersion.CurrentKubeVersion()
+	}
 	if h.sources.Poolers != nil {
 		in.Poolers, in.HasPoolers = h.sources.Poolers.CurrentPoolers()
 	}

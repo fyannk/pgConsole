@@ -96,6 +96,9 @@ type Deps struct {
 	// InfrastructureSource observes the cluster's services, volume
 	// claims and volume snapshots.
 	InfrastructureSource observe.InfrastructureSource
+	// KubeVersionSource fetches the API server's own /version report.
+	// Nil disables the poller, leaving the Kubernetes version unknown.
+	KubeVersionSource observe.KubeVersionSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
@@ -224,6 +227,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		infraStore := observe.NewInfrastructureStore()
 		sources.Infrastructure = infraStore
 		runners = append(runners, observe.NewInfrastructureCollector(deps.InfrastructureSource, infraStore, deps.Clock, logger).Run)
+	}
+	if deps.KubeVersionSource != nil {
+		kubeVersionStore := observe.NewKubeVersionStore()
+		sources.KubeVersion = kubeVersionStore
+		runners = append(runners, observe.NewKubeVersionPoller(deps.KubeVersionSource, kubeVersionStore, deps.Clock, logger).Run)
 	}
 	if deps.EvidenceFetcher != nil {
 		evidenceStore := evidence.NewStore()

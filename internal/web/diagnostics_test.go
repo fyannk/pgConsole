@@ -63,7 +63,7 @@ func newDiagnosticsHandlerFull(t *testing.T, allow bool, snapshots staticSnapsho
 		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots,
 			Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots,
 			ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots,
-			History: history, Evidence: ev},
+			KubeVersion: snapshots, History: history, Evidence: ev},
 		kube.UnavailableProber{}, nil, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -192,7 +192,7 @@ func TestDiagnosticsInputReachesEveryPublishedSource(t *testing.T) {
 	all := staticSnapshots{
 		ok: true, podsOK: true, eventsOK: true, backupsOK: true,
 		poolersOK: true, poolerPodsOK: true, quorumOK: true,
-		catalogsOK: true, declaredOK: true, infraOK: true,
+		catalogsOK: true, declaredOK: true, infraOK: true, kubeVersionOK: true,
 	}
 	h := newDiagnosticsHandlerFull(t, true, all, stubHistory{has: true}, stubEvidence{})
 	in := h.diagnosticsInput()

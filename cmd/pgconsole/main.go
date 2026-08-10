@@ -193,6 +193,7 @@ func build(lookup config.Lookup, logOut io.Writer) (*application.App, error) {
 		deps.Source = client
 		deps.PodSource = client
 		deps.EventSource = client
+		deps.KubeVersionSource = client
 		deps.BackupSource = client
 		deps.PoolerSource = client
 		deps.PoolerPodSource = client

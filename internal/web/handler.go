@@ -116,6 +116,12 @@ type InfrastructureSource interface {
 	CurrentInfrastructure() (observe.InfrastructureSnapshot, bool)
 }
 
+// KubeVersionSource supplies the API server's /version observation.
+type KubeVersionSource interface {
+	// CurrentKubeVersion returns the snapshot and whether one exists.
+	CurrentKubeVersion() (observe.KubeVersionSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -157,6 +163,9 @@ type Sources struct {
 	// Infrastructure supplies the services, volume claims and volume
 	// snapshots. Nil means they were never observed.
 	Infrastructure InfrastructureSource
+	// KubeVersion supplies the API server's /version report. Nil means
+	// the server version was never observed.
+	KubeVersion KubeVersionSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -956,6 +965,11 @@ func (EmptySnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, b
 // CurrentImageCatalogs reports no image-catalog snapshot.
 func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
 	return observe.ImageCatalogsSnapshot{}, false
+}
+
+// CurrentKubeVersion reports no server-version observation.
+func (EmptySnapshots) CurrentKubeVersion() (observe.KubeVersionSnapshot, bool) {
+	return observe.KubeVersionSnapshot{}, false
 }
 
 // CurrentDatabaseObjects reports no declarative-object snapshot.

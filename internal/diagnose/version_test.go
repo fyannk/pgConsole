@@ -130,9 +130,23 @@ func TestVersionFactsAreObservedNeverAssumed(t *testing.T) {
 		t.Errorf("CloudNativePG provenance does not name the init container: %+v", cnpg)
 	}
 
-	// Kubernetes is not observable yet; asserting a version for it would
-	// gate pinned rules on an assumption.
+	// Kubernetes stays unknown until the /version poller has reported.
 	if _, ok := facts[ComponentKubernetes]; ok {
-		t.Error("Kubernetes version asserted without a source")
+		t.Error("Kubernetes version asserted without an observation")
+	}
+	in.HasKubeVersion = true
+	in.KubeVersion = observe.KubeVersionSnapshot{GitVersion: "v1.33.1+k3s1"}
+	kube, ok := versionFacts(in)[ComponentKubernetes]
+	if !ok || kube.Version != "1.33.1" {
+		t.Fatalf("Kubernetes version = %+v, want 1.33.1 from /version", kube)
+	}
+	if kube.Origin != "Kubernetes-reported" || !strings.Contains(kube.Detail, "v1.33.1+k3s1") {
+		t.Errorf("Kubernetes fact does not quote the server's own report: %+v", kube)
+	}
+
+	// A stale observation stays usable but says so.
+	in.KubeVersion.Stale = true
+	if kube := versionFacts(in)[ComponentKubernetes]; !strings.Contains(kube.Detail, "stale") {
+		t.Errorf("stale observation not marked in the provenance: %+v", kube)
 	}
 }

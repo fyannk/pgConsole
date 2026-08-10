@@ -22,6 +22,7 @@ import (
 
 	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // Rule is one catalog diagnostic, written as data: on the pinned
@@ -456,6 +457,68 @@ func instantMetricName(key string) string {
 		}
 	}
 	return key
+}
+
+// ContainerState matches containers whose kubelet-reported state
+// reason is in the set — CrashLoopBackOff, OOMKilled, and the like. It
+// reads the same container facts the pods screen renders: the reason is
+// the kubelet's own word, quoted, never inferred from restarts or
+// timing.
+//
+// Instance pods are always scanned; pooler pods join when observed,
+// because a crash-looping PgBouncer breaks applications just as surely
+// while looking nothing like an instance failure.
+type ContainerState struct {
+	// Reasons are the kubelet reasons accepted, any of which matches.
+	Reasons []string
+}
+
+func (c ContainerState) describe() string {
+	return "a container whose state reason is " + strings.Join(c.Reasons, " or ")
+}
+
+func (c ContainerState) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasPods {
+		return nil, "instance pods have not been observed yet"
+	}
+	pods := in.Pods.Pods
+	if in.HasPoolerPods {
+		pods = append(append([]observe.PodFacts{}, pods...), in.PoolerPods.Pods...)
+	}
+	var matches []conditionMatch
+	for _, pod := range pods {
+		for _, container := range pod.Containers {
+			accepted := false
+			for _, reason := range c.Reasons {
+				if container.Reason == reason {
+					accepted = true
+					break
+				}
+			}
+			if !accepted {
+				continue
+			}
+			detail := fmt.Sprintf("container %q: %s", container.Name, container.Reason)
+			if container.State != "" {
+				detail += ", state " + container.State
+			}
+			if container.Restarts != nil {
+				detail += fmt.Sprintf(", %d restarts", *container.Restarts)
+			}
+			if container.ExitCode != nil {
+				detail += fmt.Sprintf(", last exit code %d", *container.ExitCode)
+			}
+			matches = append(matches, conditionMatch{
+				idSuffix: "/" + pod.Name + "/" + container.Name,
+				evidence: []Evidence{{
+					Origin: "Kubernetes-observed",
+					Object: "Pod/" + pod.Name,
+					Detail: detail,
+				}},
+			})
+		}
+	}
+	return matches, ""
 }
 
 // evaluateRule turns one rule into its check row and findings. The

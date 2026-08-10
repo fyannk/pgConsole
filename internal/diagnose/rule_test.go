@@ -393,6 +393,59 @@ func TestInstantNonZeroReadsTheScrapedFlag(t *testing.T) {
 	}
 }
 
+// TestContainerStateReadsTheKubeletsWord proves the container-state
+// condition: it matches the kubelet's exact reason, quotes state,
+// restarts and exit code, spans pooler pods when they are observed, and
+// reports could-not-run when no pods have been.
+func TestContainerStateReadsTheKubeletsWord(t *testing.T) {
+	t.Parallel()
+	rule := Rule{
+		ID:       "example-container",
+		Severity: SeverityCritical,
+		Summary:  "Example.",
+		When:     ContainerState{Reasons: []string{"CrashLoopBackOff", "OOMKilled"}},
+	}
+
+	if check, _ := evaluateRule(rule, Input{Now: now}); check.Outcome != CheckUnavailable {
+		t.Errorf("outcome = %v with no pods observed, want could-not-run", check.Outcome)
+	}
+
+	restarts, exit := 7, int32(137)
+	in := Input{
+		Now:     now,
+		HasPods: true,
+		Pods: observe.PodsSnapshot{Pods: []observe.PodFacts{{
+			Name: "orders-1",
+			Containers: []observe.ContainerFacts{
+				{Name: "postgres", State: "running"},
+				{Name: "plugin-barman-cloud", State: "waiting", Reason: "CrashLoopBackOff",
+					Restarts: &restarts},
+			},
+		}}},
+		HasPoolerPods: true,
+		PoolerPods: observe.PodsSnapshot{Pods: []observe.PodFacts{{
+			Name: "orders-pool-rw-abc",
+			Containers: []observe.ContainerFacts{
+				{Name: "pgbouncer", State: "terminated", Reason: "OOMKilled", ExitCode: &exit},
+			},
+		}}},
+	}
+	check, findings := evaluateRule(rule, in)
+	if check.Outcome != CheckMatched || len(findings) != 2 {
+		t.Fatalf("outcome = %v, findings = %d, want two matches", check.Outcome, len(findings))
+	}
+	sidecar := findingByID(t, Result{Findings: findings}, "example-container/orders-1/plugin-barman-cloud")
+	if !strings.Contains(sidecar.Evidence[0].Detail, "CrashLoopBackOff") ||
+		!strings.Contains(sidecar.Evidence[0].Detail, "7 restarts") {
+		t.Errorf("kubelet reason and restarts not quoted: %q", sidecar.Evidence[0].Detail)
+	}
+	pooler := findingByID(t, Result{Findings: findings}, "example-container/orders-pool-rw-abc/pgbouncer")
+	if !strings.Contains(pooler.Evidence[0].Detail, "OOMKilled") ||
+		!strings.Contains(pooler.Evidence[0].Detail, "exit code 137") {
+		t.Errorf("pooler container state not quoted: %q", pooler.Evidence[0].Detail)
+	}
+}
+
 // TestBackupPhaseHonoursAgeAndStaleness proves the backup condition:
 // phases match case-insensitively, young backups are exempted by
 // MinAge, and a stale catalog is could-not-run rather than a claim

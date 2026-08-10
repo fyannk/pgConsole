@@ -204,6 +204,10 @@ type Input struct {
 	// ImageCatalogs are the catalogs the Cluster draws its image from.
 	ImageCatalogs    observe.ImageCatalogsSnapshot
 	HasImageCatalogs bool
+	// KubeVersion is the API server's own /version report, the one
+	// observed fact that arrives by poll rather than by watch.
+	KubeVersion    observe.KubeVersionSnapshot
+	HasKubeVersion bool
 	// DatabaseObjects are the declared Database, DatabaseRole,
 	// Publication, and Subscription resources with the operator's
 	// reconciliation report on each.

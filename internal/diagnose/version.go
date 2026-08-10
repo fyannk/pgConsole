@@ -68,12 +68,23 @@ type VersionFacts map[Component]ComponentVersion
 // this package: versions are observed, never configured, because an
 // injected version the cluster does not actually run would silently gate
 // every pinned rule wrong.
-//
-// Kubernetes' own server version is not in any snapshot, so
-// ComponentKubernetes stays unknown until a source observes it — which
-// the framework treats as "could not evaluate", not as an error.
 func versionFacts(in Input) VersionFacts {
 	facts := VersionFacts{}
+
+	if in.HasKubeVersion {
+		if fields, ok := parseVersion(in.KubeVersion.GitVersion); ok {
+			detail := fmt.Sprintf("/version reports %q", in.KubeVersion.GitVersion)
+			if in.KubeVersion.Stale {
+				detail += " (stale: contact has since been lost, this is the retained last-good report)"
+			}
+			facts[ComponentKubernetes] = ComponentVersion{
+				Version: joinVersion(fields),
+				Origin:  "Kubernetes-reported",
+				Object:  "API server",
+				Detail:  detail,
+			}
+		}
+	}
 
 	if in.HasCluster && in.Cluster.Cluster.Present && in.Cluster.Cluster.PostgresMajorVersion != nil {
 		major := *in.Cluster.Cluster.PostgresMajorVersion
