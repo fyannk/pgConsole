@@ -10,7 +10,7 @@ be deployed by the **pgToolBox operator**, which owns the proxy, exposure,
 NetworkPolicy, and RBAC.
 
 :::info The operator is not published yet
-As of 0.4.0 the pgToolBox operator and its `PgConsole` API are not publicly
+As of 0.5.0 the pgToolBox operator and its `PgConsole` API are not publicly
 available, so the standalone path below is the only way to install
 pgConsole. Deploying standalone means **you** own the trust boundary the
 console assumes — read

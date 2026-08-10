@@ -44,7 +44,7 @@ const config: Config = {
             // released documentation. It must not carry the "unreleased"
             // banner, which would put that warning on every published page.
             current: {
-              label: '0.4.0',
+              label: '0.5.0',
               badge: true,
               banner: 'none',
             },
