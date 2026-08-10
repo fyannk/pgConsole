@@ -1,0 +1,68 @@
+// Copyright 2026 The pgConsole Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package diagnose
+
+// barmanRules are the claims about backup and archiving through the
+// Barman Cloud plugin. They are unpinned deliberately: each message has
+// held stable across the plugin releases the console has been tested
+// with, and the sidecar's observed version (parsed from its image tag)
+// is there to pin against the day one of them is reworded.
+func barmanRules() []Rule {
+	const bestEffort = "Read from the container's log while following it. Following is " +
+		"best effort, so the count below is a floor and an absence here " +
+		"rules nothing out."
+	return []Rule{
+		{
+			ID:        "wal-archive-not-empty",
+			Component: ComponentBarman,
+			Severity:  SeverityCritical,
+			Describes: "the archiver refusing a WAL archive that is not empty",
+			Summary: "The configured WAL archive is not empty, so the operator " +
+				"refused to start archiving into it.",
+			Detail: bestEffort,
+			When:   LogContains{Substrings: []string{"WAL archive check failed"}},
+		},
+		{
+			ID:        "backup-destination-conflict",
+			Component: ComponentBarman,
+			Severity:  SeverityCritical,
+			Describes: "a backup destination already holding another cluster's data",
+			Summary: "The backup destination already holds data for this server " +
+				"name, so the operator refused to write into it.",
+			Detail: bestEffort,
+			When:   LogContains{Substrings: []string{"backup", "already exists"}},
+		},
+		{
+			ID:        "object-store-denied",
+			Component: ComponentBarman,
+			Severity:  SeverityCritical,
+			Describes: "the object store refusing the configured credentials",
+			Summary: "The object store refused the operator's credentials for the " +
+				"configured destination.",
+			Detail: bestEffort,
+			When:   LogContains{Substrings: []string{"AccessDenied"}},
+		},
+		{
+			ID:        "object-store-unreachable",
+			Component: ComponentBarman,
+			Severity:  SeverityCritical,
+			Describes: "an unreachable object store endpoint",
+			Summary: "The operator could not reach the configured object store " +
+				"endpoint.",
+			Detail: bestEffort,
+			When:   LogContains{Substrings: []string{"could not connect to", "endpoint"}},
+		},
+	}
+}

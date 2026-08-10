@@ -14,15 +14,15 @@
 
 package diagnose
 
-import "github.com/fyannk/pgConsole/internal/logstream"
-
-// LogObservations is the read side of the continuous matcher. It is an
-// interface so diagnose depends on the shape rather than the matcher,
-// and so a test needs no stream.
+// kubernetesRules are the claims about the Kubernetes cluster itself.
 //
-// A nil value means log following is off, which every log-backed catalog
-// rule reports as "could not run" rather than as nothing found: a
-// console that is not reading logs has not ruled out anything in them.
-type LogObservations interface {
-	Observations() []logstream.Observation
+// Empty today: the API server's version is one discovery call away but
+// not yet observed into a snapshot, so ComponentKubernetes stays unknown
+// and a rule pinned to it could never resolve. As with cnpgRules, the
+// first pinned rule should land together with the version source.
+// Unpinned Kubernetes rules have a home here too — an EventMatch on a
+// kubelet reason, say — when one earns its place by catching something
+// the event-backed detectors do not.
+func kubernetesRules() []Rule {
+	return nil
 }

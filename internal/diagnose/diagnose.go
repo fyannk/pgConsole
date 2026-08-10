@@ -125,6 +125,10 @@ const (
 	// absent, forbidden, or not yet observed. This is the outcome that
 	// stops an empty screen from reading as a healthy one.
 	CheckUnavailable
+	// CheckNotApplicable means a catalog rule's version pins exclude the
+	// observed versions. Distinct from clear on purpose: the rule looked
+	// at the versions and ruled itself out, not the failure.
+	CheckNotApplicable
 )
 
 // String names the outcome for display.
@@ -134,6 +138,8 @@ func (o CheckOutcome) String() string {
 		return "matched"
 	case CheckUnavailable:
 		return "could not run"
+	case CheckNotApplicable:
+		return "does not apply"
 	default:
 		return "clear"
 	}
@@ -264,10 +270,12 @@ type Detector interface {
 	Detect(Input) (findings []Finding, unavailable string)
 }
 
-// Detectors is the registered set, in the order their checks are listed.
+// Detectors is the registered set of hand-written detectors, in the
+// order their checks are listed. These are the diagnostics that
+// correlate across snapshots; the single-observation, version-scoped
+// ones are declared in the Catalog instead.
 func Detectors() []Detector {
 	return []Detector{
-		logDetector{},
 		quotaDetector{},
 		schedulingDetector{},
 		imagePullDetector{},
@@ -276,13 +284,14 @@ func Detectors() []Detector {
 	}
 }
 
-// Run executes every detector and assembles the result. A detector
-// reporting an unavailable reason contributes no findings, however many
-// it returned: a detector that could not read its input has nothing
-// trustworthy to say.
+// Run executes every hand-written detector and every catalog rule, and
+// assembles the result. A detector reporting an unavailable reason
+// contributes no findings, however many it returned: a detector that
+// could not read its input has nothing trustworthy to say.
 func Run(in Input) Result {
 	detectors := Detectors()
-	result := Result{Checks: make([]Check, 0, len(detectors))}
+	catalog := Catalog()
+	result := Result{Checks: make([]Check, 0, len(detectors)+len(catalog))}
 	for _, detector := range detectors {
 		check := Check{Name: detector.Name(), Describes: detector.Describes()}
 		findings, unavailable := detector.Detect(in)
@@ -295,6 +304,11 @@ func Run(in Input) Result {
 		default:
 			check.Outcome = CheckClear
 		}
+		result.Checks = append(result.Checks, check)
+	}
+	for _, rule := range catalog {
+		check, findings := evaluateRule(rule, in)
+		result.Findings = append(result.Findings, findings...)
 		result.Checks = append(result.Checks, check)
 	}
 	sort.SliceStable(result.Findings, func(i, j int) bool {

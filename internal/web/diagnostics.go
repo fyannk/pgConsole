@@ -172,6 +172,10 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, result diagnose.Result) 
 			view.Unavailable++
 		case diagnose.CheckMatched:
 			state = "bad"
+		case diagnose.CheckNotApplicable:
+			// Muted, not clear: the rule ruled itself out on the observed
+			// versions, and the row's text says so.
+			state = "na"
 		}
 		view.Checks = append(view.Checks, CheckView{
 			Name:      check.Name,

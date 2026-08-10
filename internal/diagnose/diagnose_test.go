@@ -183,8 +183,8 @@ func TestRunAlwaysAccountsForEveryDetector(t *testing.T) {
 		input([]observe.ScheduledBackupFacts{schedule("s", "0 2 * * * *")}, nil),
 	} {
 		result := Run(in)
-		if len(result.Checks) != len(Detectors()) {
-			t.Errorf("checks = %d, want one per detector (%d)", len(result.Checks), len(Detectors()))
+		if want := len(Detectors()) + len(Catalog()); len(result.Checks) != want {
+			t.Errorf("checks = %d, want one per detector and catalog rule (%d)", len(result.Checks), want)
 		}
 		for _, check := range result.Checks {
 			if check.Name == "" || check.Describes == "" {
