@@ -201,6 +201,11 @@ func build(lookup config.Lookup, logOut io.Writer) (*application.App, error) {
 		deps.DatabaseObjectsSource = client
 		deps.InfrastructureSource = client
 		deps.LogTailer = client
+		// Continuous following reuses the same pods/log grant and the
+		// same membership proof as the on-demand tail. Only the opener
+		// comes from here; the roster it follows is assembled where the
+		// pod store lives.
+		deps.LogStreamOpener = client
 		deps.Prober = client.NewProber()
 		// The writer is passed only when operations are enabled: in
 		// read-only mode the client's mutation methods are never handed

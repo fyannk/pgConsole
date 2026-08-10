@@ -219,6 +219,11 @@ type Input struct {
 	// detector reaches the API server or the exporters.
 	Metrics       MetricsWindow
 	PoolerMetrics MetricsWindow
+	// Logs is the continuous matcher's read side, nil when log following
+	// is off. It is the one input that is not a snapshot: a stream is
+	// best effort, so a detector reading it may report what was seen but
+	// never how much there was.
+	Logs LogObservations
 }
 
 // MetricsWindow is the read side of a scraped metrics window, narrowed
@@ -262,6 +267,7 @@ type Detector interface {
 // Detectors is the registered set, in the order their checks are listed.
 func Detectors() []Detector {
 	return []Detector{
+		logDetector{},
 		quotaDetector{},
 		schedulingDetector{},
 		imagePullDetector{},

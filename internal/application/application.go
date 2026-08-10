@@ -31,6 +31,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/config"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/ops"
@@ -119,6 +120,11 @@ type Deps struct {
 	// file's cadence and final flush. Nil means the window is in-memory
 	// or disabled and no loop runs.
 	MetricsRunner func(ctx context.Context) error
+	// LogStreamOpener opens the continuous log streams. Nil means log
+	// following is off: no follower runs, the matcher observes nothing,
+	// and the diagnostics log detector reports that it could not run
+	// rather than that the logs are clean.
+	LogStreamOpener logstream.Opener
 	// Prober answers the readiness endpoint.
 	Prober web.ReadinessProber
 	// Clock supplies time to the collectors and the page ages.
@@ -228,6 +234,38 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 	}
 	if deps.MetricsRunner != nil {
 		runners = append(runners, deps.MetricsRunner)
+	}
+	// Continuous log following. The matcher is always a sink when
+	// following at all — it keeps only what matched, so it costs
+	// nothing per line retained. The buffer joins it only when a
+	// deployment has asked to retain log text, and a disabled buffer
+	// still satisfies the Sink interface while keeping nothing, so the
+	// two are wired the same way.
+	if cfg.LogStreamEnabled && deps.LogStreamOpener != nil && sources.Pods != nil {
+		matcher := logstream.NewMatcher(logstream.DefaultRules())
+		buffer := logstream.NewBuffer(cfg.LogBufferBytes, cfg.LogBufferTotalBytes, cfg.LogBufferMaxAge)
+		sources.LogObservations = matcher
+		sources.LogBuffer = buffer
+
+		// The roster is read at each reconcile rather than captured, so a
+		// pod that has gone stops being followed and a new one starts.
+		roster := sources.Pods
+		members := func() []logstream.Member {
+			snap, ok := roster.CurrentPods()
+			if !ok {
+				return nil
+			}
+			var out []logstream.Member
+			for _, pod := range snap.Pods {
+				for _, container := range pod.Containers {
+					out = append(out, logstream.Member{Pod: pod.Name, Container: container.Name})
+				}
+			}
+			return out
+		}
+		runners = append(runners, logstream.NewRunner(
+			logstream.NewSource(members, deps.LogStreamOpener),
+			logstream.Sinks{matcher, buffer}, deps.Clock, logger).Run)
 	}
 	// The access-review collector runs only in review mode with a wired
 	// source: disabled mode observes nothing and renders no panel.

@@ -133,6 +133,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	if h.sources.PoolerMetrics != nil {
 		in.PoolerMetrics = h.sources.PoolerMetrics
 	}
+	if h.sources.LogObservations != nil {
+		in.Logs = h.sources.LogObservations
+	}
 
 	return in
 }

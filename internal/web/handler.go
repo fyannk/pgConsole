@@ -31,9 +31,11 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/authz"
+	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
@@ -164,6 +166,14 @@ type Sources struct {
 	// History supplies the object-definition timeline. Nil means history is
 	// disabled and no history route is registered.
 	History HistorySource
+	// LogObservations is the continuous matcher's read side. Nil means
+	// log following is off, which the diagnostics detector reports as
+	// "could not run" rather than as nothing found.
+	LogObservations diagnose.LogObservations
+	// LogBuffer is the retained log text, when a deployment asked for
+	// any. Nil, or a buffer with retention off, means the log screens
+	// fall back to the on-demand tail.
+	LogBuffer *logstream.Buffer
 	// Metrics supplies the bounded instance-metrics window. Nil means
 	// metrics are disabled and no metrics route is registered.
 	Metrics MetricsSource
