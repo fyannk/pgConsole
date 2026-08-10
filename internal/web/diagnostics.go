@@ -75,9 +75,19 @@ type CheckView struct {
 // function of the snapshots already published, so this handler makes no
 // API call: it is not a request-time exception, it is ordinary rendering.
 func (h *Handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
-	// Every source is optional and each is paired with its own flag: a
-	// detector must be able to tell "not observed" from "observed and
-	// empty", because only the second licenses a clear result.
+	result := diagnose.Run(h.diagnosticsInput())
+	h.renderDiagnostics(w, h.buildDiagnosticsView(r, result))
+}
+
+// diagnosticsInput gathers every published snapshot for one run.
+//
+// Every source is optional and each is paired with its own flag: a
+// detector must be able to tell "not observed" from "observed and
+// empty", because only the second licenses a clear result. It is a
+// method of its own so a test can assert that every source the console
+// publishes actually reaches the detectors — a new source that is added
+// to Sources and forgotten here would otherwise be invisible.
+func (h *Handler) diagnosticsInput() diagnose.Input {
 	in := diagnose.Input{Now: h.now()}
 	if h.sources.Backups != nil {
 		in.Backups, in.HasBackups = h.sources.Backups.CurrentBackups()
@@ -94,8 +104,41 @@ func (h *Handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	if h.sources.Infrastructure != nil {
 		in.Infrastructure, in.HasInfrastructure = h.sources.Infrastructure.CurrentInfrastructure()
 	}
+	if h.sources.Poolers != nil {
+		in.Poolers, in.HasPoolers = h.sources.Poolers.CurrentPoolers()
+	}
+	if h.sources.PoolerPods != nil {
+		in.PoolerPods, in.HasPoolerPods = h.sources.PoolerPods.CurrentPoolerPods()
+	}
+	if h.sources.FailoverQuorum != nil {
+		in.FailoverQuorum, in.HasFailoverQuorum = h.sources.FailoverQuorum.CurrentFailoverQuorum()
+	}
+	if h.sources.ImageCatalogs != nil {
+		in.ImageCatalogs, in.HasImageCatalogs = h.sources.ImageCatalogs.CurrentImageCatalogs()
+	}
+	if h.sources.DatabaseObjects != nil {
+		in.DatabaseObjects, in.HasDatabaseObjects = h.sources.DatabaseObjects.CurrentDatabaseObjects()
+	}
+	if h.sources.History != nil {
+		in.History, in.HasHistory = h.sources.History.Snapshot()
+	}
+	if h.sources.Evidence != nil {
+		in.Evidence, in.HasEvidence = h.sources.Evidence.CurrentEvidence(), true
+	}
+	// A nil interface value here is the honest "no window": the detector
+	// reports that it could not run rather than that nothing was scraped.
+	if h.sources.Metrics != nil {
+		in.Metrics = h.sources.Metrics
+	}
+	if h.sources.PoolerMetrics != nil {
+		in.PoolerMetrics = h.sources.PoolerMetrics
+	}
 
-	result := diagnose.Run(in)
+	return in
+}
+
+// buildDiagnosticsView renders one run into the screen's view model.
+func (h *Handler) buildDiagnosticsView(r *http.Request, result diagnose.Result) DiagnosticsView {
 	view := DiagnosticsView{
 		Shell:       h.shell(r, "diagnostics"),
 		ClusterName: h.cfg.ClusterName,
@@ -135,7 +178,7 @@ func (h *Handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 			State:     state,
 		})
 	}
-	h.renderDiagnostics(w, view)
+	return view
 }
 
 // renderDiagnostics writes the screen, matching the other flag-gated

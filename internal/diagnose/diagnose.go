@@ -39,6 +39,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
@@ -177,9 +180,59 @@ type Input struct {
 	// instance count.
 	Cluster    observe.Snapshot
 	HasCluster bool
-	// Infrastructure carries the cluster's volumes.
+	// Infrastructure carries the cluster's services, volumes, volume
+	// snapshots, and owned child objects including Jobs.
 	Infrastructure    observe.InfrastructureSnapshot
 	HasInfrastructure bool
+	// Poolers and their member pods. A pooler pod is not an instance
+	// pod: it runs PgBouncer, is owned through a Deployment, and fails
+	// in its own ways.
+	Poolers       observe.PoolersSnapshot
+	HasPoolers    bool
+	PoolerPods    observe.PodsSnapshot
+	HasPoolerPods bool
+	// FailoverQuorum is the operator's account of whether a failover
+	// could proceed.
+	FailoverQuorum    observe.FailoverQuorumSnapshot
+	HasFailoverQuorum bool
+	// ImageCatalogs are the catalogs the Cluster draws its image from.
+	ImageCatalogs    observe.ImageCatalogsSnapshot
+	HasImageCatalogs bool
+	// DatabaseObjects are the declared Database, DatabaseRole,
+	// Publication, and Subscription resources with the operator's
+	// reconciliation report on each.
+	DatabaseObjects    observe.DatabaseObjectsSnapshot
+	HasDatabaseObjects bool
+	// History is the bounded object-definition timeline. It is what lets
+	// a detector say when something changed rather than only that it is
+	// wrong now — the difference between a finding and a cause.
+	History    history.Snapshot
+	HasHistory bool
+	// Evidence is the repository-evidence sidecar's status, when one is
+	// wired. The console never reads object storage itself; this is the
+	// viewer's word, carried through.
+	Evidence    evidence.Status
+	HasEvidence bool
+	// Metrics and PoolerMetrics are the scraped windows. They are query
+	// interfaces rather than plain snapshots because the window is a
+	// rollup ring, but reading them is still an in-memory operation: no
+	// detector reaches the API server or the exporters.
+	Metrics       MetricsWindow
+	PoolerMetrics MetricsWindow
+}
+
+// MetricsWindow is the read side of a scraped metrics window, narrowed
+// to what a detector needs. It is an interface so a test can supply one
+// without a scraper, and so diagnose depends on the shape rather than on
+// the store.
+//
+// A nil window means metrics are disabled or unobserved, which a
+// detector must report as "could not run" rather than as no data.
+type MetricsWindow interface {
+	// Instances names the instances the window holds series for.
+	Instances() []string
+	// Range returns the retained series for one key at one tier.
+	Range(key string, tier metrics.Tier) (times []int64, byInstance map[string][]*float64)
 }
 
 // Result is one complete run: what was found, and what was checked.
