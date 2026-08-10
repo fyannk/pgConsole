@@ -15,6 +15,8 @@
 package kube
 
 import (
+	"time"
+
 	apiv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -58,6 +60,14 @@ func convertCluster(content map[string]any) (observe.ClusterFacts, error) {
 		CurrentPrimary: cluster.Status.CurrentPrimary,
 		TargetPrimary:  cluster.Status.TargetPrimary,
 		Image:          cluster.Status.Image,
+	}
+
+	// The operator writes the timestamp as RFC3339 text; an unparseable
+	// value stays nil rather than becoming a wrong instant.
+	if raw := cluster.Status.TargetPrimaryTimestamp; raw != "" {
+		if at, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			facts.TargetPrimaryTimestamp = &at
+		}
 	}
 
 	if ref := cluster.Spec.ImageCatalogRef; ref != nil {

@@ -125,6 +125,10 @@ const (
 	// absent, forbidden, or not yet observed. This is the outcome that
 	// stops an empty screen from reading as a healthy one.
 	CheckUnavailable
+	// CheckNotApplicable means a catalog rule's version pins exclude the
+	// observed versions. Distinct from clear on purpose: the rule looked
+	// at the versions and ruled itself out, not the failure.
+	CheckNotApplicable
 )
 
 // String names the outcome for display.
@@ -134,6 +138,8 @@ func (o CheckOutcome) String() string {
 		return "matched"
 	case CheckUnavailable:
 		return "could not run"
+	case CheckNotApplicable:
+		return "does not apply"
 	default:
 		return "clear"
 	}
@@ -198,6 +204,10 @@ type Input struct {
 	// ImageCatalogs are the catalogs the Cluster draws its image from.
 	ImageCatalogs    observe.ImageCatalogsSnapshot
 	HasImageCatalogs bool
+	// KubeVersion is the API server's own /version report, the one
+	// observed fact that arrives by poll rather than by watch.
+	KubeVersion    observe.KubeVersionSnapshot
+	HasKubeVersion bool
 	// DatabaseObjects are the declared Database, DatabaseRole,
 	// Publication, and Subscription resources with the operator's
 	// reconciliation report on each.
@@ -219,6 +229,11 @@ type Input struct {
 	// detector reaches the API server or the exporters.
 	Metrics       MetricsWindow
 	PoolerMetrics MetricsWindow
+	// Logs is the continuous matcher's read side, nil when log following
+	// is off. It is the one input that is not a snapshot: a stream is
+	// best effort, so a detector reading it may report what was seen but
+	// never how much there was.
+	Logs LogObservations
 }
 
 // MetricsWindow is the read side of a scraped metrics window, narrowed
@@ -233,6 +248,10 @@ type MetricsWindow interface {
 	Instances() []string
 	// Range returns the retained series for one key at one tier.
 	Range(key string, tier metrics.Tier) (times []int64, byInstance map[string][]*float64)
+	// InstantReadings returns every instance's latest point-in-time
+	// claims, keyed by instance then by instant key. A key an instance
+	// never reported is absent rather than zero.
+	InstantReadings() map[string]map[string]metrics.Instant
 }
 
 // Result is one complete run: what was found, and what was checked.
@@ -259,7 +278,11 @@ type Detector interface {
 	Detect(Input) (findings []Finding, unavailable string)
 }
 
-// Detectors is the registered set, in the order their checks are listed.
+// Detectors is the registered set of hand-written detectors, in the
+// order their checks are listed. These are the diagnostics that
+// correlate across snapshots; the single-observation, version-scoped
+// ones are declared in the catalog packages and passed to Run by the
+// caller.
 func Detectors() []Detector {
 	return []Detector{
 		quotaDetector{},
@@ -270,13 +293,16 @@ func Detectors() []Detector {
 	}
 }
 
-// Run executes every detector and assembles the result. A detector
-// reporting an unavailable reason contributes no findings, however many
-// it returned: a detector that could not read its input has nothing
-// trustworthy to say.
-func Run(in Input) Result {
+// Run executes every hand-written detector and every given catalog
+// rule, and assembles the result. The rules arrive as an argument
+// rather than a registry so the catalog can live in its own packages —
+// one per component, importing this one — without a dependency cycle.
+// A detector reporting an unavailable reason contributes no findings,
+// however many it returned: a detector that could not read its input
+// has nothing trustworthy to say.
+func Run(in Input, rules ...Rule) Result {
 	detectors := Detectors()
-	result := Result{Checks: make([]Check, 0, len(detectors))}
+	result := Result{Checks: make([]Check, 0, len(detectors)+len(rules))}
 	for _, detector := range detectors {
 		check := Check{Name: detector.Name(), Describes: detector.Describes()}
 		findings, unavailable := detector.Detect(in)
@@ -289,6 +315,11 @@ func Run(in Input) Result {
 		default:
 			check.Outcome = CheckClear
 		}
+		result.Checks = append(result.Checks, check)
+	}
+	for _, rule := range rules {
+		check, findings := evaluateRule(rule, in)
+		result.Findings = append(result.Findings, findings...)
 		result.Checks = append(result.Checks, check)
 	}
 	sort.SliceStable(result.Findings, func(i, j int) bool {

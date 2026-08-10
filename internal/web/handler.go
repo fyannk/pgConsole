@@ -31,9 +31,11 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/authz"
+	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
@@ -114,6 +116,12 @@ type InfrastructureSource interface {
 	CurrentInfrastructure() (observe.InfrastructureSnapshot, bool)
 }
 
+// KubeVersionSource supplies the API server's /version observation.
+type KubeVersionSource interface {
+	// CurrentKubeVersion returns the snapshot and whether one exists.
+	CurrentKubeVersion() (observe.KubeVersionSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -155,6 +163,9 @@ type Sources struct {
 	// Infrastructure supplies the services, volume claims and volume
 	// snapshots. Nil means they were never observed.
 	Infrastructure InfrastructureSource
+	// KubeVersion supplies the API server's /version report. Nil means
+	// the server version was never observed.
+	KubeVersion KubeVersionSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -164,6 +175,14 @@ type Sources struct {
 	// History supplies the object-definition timeline. Nil means history is
 	// disabled and no history route is registered.
 	History HistorySource
+	// LogObservations is the continuous matcher's read side. Nil means
+	// log following is off, which the diagnostics detector reports as
+	// "could not run" rather than as nothing found.
+	LogObservations diagnose.LogObservations
+	// LogBuffer is the retained log text, when a deployment asked for
+	// any. Nil, or a buffer with retention off, means the log screens
+	// fall back to the on-demand tail.
+	LogBuffer *logstream.Buffer
 	// Metrics supplies the bounded instance-metrics window. Nil means
 	// metrics are disabled and no metrics route is registered.
 	Metrics MetricsSource
@@ -946,6 +965,11 @@ func (EmptySnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, b
 // CurrentImageCatalogs reports no image-catalog snapshot.
 func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
 	return observe.ImageCatalogsSnapshot{}, false
+}
+
+// CurrentKubeVersion reports no server-version observation.
+func (EmptySnapshots) CurrentKubeVersion() (observe.KubeVersionSnapshot, bool) {
+	return observe.KubeVersionSnapshot{}, false
 }
 
 // CurrentDatabaseObjects reports no declarative-object snapshot.

@@ -19,6 +19,7 @@ import (
 	"net/http"
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
 	"github.com/fyannk/pgConsole/internal/redact"
 )
 
@@ -75,7 +76,7 @@ type CheckView struct {
 // function of the snapshots already published, so this handler makes no
 // API call: it is not a request-time exception, it is ordinary rendering.
 func (h *Handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
-	result := diagnose.Run(h.diagnosticsInput())
+	result := diagnose.Run(h.diagnosticsInput(), catalog.Rules()...)
 	h.renderDiagnostics(w, h.buildDiagnosticsView(r, result))
 }
 
@@ -103,6 +104,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	}
 	if h.sources.Infrastructure != nil {
 		in.Infrastructure, in.HasInfrastructure = h.sources.Infrastructure.CurrentInfrastructure()
+	}
+	if h.sources.KubeVersion != nil {
+		in.KubeVersion, in.HasKubeVersion = h.sources.KubeVersion.CurrentKubeVersion()
 	}
 	if h.sources.Poolers != nil {
 		in.Poolers, in.HasPoolers = h.sources.Poolers.CurrentPoolers()
@@ -132,6 +136,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	}
 	if h.sources.PoolerMetrics != nil {
 		in.PoolerMetrics = h.sources.PoolerMetrics
+	}
+	if h.sources.LogObservations != nil {
+		in.Logs = h.sources.LogObservations
 	}
 
 	return in
@@ -169,6 +176,10 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, result diagnose.Result) 
 			view.Unavailable++
 		case diagnose.CheckMatched:
 			state = "bad"
+		case diagnose.CheckNotApplicable:
+			// Muted, not clear: the rule ruled itself out on the observed
+			// versions, and the row's text says so.
+			state = "na"
 		}
 		view.Checks = append(view.Checks, CheckView{
 			Name:      check.Name,

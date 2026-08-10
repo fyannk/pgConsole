@@ -197,3 +197,30 @@ func (r *Runner) readOnce(ctx context.Context, member Member) (reason string, er
 	}
 	return "stream ended; lines emitted before it was reopened were not observed", nil
 }
+
+// Opener opens one container's stream. The Kubernetes client implements
+// it; separating it from the roster is what lets the follower be
+// assembled where the roster lives rather than where the client does.
+type Opener interface {
+	FollowLogs(ctx context.Context, pod, container string) (io.ReadCloser, error)
+}
+
+// NewSource pairs a roster function with an opener to make a Source.
+//
+// The roster is a function rather than a snapshot so it is read at each
+// reconcile: a pod that has gone must stop being followed, and a pod
+// that has appeared must start, without the runner holding a stale list.
+func NewSource(members func() []Member, opener Opener) Source {
+	return funcSource{members: members, opener: opener}
+}
+
+type funcSource struct {
+	members func() []Member
+	opener  Opener
+}
+
+func (s funcSource) Members() []Member { return s.members() }
+
+func (s funcSource) Follow(ctx context.Context, pod, container string) (io.ReadCloser, error) {
+	return s.opener.FollowLogs(ctx, pod, container)
+}
