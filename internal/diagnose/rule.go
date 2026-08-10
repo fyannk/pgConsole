@@ -125,6 +125,11 @@ type conditionMatch struct {
 type LogContains struct {
 	// Substrings must all appear in one line.
 	Substrings []string
+	// Except withdraws a line containing any of these, for a rule whose
+	// marker is broader than its meaning: PostgreSQL stamps routine
+	// lifecycle refusals with the same severity word as real faults, and
+	// the carve-outs name those known-benign messages exactly.
+	Except []string
 }
 
 func (c LogContains) describe() string {
@@ -132,7 +137,11 @@ func (c LogContains) describe() string {
 	for i, s := range c.Substrings {
 		quoted[i] = fmt.Sprintf("%q", s)
 	}
-	return "a followed log line containing " + strings.Join(quoted, " and ")
+	described := "a followed log line containing " + strings.Join(quoted, " and ")
+	if len(c.Except) > 0 {
+		described += fmt.Sprintf(", excluding %d known-benign messages", len(c.Except))
+	}
+	return described
 }
 
 func (c LogContains) evaluate(ruleID string, in Input) ([]conditionMatch, string) {
@@ -880,6 +889,7 @@ func LogRules(rules []Rule) []logstream.Rule {
 			derived = append(derived, logstream.Rule{
 				ID:       rule.ID,
 				Contains: condition.Substrings,
+				Except:   condition.Except,
 				Summary:  rule.Summary,
 			})
 		}

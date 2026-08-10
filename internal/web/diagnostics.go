@@ -15,6 +15,7 @@
 package web
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -36,11 +37,32 @@ type DiagnosticsView struct {
 	ClusterName string
 	// Findings are most severe first.
 	Findings []FindingView
-	// Checks account for every detector that ran.
+	// Groups bucket every check by outcome, in reading order: matched
+	// first, then could-not-run, then does-not-apply, then clear. The
+	// grouping is presentation — every check is still on the page — but
+	// it is what lets sixty clear rows collapse under one honest line
+	// instead of burying the two rows that matter.
+	Groups []CheckGroupView
+	// Total counts every check, for the summary line.
+	Total int
+}
+
+// CheckGroupView is one outcome's checks, rendered as a collapsible
+// group. Open groups are the ones a reader must not miss: matches and
+// checks that could not run. The details element is ordinary markup, so
+// a reader without script opens it the same way.
+type CheckGroupView struct {
+	// Label is the outcome with its count, in the outcome's own words.
+	Label string
+	// Explain glosses what belonging to this group means — and, for
+	// clear, what it does not: clear rules out exactly what each row
+	// describes, nothing more.
+	Explain string
+	// State is the stylesheet token for the group's chip and rows.
+	State string
+	// Open renders the group expanded.
+	Open   bool
 	Checks []CheckView
-	// Unavailable counts the checks that could not run, so the summary
-	// line can say so without the reader counting rows.
-	Unavailable int
 }
 
 // FindingView is one finding as rendered.
@@ -168,25 +190,49 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, result diagnose.Result) 
 		}
 		view.Findings = append(view.Findings, rendered)
 	}
+	// Bucket the checks by outcome, keeping catalog order inside each
+	// group. The states are the console's shared vocabulary: a match is
+	// degraded, an unrunnable check is unknown, an inapplicable one is
+	// na, and only a check that ran and found nothing is current.
+	buckets := map[diagnose.CheckOutcome][]CheckView{}
 	for _, check := range result.Checks {
-		state := "ok"
-		switch check.Outcome {
-		case diagnose.CheckUnavailable:
-			state = "unknown"
-			view.Unavailable++
-		case diagnose.CheckMatched:
-			state = "bad"
-		case diagnose.CheckNotApplicable:
-			// Muted, not clear: the rule ruled itself out on the observed
-			// versions, and the row's text says so.
-			state = "na"
-		}
-		view.Checks = append(view.Checks, CheckView{
+		view.Total++
+		buckets[check.Outcome] = append(buckets[check.Outcome], CheckView{
 			Name:      check.Name,
 			Describes: check.Describes,
 			Outcome:   check.Outcome.String(),
 			Because:   boundMessage(check.Because),
-			State:     state,
+		})
+	}
+	for _, group := range []struct {
+		outcome diagnose.CheckOutcome
+		label   string
+		explain string
+		state   string
+		open    bool
+	}{
+		{diagnose.CheckMatched, "matched",
+			"these found what they look for — each match is a finding above", "degraded", true},
+		{diagnose.CheckUnavailable, "could not run",
+			"their input was absent, forbidden, or not yet observed; they rule nothing out", "unknown", true},
+		{diagnose.CheckNotApplicable, "do not apply",
+			"their version pins exclude the observed versions, so they make no claim here", "na", false},
+		{diagnose.CheckClear, "clear",
+			"ran against readable input and found nothing — which rules out exactly what each row describes, no more", "current", false},
+	} {
+		checks := buckets[group.outcome]
+		if len(checks) == 0 {
+			continue
+		}
+		for i := range checks {
+			checks[i].State = group.state
+		}
+		view.Groups = append(view.Groups, CheckGroupView{
+			Label:   fmt.Sprintf("%d %s", len(checks), group.label),
+			Explain: group.explain,
+			State:   group.state,
+			Open:    group.open,
+			Checks:  checks,
 		})
 	}
 	return view

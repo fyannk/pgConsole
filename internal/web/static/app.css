@@ -1823,3 +1823,93 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 .topo-legend span { align-items: center; display: flex; gap: var(--space-2); }
 .topo-legend svg { display: block; height: 8px; width: 26px; }
 .topo-legend svg path { fill: none; stroke-width: 1.5; }
+
+/* ------------------------------------------------------------ Diagnostics */
+
+/* A finding is a card whose left edge and chip carry its severity, in
+   the console's status colours. The severity word is always present in
+   text — the colour restates, never replaces. */
+.finding {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
+}
+.finding[data-severity="critical"] { border-left-color: var(--bad); }
+.finding[data-severity="warning"] { border-left-color: var(--warn); }
+.finding[data-severity="note"] { border-left-color: var(--border-strong); }
+
+.finding-head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.finding-head h3 { margin: 0; }
+
+.sev {
+  border-radius: 999px;
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.55rem;
+  text-transform: uppercase;
+}
+.finding[data-severity="critical"] .sev { background: var(--bad-weak); color: var(--bad); }
+.finding[data-severity="warning"] .sev { background: var(--warn-weak); color: var(--warn); }
+.finding[data-severity="note"] .sev { background: var(--surface-2); color: var(--text-muted); }
+
+.finding-detail {
+  color: var(--text-muted);
+  margin: 0 0 var(--space-3);
+  max-width: 90ch;
+}
+
+/* Evidence is a quotation and looks like one: the claim's origin and
+   object on a meta line, the verbatim text in a monospace block. */
+.evidence { margin: 0 0 var(--space-3); }
+.evidence-meta {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-1);
+}
+.evidence-meta strong { color: var(--text); font-weight: 600; }
+.origin-tag::before { content: "— "; }
+.evidence pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  margin: 0;
+  overflow-x: auto;
+  padding: var(--space-2) var(--space-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.finding-link { margin: 0; }
+
+/* The checks account. The summary line carries each outcome as a
+   counted, state-coloured chip; each group is a details element so the
+   clear majority folds under one line while matches and could-not-run
+   arrive expanded. Closed-by-default is safe without script: details is
+   ordinary markup. */
+.check-summary { margin: 0 0 var(--space-4); }
+
+details.check-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0 0 var(--space-3);
+}
+details.check-group summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+}
+details.check-group summary:hover { background: var(--surface-2); }
+details.check-group[open] > summary { border-bottom: 1px solid var(--border); }
+details.check-group .gloss { color: var(--text-muted); font-weight: 400; }
+details.check-group table { margin: 0; }
+details.check-group td:first-child { font-family: var(--mono, monospace); font-size: var(--text-sm); white-space: nowrap; }

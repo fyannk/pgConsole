@@ -6,14 +6,19 @@
   The second panel is not decoration. Findings alone would make an empty
   screen read as "nothing is wrong", which is a claim derived from the
   absence of a match rather than from anything a source reported. The
-  checks list turns that into "these were looked at, and these could not
-  be", which is what the console actually knows.
+  checks are therefore all on the page, grouped by outcome: matches and
+  checks that could not run stay expanded, while the clear majority
+  collapses under one counted line. The details element is ordinary
+  markup — a reader without script opens it the same way.
 */ -}}
 {{template "page-head" "diagnostics"}}
 {{template "shell-open" .Shell}}
   <header>
     <div class="header-bar">
       <h1>Diagnostics</h1>
+    <dl class="target">
+      <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
+    </dl>
     </div>
     <p class="lede">Every finding restates what a source reported and quotes it. None concludes anything a source did not say.</p>
   </header>
@@ -22,18 +27,22 @@
     <h2>Findings</h2>
     {{- if .Findings}}
     {{- range .Findings}}
-    <article class="finding">
-      <h3 data-state="{{if eq .Severity "critical"}}bad{{else if eq .Severity "warning"}}warn{{else}}ok{{end}}">{{.Summary}}</h3>
+    <article class="finding" data-severity="{{.Severity}}">
+      <div class="finding-head">
+        <span class="sev">{{.Severity}}</span>
+        <h3>{{.Summary}}</h3>
+      </div>
       {{- if .Detail}}
-      <p>{{.Detail}}</p>
+      <p class="finding-detail">{{.Detail}}</p>
       {{- end}}
-      <dl class="facts">
-        {{- range .Evidence}}
-        <dt>{{.Object}} ({{.Origin}})</dt><dd>{{.Detail}}</dd>
-        {{- end}}
-      </dl>
+      {{- range .Evidence}}
+      <div class="evidence">
+        <p class="evidence-meta"><strong>{{.Object}}</strong> <span class="origin-tag">{{.Origin}}</span></p>
+        <pre>{{.Detail}}</pre>
+      </div>
+      {{- end}}
       {{- if .Link}}
-      <p><a href="{{.Link}}">{{.LinkLabel}}</a></p>
+      <p class="finding-link"><a href="{{.Link}}">{{.LinkLabel}} →</a></p>
       {{- end}}
     </article>
     {{- end}}
@@ -44,19 +53,25 @@
 
   <section class="panel">
     <h2>What was checked</h2>
-    <p class="lede">{{len .Checks}} checks ran{{if .Unavailable}}; {{.Unavailable}} could not run{{end}}. A check that could not run rules nothing out.</p>
-    <table>
-      <thead><tr><th>Check</th><th>Looks for</th><th>Result</th></tr></thead>
-      <tbody>
-        {{- range .Checks}}
-        <tr>
-          <td>{{.Name}}</td>
-          <td>{{.Describes}}</td>
-          <td data-state="{{.State}}">{{.Outcome}}{{if .Because}} — {{.Because}}{{end}}</td>
-        </tr>
-        {{- end}}
-      </tbody>
-    </table>
-    <p class="origin">source: application-derived from the snapshots the other screens render; each quoted claim names its own origin above.</p>
+    <p class="check-summary">{{.Total}} checks —
+      {{- range $i, $g := .Groups}}{{if $i}} · {{end}} <span data-state="{{$g.State}}">{{$g.Label}}</span>{{end}}</p>
+    {{- range .Groups}}
+    <details class="check-group"{{if .Open}} open{{end}}>
+      <summary><span data-state="{{.State}}">{{.Label}}</span> <span class="gloss">— {{.Explain}}</span></summary>
+      <table>
+        <thead><tr><th>Check</th><th>Looks for</th><th>Note</th></tr></thead>
+        <tbody>
+          {{- range .Checks}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{.Describes}}</td>
+            <td>{{if .Because}}{{.Because}}{{else}}—{{end}}</td>
+          </tr>
+          {{- end}}
+        </tbody>
+      </table>
+    </details>
+    {{- end}}
+    <p class="origin">source: application-derived from the snapshots the other screens render; each quoted claim names its own origin above. A check that could not run rules nothing out.</p>
   </section>
 {{template "shell-close"}}

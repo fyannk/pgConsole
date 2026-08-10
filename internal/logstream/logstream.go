@@ -100,6 +100,13 @@ type Rule struct {
 	// to match. Several are allowed so a rule can be specific without a
 	// pattern language.
 	Contains []string
+	// Except are substrings any one of which withdraws the match. They
+	// exist for a rule that must stay broad — a severity marker matches
+	// routine lifecycle chatter along with real faults — and they carry
+	// the same guarantee as Contains: a substring cannot be made
+	// pathological by a hostile line, and cannot quietly match more than
+	// it says.
+	Except []string
 	// Summary states what the match means, in plain language.
 	Summary string
 }
@@ -111,6 +118,11 @@ func (r Rule) matches(text string) bool {
 	}
 	for _, needle := range r.Contains {
 		if !strings.Contains(text, needle) {
+			return false
+		}
+	}
+	for _, benign := range r.Except {
+		if strings.Contains(text, benign) {
 			return false
 		}
 	}
