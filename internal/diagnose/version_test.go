@@ -15,6 +15,7 @@
 package diagnose
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -95,6 +96,7 @@ func TestVersionFactsAreObservedNeverAssumed(t *testing.T) {
 		Pods: observe.PodsSnapshot{Pods: []observe.PodFacts{{
 			Name: "orders-1",
 			Containers: []observe.ContainerFacts{
+				{Name: "bootstrap-controller", Init: true, Image: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"},
 				{Name: "postgres", Image: "ghcr.io/cloudnative-pg/postgresql:17.5"},
 				{Name: "plugin-barman-cloud", Image: "ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.6.0"},
 			},
@@ -118,11 +120,18 @@ func TestVersionFactsAreObservedNeverAssumed(t *testing.T) {
 		t.Errorf("Barman fact carries no provenance: %+v", barman)
 	}
 
-	// Neither the operator nor Kubernetes is observable yet; asserting a
-	// version for them would gate pinned rules on an assumption.
-	if _, ok := facts[ComponentCNPG]; ok {
-		t.Error("CloudNativePG version asserted without a source")
+	// The operator injects its own image as the bootstrap init
+	// container, which is where its version is observed.
+	cnpg, ok := facts[ComponentCNPG]
+	if !ok || cnpg.Version != "1.30.0" {
+		t.Fatalf("CloudNativePG version = %+v, want 1.30.0 from the bootstrap image", cnpg)
 	}
+	if !strings.Contains(cnpg.Object, "bootstrap-controller") {
+		t.Errorf("CloudNativePG provenance does not name the init container: %+v", cnpg)
+	}
+
+	// Kubernetes is not observable yet; asserting a version for it would
+	// gate pinned rules on an assumption.
 	if _, ok := facts[ComponentKubernetes]; ok {
 		t.Error("Kubernetes version asserted without a source")
 	}

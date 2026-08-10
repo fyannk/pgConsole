@@ -244,6 +244,10 @@ type MetricsWindow interface {
 	Instances() []string
 	// Range returns the retained series for one key at one tier.
 	Range(key string, tier metrics.Tier) (times []int64, byInstance map[string][]*float64)
+	// InstantReadings returns every instance's latest point-in-time
+	// claims, keyed by instance then by instant key. A key an instance
+	// never reported is absent rather than zero.
+	InstantReadings() map[string]map[string]metrics.Instant
 }
 
 // Result is one complete run: what was found, and what was checked.

@@ -69,11 +69,9 @@ type VersionFacts map[Component]ComponentVersion
 // injected version the cluster does not actually run would silently gate
 // every pinned rule wrong.
 //
-// Two components are derivable today. The CloudNativePG operator runs
-// outside this console's namespaced authority and Kubernetes' own server
-// version is not in any snapshot, so both stay unknown until a source
-// observes them — which the framework treats as "could not evaluate",
-// not as an error.
+// Kubernetes' own server version is not in any snapshot, so
+// ComponentKubernetes stays unknown until a source observes it — which
+// the framework treats as "could not evaluate", not as an error.
 func versionFacts(in Input) VersionFacts {
 	facts := VersionFacts{}
 
@@ -88,12 +86,25 @@ func versionFacts(in Input) VersionFacts {
 	}
 
 	if in.HasPods {
-		if pod, container, version, ok := barmanSidecarVersion(in); ok {
+		if pod, container, version, ok := memberContainerVersion(in, barmanSidecarContainer); ok {
 			facts[ComponentBarman] = ComponentVersion{
 				Version: version,
 				Origin:  "console-parsed from Kubernetes-observed image",
 				Object:  fmt.Sprintf("Pod/%s container %s", pod, container.Name),
 				Detail:  fmt.Sprintf("sidecar image %q", container.Image),
+			}
+		}
+		// The operator injects its own image into every instance pod as
+		// the bootstrap init container that copies the instance manager
+		// in, so that image's tag is the operator version — observed on
+		// the workload itself, not on the operator's Deployment, which
+		// lives outside this console's namespaced authority.
+		if pod, container, version, ok := memberContainerVersion(in, bootstrapControllerContainer); ok {
+			facts[ComponentCNPG] = ComponentVersion{
+				Version: version,
+				Origin:  "console-parsed from Kubernetes-observed image",
+				Object:  fmt.Sprintf("Pod/%s init container %s", pod, container.Name),
+				Detail:  fmt.Sprintf("operator bootstrap image %q", container.Image),
 			}
 		}
 	}
@@ -105,14 +116,18 @@ func versionFacts(in Input) VersionFacts {
 // ships its sidecar under.
 const barmanSidecarContainer = "plugin-barman-cloud"
 
-// barmanSidecarVersion finds the plugin sidecar on any instance pod and
-// parses its image tag. The first pod carrying one wins: the operator
-// rolls the sidecar with the cluster, so a mixed set is transient and
-// any member is as good an answer as another.
-func barmanSidecarVersion(in Input) (pod string, container ContainerRef, version string, ok bool) {
+// bootstrapControllerContainer is the init container the operator adds
+// to every instance pod, running the operator's own image.
+const bootstrapControllerContainer = "bootstrap-controller"
+
+// memberContainerVersion finds the named container on any instance pod
+// and parses its image tag. The first pod carrying one wins: the
+// operator rolls these containers with the cluster, so a mixed set is
+// transient and any member is as good an answer as another.
+func memberContainerVersion(in Input, name string) (pod string, container ContainerRef, version string, ok bool) {
 	for _, p := range in.Pods.Pods {
 		for _, c := range p.Containers {
-			if c.Name != barmanSidecarContainer {
+			if c.Name != name {
 				continue
 			}
 			if v, parsed := imageTagVersion(c.Image); parsed {

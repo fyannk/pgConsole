@@ -18,27 +18,37 @@ package diagnose
 func postgresRules() []Rule {
 	return []Rule{
 		{
+			// The substring is the JSON field CloudNativePG's log pipe
+			// wraps every PostgreSQL server record in, which is why a
+			// PostgreSQL rule carries a CloudNativePG pin: the message is
+			// the database's, the envelope is the operator's. Matching
+			// the envelope rather than a bare "FATAL:" keeps quoted
+			// errors in other components' lines from counting as the
+			// server speaking.
 			ID:        "postgres-fatal",
 			Component: ComponentPostgreSQL,
-			Severity:  SeverityCritical,
-			Describes: "a FATAL message in a followed container log",
-			Summary:   "PostgreSQL reported a fatal error.",
-			Detail: "Read from the container's log while following it. Following is " +
-				"best effort: a stream breaks on every container restart and " +
-				"Kubernetes cannot report what was emitted in between, so the " +
-				"count below is a floor and an absence here rules nothing out.",
-			When: LogContains{Substrings: []string{"FATAL:"}},
+			Requires:  []Requirement{{Component: ComponentCNPG, Constraint: ">=1.30 <1.31"}},
+			Severity:  SeverityWarning,
+			Describes: "a server log record with FATAL severity",
+			Summary:   "PostgreSQL logged a FATAL-severity record.",
+			Detail: "FATAL ends one backend, not the server, and routine failures — a " +
+				"wrong password, a refused connection during startup — log at this " +
+				"severity too; the quoted record says which this is. Read from the " +
+				"container's log while following it, best effort: the count below is " +
+				"a floor and an absence here rules nothing out.",
+			When: LogContains{Substrings: []string{`"error_severity":"FATAL"`}},
 		},
 		{
 			ID:        "postgres-panic",
 			Component: ComponentPostgreSQL,
+			Requires:  []Requirement{{Component: ComponentCNPG, Constraint: ">=1.30 <1.31"}},
 			Severity:  SeverityCritical,
-			Describes: "a PANIC message in a followed container log",
-			Summary:   "PostgreSQL reported a panic, which ends the process.",
-			Detail: "Read from the container's log while following it. Following is " +
-				"best effort, so the count below is a floor and an absence here " +
-				"rules nothing out.",
-			When: LogContains{Substrings: []string{"PANIC:"}},
+			Describes: "a server log record with PANIC severity",
+			Summary:   "PostgreSQL panicked, which ends the whole server process.",
+			Detail: "A panic crashes the postmaster and forces crash recovery. Read from " +
+				"the container's log while following it, best effort: the count below " +
+				"is a floor and an absence here rules nothing out.",
+			When: LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
 		},
 		{
 			// The one rule where the version pin is the whole diagnostic:

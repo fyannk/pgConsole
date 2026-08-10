@@ -16,9 +16,12 @@ package diagnose
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/fyannk/pgConsole/internal/logstream"
+	"github.com/fyannk/pgConsole/internal/metrics"
 )
 
 // Rule is one catalog diagnostic, written as data: on the pinned
@@ -164,28 +167,67 @@ func (c LogContains) evaluate(ruleID string, in Input) ([]conditionMatch, string
 	return matches, ""
 }
 
-// EventMatch matches Warning events by reason, optionally narrowed to
-// messages carrying every substring. It quotes the events rather than
-// reasoning about them: the API server already stated the refusal in its
-// own words.
+// EventMatch matches events by reason, optionally narrowed to messages
+// carrying every substring. It quotes the events rather than reasoning
+// about them: the API server — or the operator, through its recorder —
+// already stated the refusal in its own words.
+//
+// Only events on the Cluster object and its member pods are in the
+// observed window, so a rule here must be about one of those. An event
+// the operator records on a Backup or ScheduledBackup object is not
+// observable and belongs to a status-backed condition instead.
 type EventMatch struct {
 	// Reasons are the event reasons accepted, any of which matches.
 	Reasons []string
+	// Types are the event types accepted; empty means Warning only.
+	// Named explicitly because the operator's type is not a reliable
+	// severity signal — some real failures are recorded as Normal.
+	Types []string
 	// MessageContains narrows to messages carrying every substring.
 	// Empty accepts any message under a matching reason.
 	MessageContains []string
 }
 
 func (c EventMatch) describe() string {
-	return "a Warning event with reason " + strings.Join(c.Reasons, " or ")
+	return "an event with reason " + strings.Join(c.Reasons, " or ")
 }
 
 func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	if !in.HasEvents {
 		return nil, "events have not been observed yet"
 	}
+	types := c.Types
+	if len(types) == 0 {
+		types = []string{"Warning"}
+	}
+	// Bounded like warningEvents, so one flapping object cannot fill a
+	// finding with the same line.
+	const maxQuoted = 3
 	var evidence []Evidence
-	for _, event := range warningEvents(in.Events.Events, c.Reasons...) {
+	for _, event := range in.Events.Events {
+		if len(evidence) >= maxQuoted {
+			break
+		}
+		typeAccepted := false
+		for _, accepted := range types {
+			if event.Type == accepted {
+				typeAccepted = true
+				break
+			}
+		}
+		if !typeAccepted {
+			continue
+		}
+		reasonAccepted := false
+		for _, reason := range c.Reasons {
+			if event.Reason == reason {
+				reasonAccepted = true
+				break
+			}
+		}
+		if !reasonAccepted {
+			continue
+		}
 		carriesAll := true
 		for _, needle := range c.MessageContains {
 			if !strings.Contains(event.Message, needle) {
@@ -203,6 +245,217 @@ func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	// One finding quoting every matched event: the events are the same
 	// refusal repeating, not separate incidents.
 	return []conditionMatch{{evidence: evidence}}, ""
+}
+
+// BackupPhase matches Backup objects sitting in one of the given phases
+// for at least MinAge, quoting the operator's own phase. The age bound
+// keeps ordinary progress out: every backup passes through its early
+// phases, and only staying there is a finding.
+type BackupPhase struct {
+	// AnyOf are the phase strings that match, compared case-insensitively
+	// because the operator has written both "failed" and "Failed" across
+	// versions.
+	AnyOf []string
+	// MinAge is how long the backup must have existed before its phase
+	// counts. Zero matches immediately.
+	MinAge time.Duration
+}
+
+func (c BackupPhase) describe() string {
+	return "a Backup whose reported phase is " + strings.Join(c.AnyOf, " or ")
+}
+
+func (c BackupPhase) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasBackups {
+		return nil, "the backup catalog has not been observed yet"
+	}
+	if in.Backups.Stale {
+		return nil, "the backup catalog is stale, so current phases are unknown"
+	}
+	var matches []conditionMatch
+	for _, backup := range in.Backups.Backups {
+		phaseAccepted := false
+		for _, phase := range c.AnyOf {
+			if strings.EqualFold(backup.Phase, phase) {
+				phaseAccepted = true
+				break
+			}
+		}
+		if !phaseAccepted {
+			continue
+		}
+		if c.MinAge > 0 && in.Now.Sub(backup.CreatedAt) < c.MinAge {
+			continue
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + backup.Name,
+			evidence: []Evidence{{
+				Origin: "operator-reported",
+				Object: "Backup/" + backup.Name,
+				Detail: fmt.Sprintf("phase %s, created %s", backup.Phase,
+					backup.CreatedAt.UTC().Format("2006-01-02 15:04:05Z")),
+			}},
+			link:      "/backups",
+			linkLabel: "Backups",
+		})
+	}
+	return matches, ""
+}
+
+// ClusterCondition matches an operator-reported condition on the
+// Cluster at a given status, quoting the operator's own reason and
+// message. It is the status-backed condition: nothing here depends on
+// log text, so rules built on it survive rewordings that would silence
+// a LogContains rule.
+type ClusterCondition struct {
+	// Type is the condition type, such as "ContinuousArchiving".
+	Type string
+	// Status is the status that matches, such as "False".
+	Status string
+	// Reason, when set, narrows to that reason. It matters when one
+	// status carries two meanings: LastBackupSucceeded goes False both
+	// for a backup that failed and for one that just started, and only
+	// the reason tells them apart.
+	Reason string
+}
+
+func (c ClusterCondition) describe() string {
+	described := fmt.Sprintf("the operator reporting condition %s as %s", c.Type, c.Status)
+	if c.Reason != "" {
+		described += " with reason " + c.Reason
+	}
+	return described
+}
+
+func (c ClusterCondition) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasCluster {
+		return nil, "the Cluster has not been observed yet"
+	}
+	if !in.Cluster.Cluster.Present {
+		return nil, "the API server reports no Cluster object"
+	}
+	for _, condition := range in.Cluster.Cluster.Conditions {
+		if condition.Type != c.Type || condition.Status != c.Status {
+			continue
+		}
+		if c.Reason != "" && condition.Reason != c.Reason {
+			continue
+		}
+		detail := fmt.Sprintf("status %s, reason %s", condition.Status, condition.Reason)
+		if condition.Message != "" {
+			detail += ": " + condition.Message
+		}
+		return []conditionMatch{{evidence: []Evidence{{
+			Origin: "operator-reported",
+			Object: "Cluster condition " + c.Type,
+			Detail: detail,
+		}}}}, ""
+	}
+	// An absent condition is not the sought status; it is also not
+	// evidence of the opposite, which is why this reads as clear only
+	// under a check row that names the exact condition it waited for.
+	return nil, ""
+}
+
+// ClusterPhase matches the operator-reported phase, quoting the phase
+// and its reason. It is for phases that mean the cluster is waiting on
+// something — a phase the operator can sit in indefinitely is the
+// closest thing it has to saying "stuck" out loud.
+type ClusterPhase struct {
+	// AnyOf are the phase strings that match, exactly as the operator
+	// writes them.
+	AnyOf []string
+}
+
+func (c ClusterPhase) describe() string {
+	return "the operator reporting phase " + strings.Join(c.AnyOf, " or ")
+}
+
+func (c ClusterPhase) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasCluster {
+		return nil, "the Cluster has not been observed yet"
+	}
+	if !in.Cluster.Cluster.Present {
+		return nil, "the API server reports no Cluster object"
+	}
+	for _, phase := range c.AnyOf {
+		if in.Cluster.Cluster.Phase != phase {
+			continue
+		}
+		detail := "phase " + phase
+		if in.Cluster.Cluster.PhaseReason != "" {
+			detail += ": " + in.Cluster.Cluster.PhaseReason
+		}
+		return []conditionMatch{{evidence: []Evidence{{
+			Origin: "operator-reported",
+			Object: "Cluster",
+			Detail: detail,
+		}}}}, ""
+	}
+	return nil, ""
+}
+
+// InstantNonZero matches an instance whose latest reading of one
+// point-in-time metric is non-zero. The keys are the metric catalog's
+// instant keys, such as "fencing-on"; the exporter's own metric name is
+// quoted in the evidence.
+//
+// It reads the scraped window, so it is a claim about what the exporter
+// last reported — the read time is quoted so the reader can judge how
+// stale that claim is.
+type InstantNonZero struct {
+	// Key is the instant key in the instance metric catalog.
+	Key string
+}
+
+func (c InstantNonZero) describe() string {
+	return fmt.Sprintf("an instance whose exporter reports %s as non-zero", instantMetricName(c.Key))
+}
+
+func (c InstantNonZero) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if in.Metrics == nil {
+		return nil, "instance metrics are not scraped"
+	}
+	readings := in.Metrics.InstantReadings()
+	instances := make([]string, 0, len(readings))
+	for instance := range readings {
+		instances = append(instances, instance)
+	}
+	sort.Strings(instances)
+	var matches []conditionMatch
+	for _, instance := range instances {
+		reading, reported := readings[instance][c.Key]
+		if !reported || reading.Value == 0 {
+			continue
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + instance,
+			evidence: []Evidence{{
+				Origin: "console-scraped from the instance exporter",
+				Object: "instance " + instance,
+				Detail: fmt.Sprintf("%s = %g, read %s", instantMetricName(c.Key), reading.Value,
+					time.Unix(reading.At, 0).UTC().Format("15:04:05Z")),
+			}},
+			link:      "/cluster/metrics",
+			linkLabel: "Metrics",
+		})
+	}
+	return matches, ""
+}
+
+// instantMetricName resolves an instant key to the exporter's metric
+// name, so evidence quotes the exporter's vocabulary rather than the
+// console's.
+func instantMetricName(key string) string {
+	for _, def := range metrics.Instance.Instants {
+		if def.Key == key {
+			if len(def.Names) > 0 {
+				return def.Names[0]
+			}
+			break
+		}
+	}
+	return key
 }
 
 // evaluateRule turns one rule into its check row and findings. The
