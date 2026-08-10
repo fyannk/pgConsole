@@ -231,3 +231,13 @@ func sortObservations(out []Observation) {
 		return out[i].Container < out[j].Container
 	})
 }
+
+// MaxAge reports the retention window, so a screen rendering retained
+// lines can state how far back the record could possibly reach instead
+// of leaving the reader to guess why older lines are absent.
+func (b *Buffer) MaxAge() time.Duration {
+	if b == nil {
+		return 0
+	}
+	return b.maxAge
+}
