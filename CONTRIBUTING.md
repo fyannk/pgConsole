@@ -87,9 +87,26 @@ file said the opposite of the code for several releases.
    operation maps to an exact verb, resource, and — where the verb supports
    it — a `resourceNames`-pinned rule. No generic "apply YAML", no `Cluster`
    spec editing, no free-form patch path.
-10. **Bounded log exposure.** Instance logs can contain query text. Tails are
-    bounded in lines and bytes, fetched on demand, never persisted, and
-    disappear entirely under `ALLOW_LOGS=false`.
+10. **Bounded log exposure.** Instance logs can contain query text, and
+    for PostgreSQL that can include statements and their literal values.
+    Every path that reads them is bounded in bytes, and all of them
+    disappear under `ALLOW_LOGS=false`. There are three, and they retain
+    increasingly more:
+    - the **on-demand tail** retains nothing: it is fetched per request,
+      bounded in lines and bytes, and never cached;
+    - the **continuous matcher** (`LOG_STREAM_ENABLED`) analyses each
+      line once and retains only what matched — one bounded observation
+      per rule per container, so its memory does not grow with log
+      volume;
+    - the **line buffer** (`LOG_BUFFER_BYTES`, default `0`) retains
+      recent lines verbatim. This one is a standing corpus of log text
+      and is therefore off unless a deployment asks for it, bounded per
+      container *and* in total, and aged out.
+
+    Nothing writes log text to disk. Following is best effort — a stream
+    breaks on every container restart and Kubernetes cannot say what was
+    missed — so a gap is recorded explicitly and a retained count is a
+    floor, never a total.
 11. **No third-party content at runtime.** No embedded iframes, external
     scripts, fonts, styles, or telemetry. Monitoring depth is a link-out to
     an operator-configured URL; every asset is served from the binary. A new

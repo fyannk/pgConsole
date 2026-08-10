@@ -1,21 +1,46 @@
 {{- /*
-  Log tail page. Renders web.LogsView: one bounded, on-demand tail of a
-  verified member pod's PostgreSQL container, kubernetes-observed. The
-  content renders as escaped text only; it is never cached or persisted.
+  Log page. Renders web.LogsView in one of two modes, and says plainly
+  which one the reader is looking at:
+
+  - Live: one bounded, on-demand tail of a verified member pod's
+    container, fetched from the kubelet for this request and never
+    stored. Complete as of now, gone when the container is.
+  - Retained: the stream this console observed while following, best
+    effort. It can outlive the container, and a break in following is
+    rendered as a gap — never joined across — because two adjacent lines
+    that were not adjacent in the container would be invented continuity.
+
+  Content renders as escaped text only in both modes.
 */ -}}
 {{template "page-head" "log tail"}}
 {{template "shell-open" .Shell}}
   <header>
     <div class="header-bar">
-      <h1>pgConsole — log tail</h1>
+      <h1>pgConsole — logs</h1>
     <dl class="target">
       <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
       <dt>Pod</dt><dd>{{.Pod}}</dd>
+      {{- if .Container}}
+      <dt>Container</dt><dd>{{.Container}}</dd>
+      {{- end}}
     </dl>
     </div>
   </header>
     <section class="panel">
-      <h2>PostgreSQL container logs</h2>
+      <h2>{{if .Container}}{{.Container}} container logs{{else}}PostgreSQL container logs{{end}}</h2>
+      {{- if .Retained}}
+      <p class="meta">{{.RetentionNote}}</p>
+      {{- range .Segments}}
+      {{- if .Gap}}
+      <p class="state">gap at {{template "stamp" .At}} — {{.Note}}</p>
+      {{- else}}
+      <p class="meta">observed from {{template "stamp" .At}}</p>
+      <pre class="logs">{{.Text}}</pre>
+      {{- end}}
+      {{- end}}
+      <p class="meta"><a href="{{.LiveURL}}">Fetch the live tail instead</a> — the kubelet's current answer, while the container exists.</p>
+      <p class="origin">source: container log, retained by this console while following (best effort); times are observation times by the console's clock, not the log's own timestamps</p>
+      {{- else}}
       {{- if .State}}
       <p class="state">{{.State}}</p>
       {{- else}}
@@ -26,5 +51,17 @@
       <pre class="logs">{{.Content}}</pre>
       {{- end}}
       <p class="origin">source: {{.Origin.Label}}</p>
+      {{- end}}
     </section>
+    {{- if .RetainedContainers}}
+    <section class="panel">
+      <h2>Retained streams</h2>
+      <p class="meta">Streams this console has retained for this pod while following its containers. A retained stream can outlive its container.</p>
+      <ul>
+        {{- range .RetainedContainers}}
+        <li><a href="/logs/{{$.Pod}}/{{.}}">{{.}}</a></li>
+        {{- end}}
+      </ul>
+    </section>
+    {{- end}}
 {{template "shell-close"}}

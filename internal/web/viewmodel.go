@@ -458,6 +458,42 @@ type LogsView struct {
 	Content string
 	// Truncated reports the byte ceiling cut this tail.
 	Truncated bool
+	// Container is the addressed container, empty when the route means
+	// the roster's default.
+	Container string
+	// Retained reports that the content below is the console's retained
+	// stream rather than a live fetch. The two make different claims: a
+	// live tail is the last N lines as the kubelet holds them now; the
+	// retained stream is what this console observed while following,
+	// best effort, and it can outlive the container.
+	Retained bool
+	// Segments is the retained stream in order: runs of text separated
+	// by explicit gap markers. A gap is rendered, never joined across.
+	Segments []LogSegmentView
+	// RetentionNote states the window and the best-effort nature.
+	RetentionNote string
+	// LiveURL fetches the on-demand tail of the same container, for the
+	// reader who wants the kubelet's current answer instead.
+	LiveURL string
+	// RetainedContainers lists the streams the console holds for this
+	// pod, so the unaddressed route can offer them. Empty when retention
+	// is off or nothing has been retained.
+	RetainedContainers []string
+}
+
+// LogSegmentView is one run of a retained log stream: either text, or an
+// explicit break in the record.
+type LogSegmentView struct {
+	// Gap marks a break; Text is then empty and Note says why.
+	Gap bool
+	// At is when the segment's first line was observed, or when the
+	// stream broke. Observation time by the console's clock — the only
+	// clock the console can vouch for.
+	At Stamp
+	// Note is the gap's reason.
+	Note string
+	// Text is the run's lines, newline-joined, escaped by the template.
+	Text string
 }
 
 // IdentityView is the display-only identity line. Both the user and the

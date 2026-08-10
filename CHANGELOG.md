@@ -9,6 +9,65 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **A version-aware diagnostic rule catalog.** A diagnostic is now data:
+  a rule declaring the component it is about, the version pins its claim
+  was verified against, the observation — a log line, an event, an
+  operator condition or phase, a metric flag or threshold, a backup
+  phase, a declared object's reconciliation report, a container state —
+  and the finding it means. Rules live one package per component under
+  `internal/diagnose/catalog/`, and each rule gets its own row on the
+  checks panel with a fourth honest outcome beside matched, clear, and
+  could-not-run: **"does not apply"**, when the observed versions fall
+  outside the rule's pins.
+
+- **The CloudNativePG catalog: 54 rules mined from the operator's own
+  source**, every string verified verbatim against releases 1.28.4,
+  1.29.2 and 1.30.0 and pinned to the span the verification covered.
+  Every blocked or waiting phase with its reason quoted; the conditions
+  that carry failure text the phase does not (`ContinuousArchiving`
+  above all — a cluster reports healthy while WAL archiving fails and
+  the disk fills); the operator's event-recorded refusals; fencing and
+  supervised-switchover flags from the exporter; failed, stuck, and
+  archiving-blocked backups; suspended and silently-stopped backup
+  schedules; a primary move still in flight on the operator's own clock;
+  declared databases, roles, publications and subscriptions the operator
+  cannot apply; and twenty instance-manager log messages, from
+  `pg_rewind` failures to the WAL volume running dry.
+
+- **Kubernetes and PostgreSQL rules** filling the gaps the hand-written
+  detectors leave: volumes that cannot mount or attach, evictions,
+  crash loops and OOM kills (instance *and* pooler containers — a
+  crash-looping sidecar breaks backups while the instance reads
+  healthy), containers the kubelet cannot construct, transaction-id and
+  multixact wraparound thresholds, and end-of-life rules for both
+  PostgreSQL and Kubernetes whose version pin is the whole diagnostic.
+
+- **Versions are observed, never configured.** CloudNativePG from the
+  `bootstrap-controller` init container the operator injects into every
+  instance pod; PostgreSQL from the operator's status; the Barman Cloud
+  plugin from its sidecar image tag; Kubernetes from the API server's
+  own `/version` report, polled every five minutes — the console's only
+  poll, a non-resource URL needing no Role. A version the console has
+  not observed leaves its pinned rules honestly at "could not run".
+
+- **`LOG_MATCH_MAX_AGE`** (default `6h`). A diagnostics log observation
+  now expires this long after its last matching line, so a finding
+  cannot outlive its relevance; a recurring failure renews its window on
+  every match. Previously a single matched line kept its finding until
+  restart.
+
+### Changed
+
+- **The log matcher's rules come from the catalog.** A log line is
+  declared once — with its pins and its finding — and matched
+  continuously; `logstream.DefaultRules` is gone. The `postgres-fatal`
+  and `postgres-panic` rules now match the log pipe's `error_severity`
+  field instead of a bare `FATAL:`, so they see real server records and
+  stop counting quoted noise; FATAL reports as a warning, because
+  routine failures — a wrong password — log at that severity too.
+
 ## [0.4.0] - 2026-08-09
 
 ### Added

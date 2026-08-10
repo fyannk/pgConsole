@@ -31,9 +31,11 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/authz"
+	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/redact"
@@ -114,6 +116,12 @@ type InfrastructureSource interface {
 	CurrentInfrastructure() (observe.InfrastructureSnapshot, bool)
 }
 
+// KubeVersionSource supplies the API server's /version observation.
+type KubeVersionSource interface {
+	// CurrentKubeVersion returns the snapshot and whether one exists.
+	CurrentKubeVersion() (observe.KubeVersionSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -155,6 +163,9 @@ type Sources struct {
 	// Infrastructure supplies the services, volume claims and volume
 	// snapshots. Nil means they were never observed.
 	Infrastructure InfrastructureSource
+	// KubeVersion supplies the API server's /version report. Nil means
+	// the server version was never observed.
+	KubeVersion KubeVersionSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -164,6 +175,14 @@ type Sources struct {
 	// History supplies the object-definition timeline. Nil means history is
 	// disabled and no history route is registered.
 	History HistorySource
+	// LogObservations is the continuous matcher's read side. Nil means
+	// log following is off, which the diagnostics detector reports as
+	// "could not run" rather than as nothing found.
+	LogObservations diagnose.LogObservations
+	// LogBuffer is the retained log text, when a deployment asked for
+	// any. Nil, or a buffer with retention off, means the log screens
+	// fall back to the on-demand tail.
+	LogBuffer *logstream.Buffer
 	// Metrics supplies the bounded instance-metrics window. Nil means
 	// metrics are disabled and no metrics route is registered.
 	Metrics MetricsSource
@@ -825,7 +844,28 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		Shell:       h.shell(r, ""),
 		ClusterName: h.cfg.ClusterName,
 		Pod:         pod,
+		Container:   container,
 		Origin:      OriginKubernetes,
+	}
+	// The unaddressed route offers whatever streams the console has
+	// retained for this pod, so a reader can reach a sidecar's — or a
+	// dead container's — record from here.
+	view.RetainedContainers = h.sources.LogBuffer.Containers(pod)
+
+	// An addressed container serves the retained stream first: the
+	// screens are powered by the continuous follow when a deployment has
+	// asked for retention, and the retained record outlives the
+	// container, which a live fetch cannot. The live tail stays one
+	// click away, and remains the fallback whenever nothing is retained.
+	if container != "" {
+		if segments, note, ok := h.retainedLog(pod, container); ok {
+			view.Retained = true
+			view.Segments = segments
+			view.RetentionNote = note
+			view.LiveURL = "/logs/" + pod + "/" + container + "?raw=1"
+			h.renderLogs(w, http.StatusOK, view)
+			return
+		}
 	}
 	status := http.StatusOK
 	if h.tailer == nil {
@@ -853,13 +893,7 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 			slog.String("pod", pod),
 			slog.String("category", redact.Safe(err)))
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	if err := h.tpl.ExecuteTemplate(w, "logs.html.tmpl", view); err != nil {
-		h.logger.Error("render failed",
-			slog.String("route", "logs"),
-			slog.String("category", redact.Safe(err)))
-	}
+	h.renderLogs(w, status, view)
 }
 
 // handlePoolerLogs serves one bounded, on-demand tail of a pooler pod's
@@ -948,6 +982,11 @@ func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, boo
 	return observe.ImageCatalogsSnapshot{}, false
 }
 
+// CurrentKubeVersion reports no server-version observation.
+func (EmptySnapshots) CurrentKubeVersion() (observe.KubeVersionSnapshot, bool) {
+	return observe.KubeVersionSnapshot{}, false
+}
+
 // CurrentDatabaseObjects reports no declarative-object snapshot.
 func (EmptySnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot, bool) {
 	return observe.DatabaseObjectsSnapshot{}, false
@@ -956,4 +995,16 @@ func (EmptySnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot,
 // CurrentInfrastructure reports no infrastructure snapshot.
 func (EmptySnapshots) CurrentInfrastructure() (observe.InfrastructureSnapshot, bool) {
 	return observe.InfrastructureSnapshot{}, false
+}
+
+// renderLogs writes the log screen, shared by the live and retained
+// paths.
+func (h *Handler) renderLogs(w http.ResponseWriter, status int, view LogsView) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := h.tpl.ExecuteTemplate(w, "logs.html.tmpl", view); err != nil {
+		h.logger.Error("render failed",
+			slog.String("route", "logs"),
+			slog.String("category", redact.Safe(err)))
+	}
 }

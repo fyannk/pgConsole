@@ -43,7 +43,7 @@ endpoints and the static assets, and nothing else.
 | GET | `/readyz` | none | always | Readiness — reaches the API (and a required sidecar). A constant body; probe detail is logged as a category only. |
 | GET | `/diagnostics` | `poweruser` | `ALLOW_DIAGNOSTICS=true` | Findings correlated from the published snapshots, plus the account of what was checked. Reads no API: it renders what the other screens already observe. |
 | GET | `/logs/{pod}` | `poweruser` | `ALLOW_LOGS=true` | One bounded, on-demand log tail for a membership-verified pod, reading its PostgreSQL container. A non-member pod is indistinguishable from a nonexistent one. |
-| GET | `/logs/{pod}/{container}` | `poweruser` | `ALLOW_LOGS=true` | The same tail for a named container in that pod — a plugin sidecar, or an init container. A container the pod does not declare is refused as not found. |
+| GET | `/logs/{pod}/{container}` | `poweruser` | `ALLOW_LOGS=true` | A named container's logs — a plugin sidecar, or an init container. With `LOG_BUFFER_BYTES` set, this serves the console's retained stream first (best effort, gaps rendered, and it can outlive the container), with the live tail one click away; otherwise the on-demand tail. A container the pod does not declare is refused as not found. |
 | GET | `/poolers/logs/{pod}` | `poweruser` | `ALLOW_LOGS=true` | One bounded, on-demand tail for a live-verified Pooler member pod. |
 | GET | `/operations` | `dba` | `ALLOW_OPERATIONS=true` | The closed catalog of day-2 operations. |
 | GET | `/operations/{op}` | `dba` | `ALLOW_OPERATIONS=true` | The confirmation form with a fresh CSRF token. No side effect. |

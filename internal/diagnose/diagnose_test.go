@@ -182,9 +182,13 @@ func TestRunAlwaysAccountsForEveryDetector(t *testing.T) {
 		input(nil, nil),
 		input([]observe.ScheduledBackupFacts{schedule("s", "0 2 * * * *")}, nil),
 	} {
-		result := Run(in)
-		if len(result.Checks) != len(Detectors()) {
-			t.Errorf("checks = %d, want one per detector (%d)", len(result.Checks), len(Detectors()))
+		// One synthetic rule rides along, proving every passed rule is
+		// accounted for beside the detectors.
+		rule := Rule{ID: "synthetic", Summary: "Synthetic.", Describes: "a synthetic condition",
+			When: EventMatch{Reasons: []string{"Never"}}}
+		result := Run(in, rule)
+		if want := len(Detectors()) + 1; len(result.Checks) != want {
+			t.Errorf("checks = %d, want one per detector and rule (%d)", len(result.Checks), want)
 		}
 		for _, check := range result.Checks {
 			if check.Name == "" || check.Describes == "" {

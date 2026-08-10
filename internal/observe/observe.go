@@ -60,7 +60,13 @@ type ClusterFacts struct {
 	// CurrentPrimary is the instance currently acting as primary.
 	CurrentPrimary string
 	// TargetPrimary is the instance the operator is moving primary to.
+	// The operator writes the sentinel "pending" while a failover is
+	// decided but no candidate is chosen yet.
 	TargetPrimary string
+	// TargetPrimaryTimestamp is when the operator requested the current
+	// target primary; nil when unreported or unparseable. It is the
+	// clock on an unfinished primary move.
+	TargetPrimaryTimestamp *time.Time
 	// DesiredInstances is the declared instance count.
 	DesiredInstances *int
 	// ReadyInstances is the operator-reported ready instance count.

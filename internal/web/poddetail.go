@@ -105,6 +105,9 @@ type PodDetailView struct {
 	Containers []ContainerView
 	// CanTailLogs gates the logs tab, same tier as the log routes.
 	CanTailLogs bool
+	// ContainerLogsBase prefixes per-container tail links in the
+	// containers table; empty hides them (pooler roster, or logs gated).
+	ContainerLogsBase string
 	// LogsGate states why the logs tab is absent when it is.
 	LogsGate string
 	// Logs carries the tail when CanTailLogs; nil otherwise.
@@ -301,6 +304,12 @@ func (h *Handler) renderPodDetail(w http.ResponseWriter, r *http.Request, roster
 	default:
 		view.CanTailLogs = true
 		view.Logs = roster.logs(r, pod.Name)
+		// Per-container tails exist only for the instance roster: that
+		// is the roster the continuous follower covers, and the roster
+		// whose addressed route is registered.
+		if roster.primary {
+			view.ContainerLogsBase = "/logs/" + pod.Name + "/"
+		}
 	}
 
 	view.Shell = h.shell(r, roster.current)

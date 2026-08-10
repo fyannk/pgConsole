@@ -1282,6 +1282,11 @@ th[data-sort="desc"]::after { color: var(--accent); content: "\2193"; }
 [data-state="unknown"] { color: var(--unknown); }
 [data-state="unknown"]::before { content: "\25CB"; }
 
+/* A check that does not apply to the observed versions: muted, because
+   the row is scoping information rather than a verdict either way. */
+[data-state="na"] { color: var(--unknown); font-weight: 500; }
+[data-state="na"]::before { content: "\2013"; }
+
 /* A suspect section is tinted at its edge so the whole panel reads as
    qualified, not just its meta line. */
 section.panel:has(.panel-head [data-state="stale"]) { border-color: var(--warn); }

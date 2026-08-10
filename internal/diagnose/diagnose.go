@@ -39,6 +39,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
@@ -122,6 +125,10 @@ const (
 	// absent, forbidden, or not yet observed. This is the outcome that
 	// stops an empty screen from reading as a healthy one.
 	CheckUnavailable
+	// CheckNotApplicable means a catalog rule's version pins exclude the
+	// observed versions. Distinct from clear on purpose: the rule looked
+	// at the versions and ruled itself out, not the failure.
+	CheckNotApplicable
 )
 
 // String names the outcome for display.
@@ -131,6 +138,8 @@ func (o CheckOutcome) String() string {
 		return "matched"
 	case CheckUnavailable:
 		return "could not run"
+	case CheckNotApplicable:
+		return "does not apply"
 	default:
 		return "clear"
 	}
@@ -177,9 +186,72 @@ type Input struct {
 	// instance count.
 	Cluster    observe.Snapshot
 	HasCluster bool
-	// Infrastructure carries the cluster's volumes.
+	// Infrastructure carries the cluster's services, volumes, volume
+	// snapshots, and owned child objects including Jobs.
 	Infrastructure    observe.InfrastructureSnapshot
 	HasInfrastructure bool
+	// Poolers and their member pods. A pooler pod is not an instance
+	// pod: it runs PgBouncer, is owned through a Deployment, and fails
+	// in its own ways.
+	Poolers       observe.PoolersSnapshot
+	HasPoolers    bool
+	PoolerPods    observe.PodsSnapshot
+	HasPoolerPods bool
+	// FailoverQuorum is the operator's account of whether a failover
+	// could proceed.
+	FailoverQuorum    observe.FailoverQuorumSnapshot
+	HasFailoverQuorum bool
+	// ImageCatalogs are the catalogs the Cluster draws its image from.
+	ImageCatalogs    observe.ImageCatalogsSnapshot
+	HasImageCatalogs bool
+	// KubeVersion is the API server's own /version report, the one
+	// observed fact that arrives by poll rather than by watch.
+	KubeVersion    observe.KubeVersionSnapshot
+	HasKubeVersion bool
+	// DatabaseObjects are the declared Database, DatabaseRole,
+	// Publication, and Subscription resources with the operator's
+	// reconciliation report on each.
+	DatabaseObjects    observe.DatabaseObjectsSnapshot
+	HasDatabaseObjects bool
+	// History is the bounded object-definition timeline. It is what lets
+	// a detector say when something changed rather than only that it is
+	// wrong now — the difference between a finding and a cause.
+	History    history.Snapshot
+	HasHistory bool
+	// Evidence is the repository-evidence sidecar's status, when one is
+	// wired. The console never reads object storage itself; this is the
+	// viewer's word, carried through.
+	Evidence    evidence.Status
+	HasEvidence bool
+	// Metrics and PoolerMetrics are the scraped windows. They are query
+	// interfaces rather than plain snapshots because the window is a
+	// rollup ring, but reading them is still an in-memory operation: no
+	// detector reaches the API server or the exporters.
+	Metrics       MetricsWindow
+	PoolerMetrics MetricsWindow
+	// Logs is the continuous matcher's read side, nil when log following
+	// is off. It is the one input that is not a snapshot: a stream is
+	// best effort, so a detector reading it may report what was seen but
+	// never how much there was.
+	Logs LogObservations
+}
+
+// MetricsWindow is the read side of a scraped metrics window, narrowed
+// to what a detector needs. It is an interface so a test can supply one
+// without a scraper, and so diagnose depends on the shape rather than on
+// the store.
+//
+// A nil window means metrics are disabled or unobserved, which a
+// detector must report as "could not run" rather than as no data.
+type MetricsWindow interface {
+	// Instances names the instances the window holds series for.
+	Instances() []string
+	// Range returns the retained series for one key at one tier.
+	Range(key string, tier metrics.Tier) (times []int64, byInstance map[string][]*float64)
+	// InstantReadings returns every instance's latest point-in-time
+	// claims, keyed by instance then by instant key. A key an instance
+	// never reported is absent rather than zero.
+	InstantReadings() map[string]map[string]metrics.Instant
 }
 
 // Result is one complete run: what was found, and what was checked.
@@ -206,7 +278,11 @@ type Detector interface {
 	Detect(Input) (findings []Finding, unavailable string)
 }
 
-// Detectors is the registered set, in the order their checks are listed.
+// Detectors is the registered set of hand-written detectors, in the
+// order their checks are listed. These are the diagnostics that
+// correlate across snapshots; the single-observation, version-scoped
+// ones are declared in the catalog packages and passed to Run by the
+// caller.
 func Detectors() []Detector {
 	return []Detector{
 		quotaDetector{},
@@ -217,13 +293,16 @@ func Detectors() []Detector {
 	}
 }
 
-// Run executes every detector and assembles the result. A detector
-// reporting an unavailable reason contributes no findings, however many
-// it returned: a detector that could not read its input has nothing
-// trustworthy to say.
-func Run(in Input) Result {
+// Run executes every hand-written detector and every given catalog
+// rule, and assembles the result. The rules arrive as an argument
+// rather than a registry so the catalog can live in its own packages —
+// one per component, importing this one — without a dependency cycle.
+// A detector reporting an unavailable reason contributes no findings,
+// however many it returned: a detector that could not read its input
+// has nothing trustworthy to say.
+func Run(in Input, rules ...Rule) Result {
 	detectors := Detectors()
-	result := Result{Checks: make([]Check, 0, len(detectors))}
+	result := Result{Checks: make([]Check, 0, len(detectors)+len(rules))}
 	for _, detector := range detectors {
 		check := Check{Name: detector.Name(), Describes: detector.Describes()}
 		findings, unavailable := detector.Detect(in)
@@ -236,6 +315,11 @@ func Run(in Input) Result {
 		default:
 			check.Outcome = CheckClear
 		}
+		result.Checks = append(result.Checks, check)
+	}
+	for _, rule := range rules {
+		check, findings := evaluateRule(rule, in)
+		result.Findings = append(result.Findings, findings...)
 		result.Checks = append(result.Checks, check)
 	}
 	sort.SliceStable(result.Findings, func(i, j int) bool {

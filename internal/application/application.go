@@ -29,8 +29,10 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/config"
+	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/ops"
@@ -94,6 +96,9 @@ type Deps struct {
 	// InfrastructureSource observes the cluster's services, volume
 	// claims and volume snapshots.
 	InfrastructureSource observe.InfrastructureSource
+	// KubeVersionSource fetches the API server's own /version report.
+	// Nil disables the poller, leaving the Kubernetes version unknown.
+	KubeVersionSource observe.KubeVersionSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
@@ -119,6 +124,11 @@ type Deps struct {
 	// file's cadence and final flush. Nil means the window is in-memory
 	// or disabled and no loop runs.
 	MetricsRunner func(ctx context.Context) error
+	// LogStreamOpener opens the continuous log streams. Nil means log
+	// following is off: no follower runs, the matcher observes nothing,
+	// and the diagnostics log detector reports that it could not run
+	// rather than that the logs are clean.
+	LogStreamOpener logstream.Opener
 	// Prober answers the readiness endpoint.
 	Prober web.ReadinessProber
 	// Clock supplies time to the collectors and the page ages.
@@ -218,6 +228,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		sources.Infrastructure = infraStore
 		runners = append(runners, observe.NewInfrastructureCollector(deps.InfrastructureSource, infraStore, deps.Clock, logger).Run)
 	}
+	if deps.KubeVersionSource != nil {
+		kubeVersionStore := observe.NewKubeVersionStore()
+		sources.KubeVersion = kubeVersionStore
+		runners = append(runners, observe.NewKubeVersionPoller(deps.KubeVersionSource, kubeVersionStore, deps.Clock, logger).Run)
+	}
 	if deps.EvidenceFetcher != nil {
 		evidenceStore := evidence.NewStore()
 		sources.Evidence = evidenceStore
@@ -228,6 +243,41 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 	}
 	if deps.MetricsRunner != nil {
 		runners = append(runners, deps.MetricsRunner)
+	}
+	// Continuous log following. The matcher is always a sink when
+	// following at all — it keeps only what matched, so it costs
+	// nothing per line retained. The buffer joins it only when a
+	// deployment has asked to retain log text, and a disabled buffer
+	// still satisfies the Sink interface while keeping nothing, so the
+	// two are wired the same way.
+	if cfg.LogStreamEnabled && deps.LogStreamOpener != nil && sources.Pods != nil {
+		// The matcher's rules come from the diagnostic catalog, so a log
+		// line is declared once — with its version pins and its finding —
+		// and matched here.
+		matcher := logstream.NewMatcher(catalog.LogRules(), cfg.LogMatchMaxAge, deps.Clock.Now)
+		buffer := logstream.NewBuffer(cfg.LogBufferBytes, cfg.LogBufferTotalBytes, cfg.LogBufferMaxAge)
+		sources.LogObservations = matcher
+		sources.LogBuffer = buffer
+
+		// The roster is read at each reconcile rather than captured, so a
+		// pod that has gone stops being followed and a new one starts.
+		roster := sources.Pods
+		members := func() []logstream.Member {
+			snap, ok := roster.CurrentPods()
+			if !ok {
+				return nil
+			}
+			var out []logstream.Member
+			for _, pod := range snap.Pods {
+				for _, container := range pod.Containers {
+					out = append(out, logstream.Member{Pod: pod.Name, Container: container.Name})
+				}
+			}
+			return out
+		}
+		runners = append(runners, logstream.NewRunner(
+			logstream.NewSource(members, deps.LogStreamOpener),
+			logstream.Sinks{matcher, buffer}, deps.Clock, logger).Run)
 	}
 	// The access-review collector runs only in review mode with a wired
 	// source: disabled mode observes nothing and renders no panel.

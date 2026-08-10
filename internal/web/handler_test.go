@@ -36,26 +36,32 @@ var testNow = time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 
 // staticSnapshots serves fixed snapshots for every section.
 type staticSnapshots struct {
-	snap         observe.Snapshot
-	ok           bool
-	pods         observe.PodsSnapshot
-	podsOK       bool
-	events       observe.EventsSnapshot
-	eventsOK     bool
-	backups      observe.BackupsSnapshot
-	backupsOK    bool
-	poolers      observe.PoolersSnapshot
-	poolersOK    bool
-	poolerPods   observe.PodsSnapshot
-	poolerPodsOK bool
-	quorum       observe.FailoverQuorumSnapshot
-	quorumOK     bool
-	catalogs     observe.ImageCatalogsSnapshot
-	catalogsOK   bool
-	declared     observe.DatabaseObjectsSnapshot
-	declaredOK   bool
-	infra        observe.InfrastructureSnapshot
-	infraOK      bool
+	snap          observe.Snapshot
+	ok            bool
+	pods          observe.PodsSnapshot
+	podsOK        bool
+	events        observe.EventsSnapshot
+	eventsOK      bool
+	backups       observe.BackupsSnapshot
+	backupsOK     bool
+	poolers       observe.PoolersSnapshot
+	poolersOK     bool
+	poolerPods    observe.PodsSnapshot
+	poolerPodsOK  bool
+	quorum        observe.FailoverQuorumSnapshot
+	quorumOK      bool
+	catalogs      observe.ImageCatalogsSnapshot
+	catalogsOK    bool
+	declared      observe.DatabaseObjectsSnapshot
+	declaredOK    bool
+	infra         observe.InfrastructureSnapshot
+	infraOK       bool
+	kubeVersion   observe.KubeVersionSnapshot
+	kubeVersionOK bool
+}
+
+func (s staticSnapshots) CurrentKubeVersion() (observe.KubeVersionSnapshot, bool) {
+	return s.kubeVersion, s.kubeVersionOK
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {

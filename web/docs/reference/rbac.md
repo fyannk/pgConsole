@@ -84,6 +84,12 @@ is unpinned — but without `list` or `watch` the console can read a
 catalog only when the `Cluster` it observes names one. Declining this
 costs a single panel, which reads `unknown` rather than failing.
 
+Beyond the resources above, the console reads one non-resource URL: the
+API server's `/version` report, polled every five minutes so
+version-pinned diagnostics can gate on the observed server version.
+`/version` is readable by every authenticated principal; no Role grants
+it and none could withhold it.
+
 ## Enforcement
 
 The Role — not application logic — is the enforcement boundary. Apply an
