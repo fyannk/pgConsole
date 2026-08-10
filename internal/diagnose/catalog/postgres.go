@@ -40,7 +40,25 @@ func postgresRules() []diagnose.Rule {
 				"severity too; the quoted record says which this is. Read from the " +
 				"container's log while following it, best effort: the count below is " +
 				"a floor and an absence here rules nothing out.",
-			When: diagnose.LogContains{Substrings: []string{`"error_severity":"FATAL"`}},
+			When: diagnose.LogContains{
+				Substrings: []string{`"error_severity":"FATAL"`},
+				// PostgreSQL stamps routine lifecycle refusals FATAL too,
+				// and the operator's own probes provoke them on every
+				// start: a connection during startup, shutdown, or crash
+				// recovery is refused at this severity, and an orderly
+				// switchover terminates backends with it. Reporting those
+				// would fire on every restart of every cluster forever,
+				// which is how a screen teaches people to ignore it. The
+				// messages are verbatim server strings, stable across the
+				// pinned majors.
+				Except: []string{
+					"the database system is starting up",
+					"the database system is not yet accepting connections",
+					"the database system is shutting down",
+					"the database system is in recovery mode",
+					"terminating connection due to administrator command",
+				},
+			},
 		},
 		{
 			ID:        "postgres-panic",

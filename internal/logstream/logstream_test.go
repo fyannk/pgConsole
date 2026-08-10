@@ -315,3 +315,27 @@ func totalBytes(retained []Retained) int {
 	}
 	return total
 }
+
+// TestMatcherWithdrawsExceptedLines proves the carve-out: a line
+// carrying the severity marker and a known-benign message is not a
+// match, while the same marker with a real fault still is.
+func TestMatcherWithdrawsExceptedLines(t *testing.T) {
+	t.Parallel()
+	rule := Rule{
+		ID:       "fatal",
+		Contains: []string{`"error_severity":"FATAL"`},
+		Except:   []string{"the database system is starting up"},
+		Summary:  "a FATAL record",
+	}
+	m := NewMatcher([]Rule{rule}, 0, nil)
+	m.Observe(line("orders-1", "postgres",
+		`{"error_severity":"FATAL","message":"the database system is starting up"}`, 0))
+	if got := m.Observations(); len(got) != 0 {
+		t.Fatalf("a known-benign lifecycle line was reported: %+v", got)
+	}
+	m.Observe(line("orders-1", "postgres",
+		`{"error_severity":"FATAL","message":"could not access file \"pg_wal/0000\""}`, time.Second))
+	if got := m.Observations(); len(got) != 1 {
+		t.Fatalf("a real FATAL was withdrawn along with the benign ones: %+v", got)
+	}
+}
