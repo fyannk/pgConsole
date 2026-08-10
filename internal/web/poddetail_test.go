@@ -35,6 +35,12 @@ func podDetailSources() staticSnapshots {
 	pod := memberPod("orders-1", "primary")
 	pod.IP = "10.42.3.17"
 	pod.Started = &started
+	ready := true
+	restarts := 0
+	pod.Containers = []observe.ContainerFacts{
+		{Name: "postgres", Image: "pg:16", Ready: &ready, Restarts: &restarts, State: "running"},
+		{Name: "plugin-barman-cloud", Image: "barman:0.5", Ready: &ready, Restarts: &restarts, State: "running"},
+	}
 	return staticSnapshots{
 		snap:   observe.Snapshot{Generation: 7, ObservedAt: testNow.Add(-3 * time.Second), Cluster: healthyFacts()},
 		ok:     true,
@@ -184,6 +190,9 @@ func TestPodDetailAboveTheGateCarriesLogsAndRawDefinition(t *testing.T) {
 		// for a value to emit markup.
 		`<span class="j-key">&#34;kind&#34;</span>: <span class="j-str">&#34;Pod&#34;</span>`,
 		`href="/history/revisions/3"`,
+		// Each container links to its own tail: the instance roster is
+		// the one the follower covers, so the addressed route exists.
+		`href="/logs/orders-1/plugin-barman-cloud"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("elevated pod detail misses %q", want)

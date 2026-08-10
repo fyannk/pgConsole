@@ -844,7 +844,28 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		Shell:       h.shell(r, ""),
 		ClusterName: h.cfg.ClusterName,
 		Pod:         pod,
+		Container:   container,
 		Origin:      OriginKubernetes,
+	}
+	// The unaddressed route offers whatever streams the console has
+	// retained for this pod, so a reader can reach a sidecar's — or a
+	// dead container's — record from here.
+	view.RetainedContainers = h.sources.LogBuffer.Containers(pod)
+
+	// An addressed container serves the retained stream first: the
+	// screens are powered by the continuous follow when a deployment has
+	// asked for retention, and the retained record outlives the
+	// container, which a live fetch cannot. The live tail stays one
+	// click away, and remains the fallback whenever nothing is retained.
+	if container != "" {
+		if segments, note, ok := h.retainedLog(pod, container); ok {
+			view.Retained = true
+			view.Segments = segments
+			view.RetentionNote = note
+			view.LiveURL = "/logs/" + pod + "/" + container + "?raw=1"
+			h.renderLogs(w, http.StatusOK, view)
+			return
+		}
 	}
 	status := http.StatusOK
 	if h.tailer == nil {
@@ -872,13 +893,7 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 			slog.String("pod", pod),
 			slog.String("category", redact.Safe(err)))
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	if err := h.tpl.ExecuteTemplate(w, "logs.html.tmpl", view); err != nil {
-		h.logger.Error("render failed",
-			slog.String("route", "logs"),
-			slog.String("category", redact.Safe(err)))
-	}
+	h.renderLogs(w, status, view)
 }
 
 // handlePoolerLogs serves one bounded, on-demand tail of a pooler pod's
@@ -980,4 +995,16 @@ func (EmptySnapshots) CurrentDatabaseObjects() (observe.DatabaseObjectsSnapshot,
 // CurrentInfrastructure reports no infrastructure snapshot.
 func (EmptySnapshots) CurrentInfrastructure() (observe.InfrastructureSnapshot, bool) {
 	return observe.InfrastructureSnapshot{}, false
+}
+
+// renderLogs writes the log screen, shared by the live and retained
+// paths.
+func (h *Handler) renderLogs(w http.ResponseWriter, status int, view LogsView) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := h.tpl.ExecuteTemplate(w, "logs.html.tmpl", view); err != nil {
+		h.logger.Error("render failed",
+			slog.String("route", "logs"),
+			slog.String("category", redact.Safe(err)))
+	}
 }
