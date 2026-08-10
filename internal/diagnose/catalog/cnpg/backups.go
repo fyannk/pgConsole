@@ -62,5 +62,36 @@ func backupRules() []diagnose.Rule {
 				"unblocks it.",
 			When: diagnose.BackupPhase{AnyOf: []string{"walArchivingFailing"}},
 		},
+		{
+			ID:        "cnpg-schedule-suspended",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a suspended backup schedule",
+			Summary:   "A backup schedule is suspended, so it produces no recovery points.",
+			Detail: "Suspension is deliberate and easy to forget, like fencing. While " +
+				"it holds, the recovery window this schedule was providing stops " +
+				"growing.",
+			When: diagnose.ScheduledBackupSuspended{},
+		},
+		{
+			// The cadence detector catches a schedule firing too often;
+			// this is the opposite failure. The operator refuses to
+			// schedule while the cluster is not healthy, and it records
+			// that refusal only on the ScheduledBackup object — whose
+			// events are outside the observed window — so the stale
+			// next-run field is what the console can honestly read.
+			ID:        "cnpg-schedule-not-firing",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a backup schedule that has stopped firing",
+			Summary:   "A backup schedule's next run is long past, so scheduling has stopped.",
+			Detail: "The operator advances the next-run time whenever it schedules, and " +
+				"it declines to schedule at all while the cluster is not healthy. A " +
+				"next run more than half an hour in the past means backups from this " +
+				"schedule are not being taken, whatever else looks fine.",
+			When: diagnose.ScheduledBackupOverdue{Grace: 30 * time.Minute},
+		},
 	}
 }

@@ -254,7 +254,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		// The matcher's rules come from the diagnostic catalog, so a log
 		// line is declared once — with its version pins and its finding —
 		// and matched here.
-		matcher := logstream.NewMatcher(catalog.LogRules())
+		matcher := logstream.NewMatcher(catalog.LogRules(), cfg.LogMatchMaxAge, deps.Clock.Now)
 		buffer := logstream.NewBuffer(cfg.LogBufferBytes, cfg.LogBufferTotalBytes, cfg.LogBufferMaxAge)
 		sources.LogObservations = matcher
 		sources.LogBuffer = buffer

@@ -41,6 +41,7 @@ func Rules() []diagnose.Rule {
 	rules = append(rules, eventRules()...)
 	rules = append(rules, metricRules()...)
 	rules = append(rules, backupRules()...)
+	rules = append(rules, databaseRules()...)
 	rules = append(rules, logRules()...)
 	return rules
 }

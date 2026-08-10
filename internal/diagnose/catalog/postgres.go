@@ -56,6 +56,43 @@ func postgresRules() []diagnose.Rule {
 			When: diagnose.LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
 		},
 		{
+			// The threshold is pinned knowledge, like the EOL boundary:
+			// transaction ids wrap at two billion usable values, and
+			// PostgreSQL stops accepting writes with three million left.
+			// At 1.6 billion the cluster still works, which is exactly
+			// why the number deserves a finding — nothing else looks
+			// wrong while the headroom runs out. The metric name is the
+			// CloudNativePG exporter's, hence the operator pin.
+			ID:        "postgres-xid-wraparound",
+			Component: diagnose.ComponentPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Severity:  diagnose.SeverityCritical,
+			Describes: "a database's transaction-id age near wraparound",
+			Summary:   "A database's transaction-id age is approaching wraparound, which ends in PostgreSQL refusing writes.",
+			Detail: "Something is holding the oldest transaction horizon — a forgotten " +
+				"open transaction, a stale replication slot, a failing autovacuum — " +
+				"and the age below leaves under a quarter of the headroom. If it " +
+				"reaches the hard limit, PostgreSQL stops accepting writes " +
+				"cluster-wide until a vacuum completes. The boundary is " +
+				"console-pinned knowledge; the reading is the exporter's.",
+			When: diagnose.SeriesAbove{Key: "xid-age", Threshold: 1_600_000_000},
+		},
+		{
+			ID:        "postgres-mxid-wraparound",
+			Component: diagnose.ComponentPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Severity:  diagnose.SeverityCritical,
+			Describes: "a database's multixact-id age near wraparound",
+			Summary:   "A database's multixact-id age is approaching wraparound, which ends in PostgreSQL refusing writes.",
+			Detail: "The multixact counter wraps exactly like the transaction counter " +
+				"and is exhausted by the same causes, plus heavy row-level sharing. " +
+				"The same consequence applies: past the hard limit, writes stop " +
+				"until vacuum catches up.",
+			When: diagnose.SeriesAbove{Key: "mxid-age", Threshold: 1_600_000_000},
+		},
+		{
 			// The one rule where the version pin is the whole diagnostic:
 			// there is no observation to wait for, because running the
 			// version is the finding. The end-of-life boundary is pinned

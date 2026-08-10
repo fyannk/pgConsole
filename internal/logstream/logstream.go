@@ -152,7 +152,9 @@ const maxObservedLine = 2048
 // containers, independent of how much is logged, which is what makes it
 // safe to run continuously.
 type Matcher struct {
-	rules []Rule
+	rules  []Rule
+	maxAge time.Duration
+	now    func() time.Time
 
 	mu       sync.RWMutex
 	observed map[observationKey]*Observation
@@ -160,9 +162,14 @@ type Matcher struct {
 
 type observationKey struct{ rule, pod, container string }
 
-// NewMatcher builds a matcher over a closed rule set.
-func NewMatcher(rules []Rule) *Matcher {
-	return &Matcher{rules: rules, observed: map[observationKey]*Observation{}}
+// NewMatcher builds a matcher over a closed rule set. Observations
+// expire maxAge after their last matching line: a finding is a claim
+// about what the logs say now, and a line nothing has repeated since
+// yesterday stops being that. A maxAge of zero, or a nil clock, retains
+// observations until the container is forgotten.
+func NewMatcher(rules []Rule, maxAge time.Duration, now func() time.Time) *Matcher {
+	return &Matcher{rules: rules, maxAge: maxAge, now: now,
+		observed: map[observationKey]*Observation{}}
 }
 
 // Observe analyses one line and keeps only a match.
@@ -200,8 +207,20 @@ func (m *Matcher) Gap(string, string, time.Time, string) {}
 // Observations returns a stable copy, ordered by rule then pod then
 // container so a refresh that changes nothing does not reorder them.
 func (m *Matcher) Observations() []Observation {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Expiry happens at read time, under the write lock, so the map
+	// never accumulates dead entries past the next read. An expired
+	// observation is dropped entirely: a stale finding that cannot
+	// clear teaches a reader to ignore the screen.
+	if m.maxAge > 0 && m.now != nil {
+		horizon := m.now().Add(-m.maxAge)
+		for key, observation := range m.observed {
+			if observation.LastSeen.Before(horizon) {
+				delete(m.observed, key)
+			}
+		}
+	}
 	out := make([]Observation, 0, len(m.observed))
 	for _, observation := range m.observed {
 		out = append(out, *observation)

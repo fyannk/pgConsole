@@ -77,6 +77,9 @@ const (
 	EnvLogBufferTotalBytes = "LOG_BUFFER_TOTAL_BYTES"
 	// EnvLogBufferMaxAge drops retained lines older than this.
 	EnvLogBufferMaxAge = "LOG_BUFFER_MAX_AGE"
+	// EnvLogMatchMaxAge expires a diagnostics log observation this long
+	// after its last matching line.
+	EnvLogMatchMaxAge = "LOG_MATCH_MAX_AGE"
 	// EnvAllowLogs enables the bounded instance log tail.
 	EnvAllowLogs = "ALLOW_LOGS"
 	// EnvLogTailLines bounds the lines returned per log request.
@@ -177,6 +180,12 @@ const (
 	DefaultLogBufferMaxAge = time.Hour
 	MinLogBufferMaxAge     = time.Minute
 	MaxLogBufferMaxAge     = 24 * time.Hour
+
+	// The match window is wider than the buffer's by default: a finding
+	// should outlive the verbatim text that raised it, but not by days.
+	DefaultLogMatchMaxAge = 6 * time.Hour
+	MinLogMatchMaxAge     = time.Minute
+	MaxLogMatchMaxAge     = 7 * 24 * time.Hour
 	// MinHistoryMaxRevisions is the lowest accepted HISTORY_MAX_REVISIONS.
 	MinHistoryMaxRevisions = 100
 	// MaxHistoryMaxRevisions is the highest accepted HISTORY_MAX_REVISIONS.
@@ -283,6 +292,10 @@ type Config struct {
 	LogBufferTotalBytes int
 	// LogBufferMaxAge drops retained lines older than this.
 	LogBufferMaxAge time.Duration
+	// LogMatchMaxAge expires a diagnostics log observation this long
+	// after its last matching line, so a finding cannot outlive its
+	// relevance.
+	LogMatchMaxAge time.Duration
 	// AllowDiagnostics enables the diagnostics screen, which correlates
 	// facts the other screens already carry into findings. It grants no
 	// authority: every detector reads snapshots that exist regardless.
@@ -452,6 +465,8 @@ func Load(lookup Lookup) (Config, error) {
 		DefaultLogBufferTotalBytes, 0, MaxLogBufferTotalBytes, fail)
 	cfg.LogBufferMaxAge = durationVar(lookup, EnvLogBufferMaxAge,
 		DefaultLogBufferMaxAge, MinLogBufferMaxAge, MaxLogBufferMaxAge, fail)
+	cfg.LogMatchMaxAge = durationVar(lookup, EnvLogMatchMaxAge,
+		DefaultLogMatchMaxAge, MinLogMatchMaxAge, MaxLogMatchMaxAge, fail)
 	cfg.AllowInsecureLinks = boolVar(lookup, EnvAllowInsecureLinks, false, fail)
 	cfg.AllowLogs = boolVar(lookup, EnvAllowLogs, true, fail)
 

@@ -14,7 +14,11 @@
 
 package cnpg
 
-import "github.com/fyannk/pgConsole/internal/diagnose"
+import (
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/diagnose"
+)
 
 // phaseRules cover the phases in which the operator has stopped
 // reconciling and said so. The phase strings are the operator's own
@@ -159,6 +163,27 @@ func phaseRules() []diagnose.Rule {
 				"archiving having failed for long enough to fill it. The volume must " +
 				"grow, or the archiving failure that filled it must be fixed.",
 			When:      diagnose.ClusterPhase{AnyOf: []string{"Not enough disk space"}},
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
+		{
+			// Not a phase but the same kind of claim: operator status
+			// fields, read together. The operator stamps the request time
+			// whenever it sets a new target primary, which is what makes
+			// "still in flight after ten minutes" an observed fact rather
+			// than the console's guess.
+			ID:        "cnpg-primary-move-stuck",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "a switchover or failover still unfinished after ten minutes",
+			Summary:   "A primary move has been in flight for over ten minutes: the cluster is between primaries and stuck there.",
+			Detail: "The operator's current and target primaries disagree, and the " +
+				"move was requested long enough ago that ordinary switchovers and " +
+				"failovers are ruled out. While this holds, an in-place primary " +
+				"restart is also blocked. The promotion-stall log checks usually say " +
+				"which side is wedged.",
+			When:      diagnose.PrimaryMismatch{MinAge: 10 * time.Minute},
 			Link:      "/cluster/overview",
 			LinkLabel: "Cluster overview",
 		},

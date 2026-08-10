@@ -446,6 +446,189 @@ func TestContainerStateReadsTheKubeletsWord(t *testing.T) {
 	}
 }
 
+// TestPrimaryMismatchNeedsTheOperatorsClock proves the stuck-move
+// condition rests entirely on operator-reported facts: disagreeing
+// primaries alone are not enough, the operator's own request timestamp
+// must be old enough, and without that timestamp nothing matches
+// because no honest duration exists.
+func TestPrimaryMismatchNeedsTheOperatorsClock(t *testing.T) {
+	t.Parallel()
+	rule := Rule{
+		ID:       "example-mismatch",
+		Severity: SeverityCritical,
+		Summary:  "Example.",
+		When:     PrimaryMismatch{MinAge: 10 * time.Minute},
+	}
+
+	in := clusterInput(17)
+	in.Cluster.Cluster.CurrentPrimary = "orders-1"
+	in.Cluster.Cluster.TargetPrimary = "pending"
+	if check, _ := evaluateRule(rule, in); check.Outcome != CheckClear {
+		t.Errorf("outcome = %v without the operator's timestamp, want clear", check.Outcome)
+	}
+
+	young := now.Add(-time.Minute)
+	in.Cluster.Cluster.TargetPrimaryTimestamp = &young
+	if check, _ := evaluateRule(rule, in); check.Outcome != CheckClear {
+		t.Errorf("outcome = %v on a young move, want clear", check.Outcome)
+	}
+
+	old := now.Add(-30 * time.Minute)
+	in.Cluster.Cluster.TargetPrimaryTimestamp = &old
+	check, findings := evaluateRule(rule, in)
+	if check.Outcome != CheckMatched {
+		t.Fatalf("outcome = %v on a thirty-minute move, want matched", check.Outcome)
+	}
+	detail := findings[0].Evidence[0].Detail
+	if !strings.Contains(detail, "orders-1") || !strings.Contains(detail, "30m0s ago") {
+		t.Errorf("primaries and age not quoted: %q", detail)
+	}
+	if !strings.Contains(detail, "no candidate chosen") {
+		t.Errorf("the pending marker is not explained: %q", detail)
+	}
+
+	in.Cluster.Cluster.TargetPrimary = "orders-1"
+	if check, _ := evaluateRule(rule, in); check.Outcome != CheckClear {
+		t.Errorf("outcome = %v with primaries agreeing, want clear", check.Outcome)
+	}
+}
+
+// TestScheduledBackupConditions proves the two schedule conditions: a
+// suspended schedule matches one rule and is excluded from the other,
+// an overdue next run matches with the grace honoured, and a stale
+// catalog is could-not-run for both.
+func TestScheduledBackupConditions(t *testing.T) {
+	t.Parallel()
+	suspended := true
+	pastNext := now.Add(-2 * time.Hour)
+	futureNext := now.Add(time.Hour)
+	in := Input{Now: now, HasBackups: true, Backups: observe.BackupsSnapshot{
+		ScheduledBackups: []observe.ScheduledBackupFacts{
+			{Name: "paused", Suspended: &suspended, NextScheduleTime: &pastNext},
+			{Name: "stopped", NextScheduleTime: &pastNext},
+			{Name: "healthy", NextScheduleTime: &futureNext},
+		},
+	}}
+
+	suspendedRule := Rule{ID: "example-suspended", Severity: SeverityWarning, Summary: "Example.",
+		When: ScheduledBackupSuspended{}}
+	check, findings := evaluateRule(suspendedRule, in)
+	if check.Outcome != CheckMatched || len(findings) != 1 || findings[0].ID != "example-suspended/paused" {
+		t.Fatalf("suspended: outcome %v, findings %+v", check.Outcome, findings)
+	}
+
+	overdueRule := Rule{ID: "example-overdue", Severity: SeverityWarning, Summary: "Example.",
+		When: ScheduledBackupOverdue{Grace: 30 * time.Minute}}
+	check, findings = evaluateRule(overdueRule, in)
+	if check.Outcome != CheckMatched || len(findings) != 1 || findings[0].ID != "example-overdue/stopped" {
+		t.Fatalf("overdue: outcome %v, findings %+v", check.Outcome, findings)
+	}
+	if !strings.Contains(findings[0].Evidence[0].Detail, "past") {
+		t.Errorf("overdue evidence does not state how late: %q", findings[0].Evidence[0].Detail)
+	}
+
+	in.Backups.Stale = true
+	if check, _ := evaluateRule(overdueRule, in); check.Outcome != CheckUnavailable {
+		t.Errorf("outcome = %v on a stale catalog, want could-not-run", check.Outcome)
+	}
+}
+
+// seriesWindow is a MetricsWindow serving one fixed series per tier.
+type seriesWindow struct {
+	raw, rollup map[string][]*float64
+	times       []int64
+}
+
+func (w seriesWindow) Instances() []string { return nil }
+func (w seriesWindow) Range(_ string, tier metrics.Tier) ([]int64, map[string][]*float64) {
+	if tier == metrics.TierRaw {
+		return w.times, w.raw
+	}
+	return w.times, w.rollup
+}
+func (w seriesWindow) InstantReadings() map[string]map[string]metrics.Instant { return nil }
+
+// TestSeriesAboveReadsTheLatestSample proves the series condition: the
+// latest non-nil sample decides, the rollup tier answers when raw holds
+// nothing, and the evidence quotes the exporter's metric name.
+func TestSeriesAboveReadsTheLatestSample(t *testing.T) {
+	t.Parallel()
+	rule := Rule{
+		ID:       "example-series",
+		Severity: SeverityCritical,
+		Summary:  "Example.",
+		When:     SeriesAbove{Key: "xid-age", Threshold: 1_600_000_000},
+	}
+
+	if check, _ := evaluateRule(rule, Input{Now: now}); check.Outcome != CheckUnavailable {
+		t.Errorf("outcome = %v with no metrics window, want could-not-run", check.Outcome)
+	}
+
+	high, low, older := 1_700_000_000.0, 12_000.0, 1_900_000_000.0
+	in := Input{Now: now, Metrics: seriesWindow{
+		times: []int64{now.Unix() - 60, now.Unix()},
+		raw: map[string][]*float64{
+			"orders-1": {&older, &high}, // latest sample decides
+			"orders-2": {nil, &low},
+		},
+	}}
+	check, findings := evaluateRule(rule, in)
+	if check.Outcome != CheckMatched || len(findings) != 1 || findings[0].ID != "example-series/orders-1" {
+		t.Fatalf("outcome %v, findings %+v", check.Outcome, findings)
+	}
+	if !strings.Contains(findings[0].Evidence[0].Detail, "cnpg_pg_database_xid_age") {
+		t.Errorf("evidence does not name the exporter's metric: %q", findings[0].Evidence[0].Detail)
+	}
+
+	// An empty raw window falls back to the rollup tier.
+	in.Metrics = seriesWindow{
+		times:  []int64{now.Unix()},
+		raw:    map[string][]*float64{},
+		rollup: map[string][]*float64{"orders-1": {&high}},
+	}
+	if check, _ := evaluateRule(rule, in); check.Outcome != CheckMatched {
+		t.Errorf("outcome = %v from the rollup tier, want matched", check.Outcome)
+	}
+}
+
+// TestDeclaredObjectFailedQuotesTheOperator proves the declarative
+// condition: only a reported failure matches — never an unreported
+// object — and the operator's message rides the evidence.
+func TestDeclaredObjectFailedQuotesTheOperator(t *testing.T) {
+	t.Parallel()
+	rule := Rule{ID: "example-declared", Severity: SeverityWarning, Summary: "Example.",
+		When: DeclaredObjectFailed{}}
+
+	if check, _ := evaluateRule(rule, Input{Now: now}); check.Outcome != CheckUnavailable {
+		t.Errorf("outcome = %v with objects unobserved, want could-not-run", check.Outcome)
+	}
+
+	applied, failed := true, false
+	in := Input{Now: now, HasDatabaseObjects: true, DatabaseObjects: observe.DatabaseObjectsSnapshot{
+		Databases: []observe.DatabaseFacts{
+			{Name: "orders-db", Declared: observe.Declared{Applied: &failed,
+				Message: `role "app_owner" does not exist`}},
+			{Name: "fine-db", Declared: observe.Declared{Applied: &applied}},
+			{Name: "new-db"}, // unreported is not failed
+		},
+		Subscriptions: []observe.SubscriptionFacts{
+			{Name: "orders-sub", Declared: observe.Declared{Applied: &failed,
+				Message: "could not connect to the publisher"}},
+		},
+	}}
+	check, findings := evaluateRule(rule, in)
+	if check.Outcome != CheckMatched || len(findings) != 2 {
+		t.Fatalf("outcome %v, findings %d, want two failures", check.Outcome, len(findings))
+	}
+	db := findingByID(t, Result{Findings: findings}, "example-declared/database/orders-db")
+	if !strings.Contains(db.Evidence[0].Detail, `role "app_owner" does not exist`) {
+		t.Errorf("operator message not quoted: %q", db.Evidence[0].Detail)
+	}
+	if !strings.Contains(db.Summary, "Database") || !strings.Contains(db.Summary, "orders-db") {
+		t.Errorf("summary does not name the object: %q", db.Summary)
+	}
+}
+
 // TestBackupPhaseHonoursAgeAndStaleness proves the backup condition:
 // phases match case-insensitively, young backups are exempted by
 // MinAge, and a stale catalog is could-not-run rather than a claim

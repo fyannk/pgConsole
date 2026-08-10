@@ -521,6 +521,267 @@ func (c ContainerState) evaluate(_ string, in Input) ([]conditionMatch, string) 
 	return matches, ""
 }
 
+// PrimaryMismatch matches a primary move still in flight after MinAge:
+// the operator's current and target primaries disagree, and the
+// operator's own request timestamp is at least that old. Both bounds
+// come from the operator — without the timestamp there is no honest way
+// to call the move stuck, so an unreported timestamp matches nothing.
+type PrimaryMismatch struct {
+	// MinAge is how long the move must have been in flight.
+	MinAge time.Duration
+}
+
+func (c PrimaryMismatch) describe() string {
+	return fmt.Sprintf("a primary move still in flight after %s", c.MinAge)
+}
+
+func (c PrimaryMismatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasCluster {
+		return nil, "the Cluster has not been observed yet"
+	}
+	cluster := in.Cluster.Cluster
+	if !cluster.Present {
+		return nil, "the API server reports no Cluster object"
+	}
+	if cluster.CurrentPrimary == "" || cluster.TargetPrimary == "" ||
+		cluster.CurrentPrimary == cluster.TargetPrimary {
+		return nil, ""
+	}
+	if cluster.TargetPrimaryTimestamp == nil {
+		return nil, ""
+	}
+	age := in.Now.Sub(*cluster.TargetPrimaryTimestamp)
+	if age < c.MinAge {
+		return nil, ""
+	}
+	detail := fmt.Sprintf("currentPrimary %s, targetPrimary %s, requested %s (%s ago)",
+		cluster.CurrentPrimary, cluster.TargetPrimary,
+		cluster.TargetPrimaryTimestamp.UTC().Format("15:04:05Z"),
+		age.Round(time.Minute))
+	if cluster.TargetPrimary == "pending" {
+		detail += `; "pending" is the operator's marker for a failover decided with no candidate chosen yet`
+	}
+	return []conditionMatch{{evidence: []Evidence{{
+		Origin: "operator-reported",
+		Object: "Cluster primaries",
+		Detail: detail,
+	}}}}, ""
+}
+
+// ScheduledBackupSuspended matches suspended backup schedules.
+type ScheduledBackupSuspended struct{}
+
+func (ScheduledBackupSuspended) describe() string {
+	return "a ScheduledBackup whose suspend flag is set"
+}
+
+func (ScheduledBackupSuspended) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasBackups {
+		return nil, "the backup catalog has not been observed yet"
+	}
+	if in.Backups.Stale {
+		return nil, "the backup catalog is stale, so current schedules are unknown"
+	}
+	var matches []conditionMatch
+	for _, schedule := range in.Backups.ScheduledBackups {
+		if schedule.Suspended == nil || !*schedule.Suspended {
+			continue
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + schedule.Name,
+			evidence: []Evidence{{
+				Origin: "operator-reported",
+				Object: "ScheduledBackup/" + schedule.Name,
+				Detail: "suspend is true",
+			}},
+			link:      "/backups",
+			linkLabel: "Backups",
+		})
+	}
+	return matches, ""
+}
+
+// ScheduledBackupOverdue matches schedules whose operator-reported next
+// run is at least Grace in the past — the operator advances that field
+// every time it schedules, so a stale one means scheduling itself has
+// stopped, whatever the cause. Suspended schedules are excluded: those
+// are the other rule's finding.
+type ScheduledBackupOverdue struct {
+	// Grace is how far past the reported next run counts as stopped.
+	Grace time.Duration
+}
+
+func (c ScheduledBackupOverdue) describe() string {
+	return fmt.Sprintf("a ScheduledBackup whose reported next run is over %s past", c.Grace)
+}
+
+func (c ScheduledBackupOverdue) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasBackups {
+		return nil, "the backup catalog has not been observed yet"
+	}
+	if in.Backups.Stale {
+		return nil, "the backup catalog is stale, so current schedules are unknown"
+	}
+	var matches []conditionMatch
+	for _, schedule := range in.Backups.ScheduledBackups {
+		if schedule.Suspended != nil && *schedule.Suspended {
+			continue
+		}
+		if schedule.NextScheduleTime == nil {
+			continue
+		}
+		overdue := in.Now.Sub(*schedule.NextScheduleTime)
+		if overdue < c.Grace {
+			continue
+		}
+		detail := fmt.Sprintf("next run reported for %s, now %s past",
+			schedule.NextScheduleTime.UTC().Format("2006-01-02 15:04:05Z"),
+			overdue.Round(time.Minute))
+		if schedule.LastScheduleTime != nil {
+			detail += ", last scheduled " + schedule.LastScheduleTime.UTC().Format("2006-01-02 15:04:05Z")
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + schedule.Name,
+			evidence: []Evidence{{
+				Origin: "operator-reported",
+				Object: "ScheduledBackup/" + schedule.Name,
+				Detail: detail,
+			}},
+			link:      "/backups",
+			linkLabel: "Backups",
+		})
+	}
+	return matches, ""
+}
+
+// SeriesAbove matches an instance whose latest reading of one retained
+// metric series is at or above the threshold. Raw samples are preferred;
+// the rollup tier answers when the raw window holds nothing.
+type SeriesAbove struct {
+	// Key is the series key in the instance metric catalog.
+	Key string
+	// Threshold is the inclusive lower bound that matches.
+	Threshold float64
+}
+
+func (c SeriesAbove) describe() string {
+	return fmt.Sprintf("an instance whose %s reading is at least %g", seriesMetricName(c.Key), c.Threshold)
+}
+
+func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if in.Metrics == nil {
+		return nil, "instance metrics are not scraped"
+	}
+	latest := map[string]seriesReading{}
+	for _, tier := range [...]metrics.Tier{metrics.TierRaw, metrics.TierRollup} {
+		times, byInstance := in.Metrics.Range(c.Key, tier)
+		for instance, column := range byInstance {
+			if _, done := latest[instance]; done {
+				continue
+			}
+			for i := len(column) - 1; i >= 0; i-- {
+				if column[i] != nil {
+					latest[instance] = seriesReading{value: *column[i], at: times[i]}
+					break
+				}
+			}
+		}
+	}
+	instances := make([]string, 0, len(latest))
+	for instance := range latest {
+		instances = append(instances, instance)
+	}
+	sort.Strings(instances)
+	var matches []conditionMatch
+	for _, instance := range instances {
+		reading := latest[instance]
+		if reading.value < c.Threshold {
+			continue
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + instance,
+			evidence: []Evidence{{
+				Origin: "console-scraped from the instance exporter",
+				Object: "instance " + instance,
+				Detail: fmt.Sprintf("%s = %.0f, read %s", seriesMetricName(c.Key), reading.value,
+					time.Unix(reading.at, 0).UTC().Format("15:04:05Z")),
+			}},
+			link:      "/cluster/metrics",
+			linkLabel: "Metrics",
+		})
+	}
+	return matches, ""
+}
+
+// seriesReading is one instance's latest sample of a series.
+type seriesReading struct {
+	value float64
+	at    int64
+}
+
+// seriesMetricName resolves a series key to the exporter's metric name,
+// so evidence quotes the exporter's vocabulary rather than the
+// console's.
+func seriesMetricName(key string) string {
+	if def, ok := metrics.Instance.SeriesByKey(key); ok && len(def.Names) > 0 {
+		return def.Names[0]
+	}
+	return key
+}
+
+// DeclaredObjectFailed matches declarative database objects — Database,
+// DatabaseRole, Publication, Subscription — whose operator
+// reconciliation report says failed. An object the operator has not
+// reported on yet matches nothing: unreported is not failed.
+type DeclaredObjectFailed struct{}
+
+func (DeclaredObjectFailed) describe() string {
+	return "a declared database object whose reconciliation the operator reports as failed"
+}
+
+func (DeclaredObjectFailed) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if !in.HasDatabaseObjects {
+		return nil, "the declared database objects have not been observed yet"
+	}
+	if in.DatabaseObjects.Stale {
+		return nil, "the declared database objects are stale, so current reports are unknown"
+	}
+	var matches []conditionMatch
+	failed := func(kind, name string, declared observe.Declared) {
+		if declared.Applied == nil || *declared.Applied {
+			return
+		}
+		detail := "applied false"
+		if declared.Message != "" {
+			detail += ": " + declared.Message
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + strings.ToLower(kind) + "/" + name,
+			summary:  fmt.Sprintf("The operator cannot apply the declared %s %q.", kind, name),
+			evidence: []Evidence{{
+				Origin: "operator-reported",
+				Object: kind + "/" + name,
+				Detail: detail,
+			}},
+			link:      "/databases",
+			linkLabel: "Databases",
+		})
+	}
+	for _, object := range in.DatabaseObjects.Databases {
+		failed("Database", object.Name, object.Declared)
+	}
+	for _, object := range in.DatabaseObjects.Roles {
+		failed("DatabaseRole", object.Name, object.Declared)
+	}
+	for _, object := range in.DatabaseObjects.Publications {
+		failed("Publication", object.Name, object.Declared)
+	}
+	for _, object := range in.DatabaseObjects.Subscriptions {
+		failed("Subscription", object.Name, object.Declared)
+	}
+	return matches, ""
+}
+
 // evaluateRule turns one rule into its check row and findings. The
 // outcomes, in the order they are decided:
 //
