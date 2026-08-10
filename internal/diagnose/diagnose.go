@@ -277,7 +277,8 @@ type Detector interface {
 // Detectors is the registered set of hand-written detectors, in the
 // order their checks are listed. These are the diagnostics that
 // correlate across snapshots; the single-observation, version-scoped
-// ones are declared in the Catalog instead.
+// ones are declared in the catalog packages and passed to Run by the
+// caller.
 func Detectors() []Detector {
 	return []Detector{
 		quotaDetector{},
@@ -288,14 +289,16 @@ func Detectors() []Detector {
 	}
 }
 
-// Run executes every hand-written detector and every catalog rule, and
-// assembles the result. A detector reporting an unavailable reason
-// contributes no findings, however many it returned: a detector that
-// could not read its input has nothing trustworthy to say.
-func Run(in Input) Result {
+// Run executes every hand-written detector and every given catalog
+// rule, and assembles the result. The rules arrive as an argument
+// rather than a registry so the catalog can live in its own packages —
+// one per component, importing this one — without a dependency cycle.
+// A detector reporting an unavailable reason contributes no findings,
+// however many it returned: a detector that could not read its input
+// has nothing trustworthy to say.
+func Run(in Input, rules ...Rule) Result {
 	detectors := Detectors()
-	catalog := Catalog()
-	result := Result{Checks: make([]Check, 0, len(detectors)+len(catalog))}
+	result := Result{Checks: make([]Check, 0, len(detectors)+len(rules))}
 	for _, detector := range detectors {
 		check := Check{Name: detector.Name(), Describes: detector.Describes()}
 		findings, unavailable := detector.Detect(in)
@@ -310,7 +313,7 @@ func Run(in Input) Result {
 		}
 		result.Checks = append(result.Checks, check)
 	}
-	for _, rule := range catalog {
+	for _, rule := range rules {
 		check, findings := evaluateRule(rule, in)
 		result.Findings = append(result.Findings, findings...)
 		result.Checks = append(result.Checks, check)

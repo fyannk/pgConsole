@@ -12,57 +12,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package diagnose
+package catalog
+
+import "github.com/fyannk/pgConsole/internal/diagnose"
 
 // barmanRules are the claims about backup and archiving through the
-// Barman Cloud plugin. They are unpinned deliberately: each message has
-// held stable across the plugin releases the console has been tested
-// with, and the sidecar's observed version (parsed from its image tag)
-// is there to pin against the day one of them is reworded.
-func barmanRules() []Rule {
+// Barman Cloud tooling — messages the barman-cloud commands themselves
+// write, whichever process invokes them. They are unpinned
+// deliberately: each message has held stable across the releases the
+// console has been tested with, and the sidecar's observed version
+// (parsed from its image tag) is there to pin against the day one of
+// them is reworded.
+func barmanRules() []diagnose.Rule {
 	const bestEffort = "Read from the container's log while following it. Following is " +
 		"best effort, so the count below is a floor and an absence here " +
 		"rules nothing out."
-	return []Rule{
+	return []diagnose.Rule{
 		{
 			ID:        "wal-archive-not-empty",
-			Component: ComponentBarman,
-			Severity:  SeverityCritical,
+			Component: diagnose.ComponentBarman,
+			Severity:  diagnose.SeverityCritical,
 			Describes: "the archiver refusing a WAL archive that is not empty",
 			Summary: "The configured WAL archive is not empty, so the operator " +
 				"refused to start archiving into it.",
 			Detail: bestEffort,
-			When:   LogContains{Substrings: []string{"WAL archive check failed"}},
+			When:   diagnose.LogContains{Substrings: []string{"WAL archive check failed"}},
 		},
 		{
 			ID:        "backup-destination-conflict",
-			Component: ComponentBarman,
-			Severity:  SeverityCritical,
+			Component: diagnose.ComponentBarman,
+			Severity:  diagnose.SeverityCritical,
 			Describes: "a backup destination already holding another cluster's data",
 			Summary: "The backup destination already holds data for this server " +
 				"name, so the operator refused to write into it.",
 			Detail: bestEffort,
-			When:   LogContains{Substrings: []string{"backup", "already exists"}},
+			When:   diagnose.LogContains{Substrings: []string{"backup", "already exists"}},
 		},
 		{
 			ID:        "object-store-denied",
-			Component: ComponentBarman,
-			Severity:  SeverityCritical,
+			Component: diagnose.ComponentBarman,
+			Severity:  diagnose.SeverityCritical,
 			Describes: "the object store refusing the configured credentials",
 			Summary: "The object store refused the operator's credentials for the " +
 				"configured destination.",
 			Detail: bestEffort,
-			When:   LogContains{Substrings: []string{"AccessDenied"}},
+			When:   diagnose.LogContains{Substrings: []string{"AccessDenied"}},
 		},
 		{
 			ID:        "object-store-unreachable",
-			Component: ComponentBarman,
-			Severity:  SeverityCritical,
+			Component: diagnose.ComponentBarman,
+			Severity:  diagnose.SeverityCritical,
 			Describes: "an unreachable object store endpoint",
 			Summary: "The operator could not reach the configured object store " +
 				"endpoint.",
 			Detail: bestEffort,
-			When:   LogContains{Substrings: []string{"could not connect to", "endpoint"}},
+			When:   diagnose.LogContains{Substrings: []string{"could not connect to", "endpoint"}},
 		},
 	}
 }

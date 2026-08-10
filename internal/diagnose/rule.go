@@ -542,23 +542,23 @@ func ruleDescribes(rule Rule) string {
 	return describes + " (applies to " + strings.Join(pins, ", ") + ")"
 }
 
-// LogRules derives the continuous matcher's rule set from the catalog:
+// LogRules derives the continuous matcher's rule set from a catalog:
 // every rule watching for a log line is declared once, there, and the
 // matcher learns its substrings from the same declaration the evaluator
 // reads. The matcher is deliberately version-blind — it retains matches
 // whatever the versions are, and the evaluator applies the pins when the
 // findings are assembled, so a version fact that arrives late does not
 // need lines re-read that are already gone.
-func LogRules() []logstream.Rule {
-	var rules []logstream.Rule
-	for _, rule := range Catalog() {
+func LogRules(rules []Rule) []logstream.Rule {
+	var derived []logstream.Rule
+	for _, rule := range rules {
 		if condition, ok := rule.When.(LogContains); ok {
-			rules = append(rules, logstream.Rule{
+			derived = append(derived, logstream.Rule{
 				ID:       rule.ID,
 				Contains: condition.Substrings,
 				Summary:  rule.Summary,
 			})
 		}
 	}
-	return rules
+	return derived
 }

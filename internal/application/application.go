@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/config"
-	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/identity"
 	"github.com/fyannk/pgConsole/internal/logstream"
@@ -246,7 +246,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		// The matcher's rules come from the diagnostic catalog, so a log
 		// line is declared once — with its version pins and its finding —
 		// and matched here.
-		matcher := logstream.NewMatcher(diagnose.LogRules())
+		matcher := logstream.NewMatcher(catalog.LogRules())
 		buffer := logstream.NewBuffer(cfg.LogBufferBytes, cfg.LogBufferTotalBytes, cfg.LogBufferMaxAge)
 		sources.LogObservations = matcher
 		sources.LogBuffer = buffer

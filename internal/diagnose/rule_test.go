@@ -24,6 +24,11 @@ import (
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
+// The framework is tested with synthetic rules only: the real catalog
+// lives in its own packages and carries its own tests. What is proven
+// here is the machinery — gating, condition evaluation, evidence
+// assembly — independent of any actual claim.
+
 type staticObservations []logstream.Observation
 
 func (s staticObservations) Observations() []logstream.Observation { return s }
@@ -41,27 +46,33 @@ func clusterInput(major int) Input {
 	}
 }
 
-// TestLogRuleReportsWhatTheMatcherSaw proves a log-backed catalog rule
-// quotes the matched line, marks the stream best effort, states the
-// count as a floor, and links to the tail of the exact container.
+// logRule is a synthetic unpinned log rule.
+func logRule() Rule {
+	return Rule{
+		ID:       "example-log",
+		Severity: SeverityCritical,
+		Summary:  "Example log finding.",
+		When:     LogContains{Substrings: []string{"boom"}},
+	}
+}
+
+// TestLogRuleReportsWhatTheMatcherSaw proves a log-backed rule quotes
+// the matched line, marks the stream best effort, states the count as a
+// floor, and links to the tail of the exact container.
 func TestLogRuleReportsWhatTheMatcherSaw(t *testing.T) {
 	t.Parallel()
 	in := Input{Now: now, Logs: staticObservations{{
-		RuleID:    "wal-archive-not-empty",
-		Summary:   "The configured WAL archive is not empty.",
+		RuleID:    "example-log",
 		Pod:       "orders-1",
-		Container: "plugin-barman-cloud",
-		Line:      "ERROR: WAL archive check failed for server orders",
+		Container: "postgres",
+		Line:      "something went boom",
 		FirstSeen: now.Add(-time.Hour),
 		LastSeen:  now,
 		Count:     7,
 	}}}
 
-	finding := findingByID(t, Run(in), "wal-archive-not-empty/orders-1/plugin-barman-cloud")
-	if !strings.Contains(finding.Summary, "WAL archive is not empty") {
-		t.Errorf("summary = %q", finding.Summary)
-	}
-	if finding.Evidence[0].Detail != "ERROR: WAL archive check failed for server orders" {
+	finding := findingByID(t, Run(in, logRule()), "example-log/orders-1/postgres")
+	if finding.Evidence[0].Detail != "something went boom" {
 		t.Errorf("line not quoted verbatim: %q", finding.Evidence[0].Detail)
 	}
 	// The origin must say the evidence is best effort: a stream cannot
@@ -72,7 +83,7 @@ func TestLogRuleReportsWhatTheMatcherSaw(t *testing.T) {
 	if !strings.Contains(finding.Evidence[1].Detail, "at least 7") {
 		t.Errorf("count is not stated as a floor: %q", finding.Evidence[1].Detail)
 	}
-	if finding.Link != "/logs/orders-1/plugin-barman-cloud" {
+	if finding.Link != "/logs/orders-1/postgres" {
 		t.Errorf("link = %q, want the tail of the container it came from", finding.Link)
 	}
 }
@@ -82,21 +93,32 @@ func TestLogRuleReportsWhatTheMatcherSaw(t *testing.T) {
 // every log-backed rule reports that it could not run.
 func TestLogRuleWithFollowingOffCannotBeClear(t *testing.T) {
 	t.Parallel()
-	result := Run(Input{Now: now})
-	if got := outcomeOf(t, result, "object-store-denied"); got != CheckUnavailable {
-		t.Errorf("outcome = %v with following off, want could-not-run", got)
+	check, _ := evaluateRule(logRule(), Input{Now: now})
+	if check.Outcome != CheckUnavailable {
+		t.Errorf("outcome = %v with following off, want could-not-run", check.Outcome)
 	}
 }
 
 // TestLogRuleFollowingOnWithNoMatchIsClear proves the other side: with
-// following on and nothing matched, the check is genuinely clear. The
-// rule under test is an unpinned one, so the outcome reflects only the
-// log stream.
+// following on and nothing matched, the check is genuinely clear.
 func TestLogRuleFollowingOnWithNoMatchIsClear(t *testing.T) {
 	t.Parallel()
-	result := Run(Input{Now: now, Logs: staticObservations{}})
-	if got := outcomeOf(t, result, "object-store-denied"); got != CheckClear {
-		t.Errorf("outcome = %v with following on and no match, want clear", got)
+	check, _ := evaluateRule(logRule(), Input{Now: now, Logs: staticObservations{}})
+	if check.Outcome != CheckClear {
+		t.Errorf("outcome = %v with following on and no match, want clear", check.Outcome)
+	}
+}
+
+// pinnedRule is a synthetic version-only rule: no condition, so the pin
+// alone decides.
+func pinnedRule() Rule {
+	return Rule{
+		ID:        "example-pinned",
+		Component: ComponentPostgreSQL,
+		Requires:  []Requirement{{Component: ComponentPostgreSQL, Constraint: "<14"}},
+		Severity:  SeverityWarning,
+		Summary:   "Example pinned finding.",
+		Describes: "an example version-only rule",
 	}
 }
 
@@ -106,14 +128,12 @@ func TestLogRuleFollowingOnWithNoMatchIsClear(t *testing.T) {
 // matched.
 func TestPinnedRuleWithUnobservedVersionCannotRun(t *testing.T) {
 	t.Parallel()
-	result := Run(Input{Now: now})
-	if got := outcomeOf(t, result, "postgres-eol"); got != CheckUnavailable {
-		t.Errorf("outcome = %v with no observed version, want could-not-run", got)
+	check, _ := evaluateRule(pinnedRule(), Input{Now: now})
+	if check.Outcome != CheckUnavailable {
+		t.Errorf("outcome = %v with no observed version, want could-not-run", check.Outcome)
 	}
-	for _, check := range result.Checks {
-		if check.Name == "postgres-eol" && !strings.Contains(check.Because, "PostgreSQL <14") {
-			t.Errorf("reason does not state the pin: %q", check.Because)
-		}
+	if !strings.Contains(check.Because, "PostgreSQL <14") {
+		t.Errorf("reason does not state the pin: %q", check.Because)
 	}
 }
 
@@ -122,18 +142,14 @@ func TestPinnedRuleWithUnobservedVersionCannotRun(t *testing.T) {
 // stating both the pin and the observed version.
 func TestPinnedRuleOutsideItsVersionsDoesNotApply(t *testing.T) {
 	t.Parallel()
-	result := Run(clusterInput(17))
-	if got := outcomeOf(t, result, "postgres-eol"); got != CheckNotApplicable {
-		t.Errorf("outcome = %v on PostgreSQL 17, want does-not-apply", got)
+	check, findings := evaluateRule(pinnedRule(), clusterInput(17))
+	if check.Outcome != CheckNotApplicable {
+		t.Errorf("outcome = %v on PostgreSQL 17, want does-not-apply", check.Outcome)
 	}
-	for _, check := range result.Checks {
-		if check.Name == "postgres-eol" {
-			if !strings.Contains(check.Because, "17") || !strings.Contains(check.Because, "<14") {
-				t.Errorf("reason states neither observed version nor pin: %q", check.Because)
-			}
-		}
+	if !strings.Contains(check.Because, "17") || !strings.Contains(check.Because, "<14") {
+		t.Errorf("reason states neither observed version nor pin: %q", check.Because)
 	}
-	if len(Run(clusterInput(17)).Findings) != 0 {
+	if len(findings) != 0 {
 		t.Error("a rule that does not apply reported findings")
 	}
 }
@@ -143,10 +159,11 @@ func TestPinnedRuleOutsideItsVersionsDoesNotApply(t *testing.T) {
 // it rests on.
 func TestVersionOnlyRuleFiresOnThePinAlone(t *testing.T) {
 	t.Parallel()
-	finding := findingByID(t, Run(clusterInput(13)), "postgres-eol")
-	if finding.Severity != SeverityWarning {
-		t.Errorf("severity = %v", finding.Severity)
+	check, findings := evaluateRule(pinnedRule(), clusterInput(13))
+	if check.Outcome != CheckMatched || len(findings) != 1 {
+		t.Fatalf("outcome = %v, findings = %d, want one match", check.Outcome, len(findings))
 	}
+	finding := findings[0]
 	if len(finding.Evidence) == 0 {
 		t.Fatal("finding carries no evidence")
 	}
@@ -164,7 +181,7 @@ func TestVersionOnlyRuleFiresOnThePinAlone(t *testing.T) {
 func TestPinnedLogRuleQuotesTheVersionBeneathTheFinding(t *testing.T) {
 	t.Parallel()
 	rule := Rule{
-		ID:        "example-pinned",
+		ID:        "example-pinned-log",
 		Component: ComponentPostgreSQL,
 		Requires:  []Requirement{{Component: ComponentPostgreSQL, Constraint: ">=13"}},
 		Severity:  SeverityCritical,
@@ -172,7 +189,7 @@ func TestPinnedLogRuleQuotesTheVersionBeneathTheFinding(t *testing.T) {
 		When:      LogContains{Substrings: []string{"boom"}},
 	}
 	in := clusterInput(17)
-	in.Logs = staticObservations{{RuleID: "example-pinned", Pod: "p", Container: "c", Line: "boom", Count: 1}}
+	in.Logs = staticObservations{{RuleID: "example-pinned-log", Pod: "p", Container: "c", Line: "boom", Count: 1}}
 
 	check, findings := evaluateRule(rule, in)
 	if check.Outcome != CheckMatched {
@@ -222,10 +239,32 @@ func TestEventConditionQuotesTheEvent(t *testing.T) {
 	}
 }
 
+// TestEventConditionAcceptsDeclaredTypes proves the Types field: some
+// operator failures are recorded as Normal events, and a rule declaring
+// that must see them while the default stays Warning-only.
+func TestEventConditionAcceptsDeclaredTypes(t *testing.T) {
+	t.Parallel()
+	in := Input{Now: now, HasEvents: true, Events: observe.EventsSnapshot{Events: []observe.EventFacts{
+		{Type: "Normal", Reason: "Failed", Kind: "Cluster", Object: "orders", Message: "Backup failed"},
+	}}}
+
+	defaulted := Rule{ID: "warning-only", Severity: SeverityWarning, Summary: "Example.",
+		When: EventMatch{Reasons: []string{"Failed"}}}
+	if check, _ := evaluateRule(defaulted, in); check.Outcome != CheckClear {
+		t.Errorf("outcome = %v, want clear: a Normal event must not match the Warning default", check.Outcome)
+	}
+
+	declared := Rule{ID: "normal-too", Severity: SeverityWarning, Summary: "Example.",
+		When: EventMatch{Reasons: []string{"Failed"}, Types: []string{"Normal"}}}
+	if check, _ := evaluateRule(declared, in); check.Outcome != CheckMatched {
+		t.Errorf("outcome = %v, want matched with the type declared", check.Outcome)
+	}
+}
+
 // TestClusterConditionQuotesTheOperator proves the status-backed
-// condition: it matches only the exact type and status, quotes reason
-// and message, treats an absent condition as clear, and an unobserved
-// or absent Cluster as could-not-run.
+// condition: it matches only the exact type, status and — when set —
+// reason, quotes reason and message, treats an absent condition as
+// clear, and an unobserved or absent Cluster as could-not-run.
 func TestClusterConditionQuotesTheOperator(t *testing.T) {
 	t.Parallel()
 	rule := Rule{
@@ -261,6 +300,15 @@ func TestClusterConditionQuotesTheOperator(t *testing.T) {
 	in.Cluster.Cluster.Conditions[1].Status = "True"
 	if check, _ := evaluateRule(rule, in); check.Outcome != CheckClear {
 		t.Errorf("outcome = %v with the condition True, want clear", check.Outcome)
+	}
+
+	// A declared reason narrows: the same status under another reason is
+	// not a match.
+	narrowed := rule
+	narrowed.When = ClusterCondition{Type: "ContinuousArchiving", Status: "False", Reason: "Other"}
+	in.Cluster.Cluster.Conditions[1].Status = "False"
+	if check, _ := evaluateRule(narrowed, in); check.Outcome != CheckClear {
+		t.Errorf("outcome = %v with another reason, want clear", check.Outcome)
 	}
 }
 
@@ -345,61 +393,33 @@ func TestInstantNonZeroReadsTheScrapedFlag(t *testing.T) {
 	}
 }
 
-// TestCatalogDeclarationsAreComplete is the sanity gate on the data:
-// IDs unique across the catalog and the hand-written detectors, every
-// rule able to state what it looks for, and every log rule carrying the
-// substrings the matcher will be given.
-func TestCatalogDeclarationsAreComplete(t *testing.T) {
+// TestBackupPhaseHonoursAgeAndStaleness proves the backup condition:
+// phases match case-insensitively, young backups are exempted by
+// MinAge, and a stale catalog is could-not-run rather than a claim
+// about current phases.
+func TestBackupPhaseHonoursAgeAndStaleness(t *testing.T) {
 	t.Parallel()
-	seen := map[string]bool{}
-	for _, detector := range Detectors() {
-		seen[detector.Name()] = true
+	rule := Rule{
+		ID:       "example-backup",
+		Severity: SeverityWarning,
+		Summary:  "Example.",
+		When:     BackupPhase{AnyOf: []string{"pending"}, MinAge: 30 * time.Minute},
 	}
-	for _, rule := range Catalog() {
-		if rule.ID == "" || rule.Summary == "" || rule.Component == "" {
-			t.Errorf("rule is missing its identity: %+v", rule)
-		}
-		if seen[rule.ID] {
-			t.Errorf("duplicate check name %q", rule.ID)
-		}
-		seen[rule.ID] = true
-		if ruleDescribes(rule) == "" {
-			t.Errorf("rule %q cannot state what it looks for", rule.ID)
-		}
-		if rule.When == nil && len(rule.Requires) == 0 {
-			t.Errorf("rule %q has neither a condition nor a pin, so it would always fire", rule.ID)
-		}
-		if condition, ok := rule.When.(LogContains); ok && len(condition.Substrings) == 0 {
-			t.Errorf("log rule %q has no substrings, so it could never match", rule.ID)
-		}
-	}
-}
 
-// TestLogRulesMirrorTheCatalog proves the matcher is fed from the same
-// declarations the evaluator reads: every log-backed rule appears, under
-// its own ID, with its own substrings.
-func TestLogRulesMirrorTheCatalog(t *testing.T) {
-	t.Parallel()
-	derived := map[string]logstream.Rule{}
-	for _, rule := range LogRules() {
-		derived[rule.ID] = rule
+	in := Input{Now: now, HasBackups: true, Backups: observe.BackupsSnapshot{Backups: []observe.BackupFacts{
+		{Name: "old-pending", Phase: "Pending", CreatedAt: now.Add(-time.Hour)},
+		{Name: "new-pending", Phase: "pending", CreatedAt: now.Add(-time.Minute)},
+	}}}
+	check, findings := evaluateRule(rule, in)
+	if check.Outcome != CheckMatched {
+		t.Fatalf("outcome = %v, want matched", check.Outcome)
 	}
-	for _, rule := range Catalog() {
-		condition, ok := rule.When.(LogContains)
-		if !ok {
-			continue
-		}
-		matcher, present := derived[rule.ID]
-		if !present {
-			t.Errorf("log rule %q not derived for the matcher", rule.ID)
-			continue
-		}
-		if len(matcher.Contains) != len(condition.Substrings) {
-			t.Errorf("rule %q substrings diverge: %v vs %v", rule.ID, matcher.Contains, condition.Substrings)
-		}
-		delete(derived, rule.ID)
+	if len(findings) != 1 || findings[0].ID != "example-backup/old-pending" {
+		t.Fatalf("want the old pending backup only, got %+v", findings)
 	}
-	for id := range derived {
-		t.Errorf("matcher rule %q has no catalog declaration", id)
+
+	in.Backups.Stale = true
+	if check, _ := evaluateRule(rule, in); check.Outcome != CheckUnavailable {
+		t.Errorf("outcome = %v on a stale catalog, want could-not-run", check.Outcome)
 	}
 }

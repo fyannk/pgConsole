@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package diagnose
+package catalog
+
+import "github.com/fyannk/pgConsole/internal/diagnose"
 
 // postgresRules are the claims about PostgreSQL itself.
-func postgresRules() []Rule {
-	return []Rule{
+func postgresRules() []diagnose.Rule {
+	return []diagnose.Rule{
 		{
 			// The substring is the JSON field CloudNativePG's log pipe
 			// wraps every PostgreSQL server record in, which is why a
@@ -24,11 +26,13 @@ func postgresRules() []Rule {
 			// the database's, the envelope is the operator's. Matching
 			// the envelope rather than a bare "FATAL:" keeps quoted
 			// errors in other components' lines from counting as the
-			// server speaking.
+			// server speaking. The log pipe's field is verbatim-identical
+			// across the verified releases 1.28.4, 1.29.2 and 1.30.0.
 			ID:        "postgres-fatal",
-			Component: ComponentPostgreSQL,
-			Requires:  []Requirement{{Component: ComponentCNPG, Constraint: ">=1.30 <1.31"}},
-			Severity:  SeverityWarning,
+			Component: diagnose.ComponentPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Severity:  diagnose.SeverityWarning,
 			Describes: "a server log record with FATAL severity",
 			Summary:   "PostgreSQL logged a FATAL-severity record.",
 			Detail: "FATAL ends one backend, not the server, and routine failures — a " +
@@ -36,19 +40,20 @@ func postgresRules() []Rule {
 				"severity too; the quoted record says which this is. Read from the " +
 				"container's log while following it, best effort: the count below is " +
 				"a floor and an absence here rules nothing out.",
-			When: LogContains{Substrings: []string{`"error_severity":"FATAL"`}},
+			When: diagnose.LogContains{Substrings: []string{`"error_severity":"FATAL"`}},
 		},
 		{
 			ID:        "postgres-panic",
-			Component: ComponentPostgreSQL,
-			Requires:  []Requirement{{Component: ComponentCNPG, Constraint: ">=1.30 <1.31"}},
-			Severity:  SeverityCritical,
+			Component: diagnose.ComponentPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Severity:  diagnose.SeverityCritical,
 			Describes: "a server log record with PANIC severity",
 			Summary:   "PostgreSQL panicked, which ends the whole server process.",
 			Detail: "A panic crashes the postmaster and forces crash recovery. Read from " +
 				"the container's log while following it, best effort: the count below " +
 				"is a floor and an absence here rules nothing out.",
-			When: LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
+			When: diagnose.LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
 		},
 		{
 			// The one rule where the version pin is the whole diagnostic:
@@ -60,9 +65,10 @@ func postgresRules() []Rule {
 			// exactly what a catalog rule is for, stated as the console's
 			// own claim rather than smuggled in as an observation.
 			ID:        "postgres-eol",
-			Component: ComponentPostgreSQL,
-			Requires:  []Requirement{{Component: ComponentPostgreSQL, Constraint: "<14"}},
-			Severity:  SeverityWarning,
+			Component: diagnose.ComponentPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentPostgreSQL, Constraint: "<14"}},
+			Severity:  diagnose.SeverityWarning,
 			Describes: "a PostgreSQL major version past upstream end of life",
 			Summary:   "The PostgreSQL major version no longer receives upstream releases.",
 			Detail: "Majors before 14 left the PostgreSQL project's five-year support " +

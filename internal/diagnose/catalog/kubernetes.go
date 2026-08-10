@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package diagnose
+package catalog
+
+import "github.com/fyannk/pgConsole/internal/diagnose"
 
 // kubernetesRules are the claims about the Kubernetes cluster itself.
 //
 // Empty today: the API server's version is one discovery call away but
 // not yet observed into a snapshot, so ComponentKubernetes stays unknown
-// and a rule pinned to it could never resolve. As with cnpgRules, the
-// first pinned rule should land together with the version source.
-// Unpinned Kubernetes rules have a home here too — an EventMatch on a
-// kubelet reason, say — when one earns its place by catching something
-// the event-backed detectors do not.
-func kubernetesRules() []Rule {
+// and a rule pinned to it could never resolve. The first pinned rule
+// should land together with the version source. Unpinned Kubernetes
+// rules have a home here too — an EventMatch on a kubelet reason, say —
+// when one earns its place by catching something the event-backed
+// detectors do not.
+func kubernetesRules() []diagnose.Rule {
 	return nil
 }

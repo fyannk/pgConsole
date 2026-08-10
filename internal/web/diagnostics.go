@@ -19,6 +19,7 @@ import (
 	"net/http"
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
 	"github.com/fyannk/pgConsole/internal/redact"
 )
 
@@ -75,7 +76,7 @@ type CheckView struct {
 // function of the snapshots already published, so this handler makes no
 // API call: it is not a request-time exception, it is ordinary rendering.
 func (h *Handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
-	result := diagnose.Run(h.diagnosticsInput())
+	result := diagnose.Run(h.diagnosticsInput(), catalog.Rules()...)
 	h.renderDiagnostics(w, h.buildDiagnosticsView(r, result))
 }
 
