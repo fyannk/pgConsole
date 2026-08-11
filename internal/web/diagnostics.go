@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
@@ -35,7 +36,13 @@ import (
 type DiagnosticsView struct {
 	Shell       ShellView
 	ClusterName string
-	// Findings are most severe first.
+	// State is the operator's own account of the cluster, stated before
+	// any finding: a reader asking "what is wrong" needs "what state is
+	// it in" answered first.
+	State ClusterStateView
+	// Findings are most severe first. A finding whose declared cause
+	// also matched is nested inside that cause's card rather than
+	// listed here, so one incident reads as one incident.
 	Findings []FindingView
 	// Groups bucket every check by outcome, in reading order: matched
 	// first, then could-not-run, then does-not-apply, then clear. The
@@ -65,15 +72,44 @@ type CheckGroupView struct {
 	Checks []CheckView
 }
 
+// ClusterStateView is the header strip: the operator-reported state of
+// the cluster, or an explicit unknown.
+type ClusterStateView struct {
+	// Observed is false when no Cluster snapshot exists; the strip then
+	// says so instead of rendering empty facts.
+	Observed bool
+	// Phase and PhaseReason are the operator's words, "unknown" when
+	// unreported.
+	Phase       string
+	PhaseReason string
+	// Instances states ready against declared, e.g. "1 of 3 ready".
+	Instances string
+	// Primary is the current primary instance, "unknown" when
+	// unreported.
+	Primary string
+	// State is the stylesheet token: current only for the operator's
+	// healthy phase, unknown when unobserved, degraded otherwise.
+	State string
+}
+
 // FindingView is one finding as rendered.
 type FindingView struct {
-	ID        string
-	Severity  string
-	Summary   string
-	Detail    string
-	Evidence  []EvidenceView
-	Link      string
-	LinkLabel string
+	ID       string
+	Severity string
+	Summary  string
+	Detail   string
+	Evidence []EvidenceView
+	// NextSteps is the console's guidance, rendered apart from the
+	// quoted evidence and labeled as guidance: it is the one thing on
+	// the screen no source reported.
+	NextSteps string
+	// Consequences are findings whose declared cause is this finding
+	// (directly or through a chain), presented inside this card as one
+	// incident. The relation is catalog-pinned knowledge; each nested
+	// finding keeps its own evidence.
+	Consequences []FindingView
+	Link         string
+	LinkLabel    string
 }
 
 // EvidenceView is one quoted claim beneath a finding.
@@ -98,8 +134,9 @@ type CheckView struct {
 // function of the snapshots already published, so this handler makes no
 // API call: it is not a request-time exception, it is ordinary rendering.
 func (h *Handler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
-	result := diagnose.Run(h.diagnosticsInput(), catalog.Rules()...)
-	h.renderDiagnostics(w, h.buildDiagnosticsView(r, result))
+	in := h.diagnosticsInput()
+	result := diagnose.Run(in, catalog.Rules()...)
+	h.renderDiagnostics(w, h.buildDiagnosticsView(r, in, result))
 }
 
 // diagnosticsInput gathers every published snapshot for one run.
@@ -129,6 +166,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	}
 	if h.sources.KubeVersion != nil {
 		in.KubeVersion, in.HasKubeVersion = h.sources.KubeVersion.CurrentKubeVersion()
+	}
+	if h.sources.Quotas != nil {
+		in.Quotas, in.HasQuotas = h.sources.Quotas.CurrentQuotas()
 	}
 	if h.sources.Poolers != nil {
 		in.Poolers, in.HasPoolers = h.sources.Poolers.CurrentPoolers()
@@ -167,29 +207,33 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 }
 
 // buildDiagnosticsView renders one run into the screen's view model.
-func (h *Handler) buildDiagnosticsView(r *http.Request, result diagnose.Result) DiagnosticsView {
+func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, result diagnose.Result) DiagnosticsView {
 	view := DiagnosticsView{
 		Shell:       h.shell(r, "diagnostics"),
 		ClusterName: h.cfg.ClusterName,
+		State:       clusterStateView(in),
 	}
+	rendered := make([]FindingView, 0, len(result.Findings))
 	for _, finding := range result.Findings {
-		rendered := FindingView{
+		one := FindingView{
 			ID:        finding.ID,
 			Severity:  finding.Severity.String(),
 			Summary:   boundMessage(finding.Summary),
 			Detail:    boundMessage(finding.Detail),
+			NextSteps: boundMessage(finding.NextSteps),
 			Link:      finding.Link,
 			LinkLabel: finding.LinkLabel,
 		}
 		for _, evidence := range finding.Evidence {
-			rendered.Evidence = append(rendered.Evidence, EvidenceView{
+			one.Evidence = append(one.Evidence, EvidenceView{
 				Origin: evidence.Origin,
 				Object: evidence.Object,
 				Detail: boundEvidence(evidence.Detail),
 			})
 		}
-		view.Findings = append(view.Findings, rendered)
+		rendered = append(rendered, one)
 	}
+	view.Findings = groupIncidents(result.Findings, rendered)
 	// Bucket the checks by outcome, keeping catalog order inside each
 	// group. The states are the console's shared vocabulary: a match is
 	// degraded, an unrunnable check is unknown, an inapplicable one is
@@ -236,6 +280,112 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, result diagnose.Result) 
 		})
 	}
 	return view
+}
+
+// clusterStateView reduces the operator's snapshot to the header strip.
+func clusterStateView(in diagnose.Input) ClusterStateView {
+	if !in.HasCluster || !in.Cluster.Cluster.Present {
+		return ClusterStateView{State: unknown, Phase: unknown, Instances: unknown, Primary: unknown}
+	}
+	cluster := in.Cluster.Cluster
+	state := ClusterStateView{
+		Observed:    true,
+		Phase:       orUnknown(cluster.Phase),
+		PhaseReason: boundMessage(cluster.PhaseReason),
+		Primary:     orUnknown(cluster.CurrentPrimary),
+		Instances:   unknown,
+		State:       "degraded",
+	}
+	if cluster.Phase == "Cluster in healthy state" {
+		state.State = "current"
+	} else if cluster.Phase == "" {
+		state.State = unknown
+	}
+	if cluster.DesiredInstances != nil {
+		ready := 0
+		if cluster.ReadyInstances != nil {
+			ready = *cluster.ReadyInstances
+		}
+		state.Instances = fmt.Sprintf("%d of %d ready", ready, *cluster.DesiredInstances)
+	}
+	return state
+}
+
+// groupIncidents nests findings under their declared causes, so one
+// incident renders as one card. The relation lives on the finding: a
+// finding names the checks it is a consequence of, and when one of
+// those also matched in the same run, this finding belongs inside it.
+//
+// The grouping walks each finding's cause chain to its topmost matched
+// cause and attaches the finding to that root's first finding, ordered
+// by chain depth so the immediate cause reads before the knock-on
+// effects. A relation that would loop is ignored — the finding stays a
+// root — because a cycle means the catalog's claim is malformed and
+// flat honesty beats clever nesting.
+func groupIncidents(findings []diagnose.Finding, rendered []FindingView) []FindingView {
+	// The first finding index per check: the attachment point.
+	firstOf := map[string]int{}
+	for i, finding := range findings {
+		if _, seen := firstOf[finding.Check]; !seen {
+			firstOf[finding.Check] = i
+		}
+	}
+	// parentOf resolves one check's first matched cause.
+	parentOf := func(check string, of []string) (string, bool) {
+		for _, cause := range of {
+			if cause == check {
+				continue
+			}
+			if _, matched := firstOf[cause]; matched {
+				return cause, true
+			}
+		}
+		return "", false
+	}
+	// rootOf climbs the chain, bounded by the finding count so a
+	// malformed cycle terminates as "stay a root".
+	rootOf := func(i int) (int, int) {
+		check, depth := findings[i].Check, 0
+		seen := map[string]bool{check: true}
+		for range findings {
+			parent, ok := parentOf(check, findings[firstOf[check]].ConsequenceOf)
+			if !ok {
+				break
+			}
+			if seen[parent] {
+				return firstOf[findings[i].Check], 0
+			}
+			seen[parent] = true
+			check, depth = parent, depth+1
+		}
+		return firstOf[check], depth
+	}
+
+	type nested struct {
+		index, depth int
+	}
+	children := map[int][]nested{}
+	var roots []int
+	for i := range findings {
+		root, depth := rootOf(i)
+		if root == i {
+			roots = append(roots, i)
+			continue
+		}
+		children[root] = append(children[root], nested{index: i, depth: depth})
+	}
+
+	out := make([]FindingView, 0, len(roots))
+	for _, root := range roots {
+		card := rendered[root]
+		chain := children[root]
+		sort.SliceStable(chain, func(a, b int) bool { return chain[a].depth < chain[b].depth })
+		for _, consequence := range chain {
+			card.Consequences = append(card.Consequences, rendered[consequence.index])
+		}
+		out = append(out, card)
+	}
+	return out
 }
 
 // renderDiagnostics writes the screen, matching the other flag-gated

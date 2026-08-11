@@ -1,15 +1,26 @@
 {{- /*
-  Diagnostics. Renders web.DiagnosticsView: findings correlated from the
-  snapshots the other screens already render, and — equally load-bearing
-  — the account of what was checked.
+  Diagnostics. Renders web.DiagnosticsView: the operator's own account
+  of the cluster first, then findings correlated from the snapshots the
+  other screens already render, then — equally load-bearing — the
+  account of what was checked.
 
-  The second panel is not decoration. Findings alone would make an empty
-  screen read as "nothing is wrong", which is a claim derived from the
-  absence of a match rather than from anything a source reported. The
-  checks are therefore all on the page, grouped by outcome: matches and
-  checks that could not run stay expanded, while the clear majority
-  collapses under one counted line. The details element is ordinary
-  markup — a reader without script opens it the same way.
+  Findings are grouped into incidents: a finding whose declared cause
+  also matched nests inside that cause's card, so a chain like
+  "archiving failed → WAL filled the volume → postgres kept down" reads
+  as one story with one root instead of three alarms. The relation is
+  catalog-pinned knowledge and the card says so; every nested finding
+  keeps its own quoted evidence.
+
+  Guidance ("what to do") renders apart from the evidence and is
+  labeled as the console's: advice is the one thing on this screen no
+  source reported.
+
+  The checks panel is not decoration. Findings alone would make an
+  empty screen read as "nothing is wrong", which is a claim derived
+  from the absence of a match rather than from anything a source
+  reported. The checks are therefore all on the page, grouped by
+  outcome: matches and checks that could not run stay expanded, while
+  the clear majority collapses under one counted line.
 */ -}}
 {{template "page-head" "diagnostics"}}
 {{template "shell-open" .Shell}}
@@ -22,6 +33,21 @@
     </div>
     <p class="lede">Every finding restates what a source reported and quotes it. None concludes anything a source did not say.</p>
   </header>
+
+  <section class="panel">
+    <h2>Cluster state</h2>
+    {{- with .State}}
+    <dl class="facts state-strip">
+      <dt>Operator-reported phase</dt>
+      <dd><span data-state="{{.State}}">{{.Phase}}</span>{{if .PhaseReason}} — {{.PhaseReason}}{{end}}</dd>
+      <dt>Instances</dt><dd>{{.Instances}}</dd>
+      <dt>Current primary</dt><dd>{{.Primary}}</dd>
+    </dl>
+    {{- if not .Observed}}
+    <p class="origin">The Cluster has not been observed yet; nothing below can be judged against its state.</p>
+    {{- end}}
+    {{- end}}
+  </section>
 
   <section class="panel">
     <h2>Findings</h2>
@@ -39,6 +65,40 @@
       <div class="evidence">
         <p class="evidence-meta"><strong>{{.Object}}</strong> <span class="origin-tag">{{.Origin}}</span></p>
         <pre>{{.Detail}}</pre>
+      </div>
+      {{- end}}
+      {{- if .NextSteps}}
+      <div class="next-steps">
+        <p class="next-steps-label">What to do <span class="origin-tag">console guidance</span></p>
+        <p>{{.NextSteps}}</p>
+      </div>
+      {{- end}}
+      {{- if .Consequences}}
+      <div class="finding-chain">
+        <p class="chain-label">In consequence — the catalog relates these to the finding above; each keeps its own evidence:</p>
+        {{- range .Consequences}}
+        <details class="chained" data-severity="{{.Severity}}">
+          <summary><span class="sev">{{.Severity}}</span> {{.Summary}}</summary>
+          {{- if .Detail}}
+          <p class="finding-detail">{{.Detail}}</p>
+          {{- end}}
+          {{- range .Evidence}}
+          <div class="evidence">
+            <p class="evidence-meta"><strong>{{.Object}}</strong> <span class="origin-tag">{{.Origin}}</span></p>
+            <pre>{{.Detail}}</pre>
+          </div>
+          {{- end}}
+          {{- if .NextSteps}}
+          <div class="next-steps">
+            <p class="next-steps-label">What to do <span class="origin-tag">console guidance</span></p>
+            <p>{{.NextSteps}}</p>
+          </div>
+          {{- end}}
+          {{- if .Link}}
+          <p class="finding-link"><a href="{{.Link}}">{{.LinkLabel}} →</a></p>
+          {{- end}}
+        </details>
+        {{- end}}
       </div>
       {{- end}}
       {{- if .Link}}

@@ -122,6 +122,12 @@ type KubeVersionSource interface {
 	CurrentKubeVersion() (observe.KubeVersionSnapshot, bool)
 }
 
+// QuotaSource supplies the namespace's ResourceQuota snapshot.
+type QuotaSource interface {
+	// CurrentQuotas returns the snapshot and whether one exists.
+	CurrentQuotas() (observe.QuotasSnapshot, bool)
+}
+
 // EvidenceSource supplies the current repository-evidence status.
 type EvidenceSource interface {
 	// CurrentEvidence returns the status.
@@ -166,6 +172,9 @@ type Sources struct {
 	// KubeVersion supplies the API server's /version report. Nil means
 	// the server version was never observed.
 	KubeVersion KubeVersionSource
+	// Quotas supplies the namespace's ResourceQuota snapshot. Nil means
+	// quotas were never observed.
+	Quotas QuotaSource
 	// Evidence supplies the repository-evidence status. Nil means the
 	// consumer is disabled: no section, no panel, nothing to probe.
 	Evidence EvidenceSource
@@ -985,6 +994,11 @@ func (EmptySnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, boo
 // CurrentKubeVersion reports no server-version observation.
 func (EmptySnapshots) CurrentKubeVersion() (observe.KubeVersionSnapshot, bool) {
 	return observe.KubeVersionSnapshot{}, false
+}
+
+// CurrentQuotas reports no quota snapshot.
+func (EmptySnapshots) CurrentQuotas() (observe.QuotasSnapshot, bool) {
+	return observe.QuotasSnapshot{}, false
 }
 
 // CurrentDatabaseObjects reports no declarative-object snapshot.

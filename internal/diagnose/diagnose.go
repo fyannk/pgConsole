@@ -94,6 +94,9 @@ type Finding struct {
 	// ID is the stable detector-scoped identifier, used for ordering
 	// ties and for referring to a finding without quoting its prose.
 	ID string
+	// Check names the detector or rule that produced this finding, so
+	// findings can be related to each other by their producers.
+	Check string
 	// Severity orders the finding on the screen.
 	Severity Severity
 	// Summary is one sentence stating what is wrong, in plain language.
@@ -105,6 +108,18 @@ type Finding struct {
 	// should encounter it. Never empty: a finding without evidence is an
 	// opinion.
 	Evidence []Evidence
+	// NextSteps is what an operator does about it: console-pinned
+	// guidance, stated as guidance and rendered apart from the quoted
+	// evidence — advice is the one thing on this screen no source
+	// reported. Empty when the summary and evidence say everything.
+	NextSteps string
+	// ConsequenceOf names the checks whose findings this one follows
+	// from, in preference order. When one of them also matched in the
+	// same run, the screen presents this finding beneath it as part of
+	// one incident rather than as a second alarm. The relation is
+	// catalog-pinned knowledge, stated as such; each nested finding
+	// keeps its own evidence.
+	ConsequenceOf []string
 	// Link is where the reader goes next — always a screen, never an
 	// action. Diagnostics proposes; it does not remediate.
 	Link string
@@ -208,6 +223,11 @@ type Input struct {
 	// observed fact that arrives by poll rather than by watch.
 	KubeVersion    observe.KubeVersionSnapshot
 	HasKubeVersion bool
+	// Quotas are the namespace's ResourceQuota objects, with usage and
+	// exhaustion as the API server reports them. They are what lets a
+	// refusal name the quota that made it.
+	Quotas    observe.QuotasSnapshot
+	HasQuotas bool
 	// DatabaseObjects are the declared Database, DatabaseRole,
 	// Publication, and Subscription resources with the operator's
 	// reconciliation report on each.
@@ -286,6 +306,7 @@ type Detector interface {
 func Detectors() []Detector {
 	return []Detector{
 		quotaDetector{},
+		quotaExhaustedDetector{},
 		schedulingDetector{},
 		imagePullDetector{},
 		volumeDetector{},
@@ -311,6 +332,11 @@ func Run(in Input, rules ...Rule) Result {
 			check.Outcome, check.Because = CheckUnavailable, unavailable
 		case len(findings) > 0:
 			check.Outcome = CheckMatched
+			for i := range findings {
+				if findings[i].Check == "" {
+					findings[i].Check = detector.Name()
+				}
+			}
 			result.Findings = append(result.Findings, findings...)
 		default:
 			check.Outcome = CheckClear

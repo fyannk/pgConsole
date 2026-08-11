@@ -99,6 +99,10 @@ type Deps struct {
 	// KubeVersionSource fetches the API server's own /version report.
 	// Nil disables the poller, leaving the Kubernetes version unknown.
 	KubeVersionSource observe.KubeVersionSource
+	// QuotaSource observes the namespace's ResourceQuota objects, so
+	// diagnostics can name the quota behind a refusal. Nil disables the
+	// collector.
+	QuotaSource observe.QuotaSource
 	// EvidenceFetcher polls the repository-evidence sidecar. Nil means
 	// the consumer is disabled: no poller runs, no section renders,
 	// and readiness never involves the sidecar.
@@ -227,6 +231,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		infraStore := observe.NewInfrastructureStore()
 		sources.Infrastructure = infraStore
 		runners = append(runners, observe.NewInfrastructureCollector(deps.InfrastructureSource, infraStore, deps.Clock, logger).Run)
+	}
+	if deps.QuotaSource != nil {
+		quotaStore := observe.NewQuotaStore()
+		sources.Quotas = quotaStore
+		runners = append(runners, observe.NewQuotaCollector(deps.QuotaSource, quotaStore, deps.Clock, logger).Run)
 	}
 	if deps.KubeVersionSource != nil {
 		kubeVersionStore := observe.NewKubeVersionStore()

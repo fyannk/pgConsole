@@ -1891,6 +1891,53 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
 }
 .finding-link { margin: 0; }
 
+/* The state strip: the operator's own account of the cluster, stated
+   before any finding. */
+.state-strip dd [data-state] { font-weight: 600; }
+
+/* Guidance renders apart from evidence and says whose it is: advice is
+   the one thing on this screen no source reported. */
+.next-steps {
+  background: var(--surface-2);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+.next-steps p { margin: 0; max-width: 90ch; }
+.next-steps-label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+/* An incident's chain: findings whose declared cause is the card they
+   sit in. Each is a details element carrying its own severity, summary
+   and evidence — the relation is presentation, the evidence is not. */
+.finding-chain { margin: 0 0 var(--space-3); }
+.chain-label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-2);
+}
+details.chained {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+details.chained[data-severity="critical"] { border-left-color: var(--bad); }
+details.chained[data-severity="warning"] { border-left-color: var(--warn); }
+details.chained[data-severity="note"] { border-left-color: var(--border-strong); }
+details.chained > summary { cursor: pointer; font-weight: 600; }
+details.chained[open] > summary { margin-bottom: var(--space-2); }
+details.chained .sev { margin-right: var(--space-2); }
+details.chained[data-severity="critical"] .sev { background: var(--bad-weak); color: var(--bad); }
+details.chained[data-severity="warning"] .sev { background: var(--warn-weak); color: var(--warn); }
+details.chained[data-severity="note"] .sev { background: var(--surface-2); color: var(--text-muted); }
+
 /* The checks account. The summary line carries each outcome as a
    counted, state-coloured chip; each group is a details element so the
    clear majority folds under one line while matches and could-not-run

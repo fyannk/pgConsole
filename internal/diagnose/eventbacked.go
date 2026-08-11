@@ -105,8 +105,11 @@ func (d quotaDetector) Detect(in Input) ([]Finding, string) {
 		Detail: "The API server rejected a create, so the object does not exist and " +
 			"nothing will retry it into existence. The refusal below carries the " +
 			"quota's own numbers.",
-		Link:      "/cluster/pods",
-		LinkLabel: "Pods",
+		NextSteps: "Raise the quota's ceiling or lower what the cluster asks for; the " +
+			"operator retries refused objects on its own once room exists.",
+		ConsequenceOf: []string{"quota-exhausted"},
+		Link:          "/cluster/pods",
+		LinkLabel:     "Pods",
 	}
 	for _, event := range quota {
 		finding.Evidence = append(finding.Evidence, eventEvidence(event))
@@ -163,12 +166,18 @@ func (d schedulingDetector) Detect(in Input) ([]Finding, string) {
 		return nil, ""
 	}
 	finding := Finding{
-		ID:        "pod-scheduling",
-		Severity:  SeverityWarning,
-		Summary:   "A pod cannot be scheduled onto any node.",
-		Detail:    "The pod exists and will stay Pending until the constraint below is satisfied.",
-		Link:      "/cluster/pods",
-		LinkLabel: "Pods",
+		ID:       "pod-scheduling",
+		Severity: SeverityWarning,
+		Summary:  "A pod cannot be scheduled onto any node.",
+		Detail:   "The pod exists and will stay Pending until the constraint below is satisfied.",
+		NextSteps: "The scheduler's message names the missing piece. A missing " +
+			"persistentvolumeclaim usually means the claim's creation was refused — " +
+			"an exhausted storage quota is the common cause — while insufficient " +
+			"cpu or memory needs node capacity or smaller requests, and an " +
+			"unsatisfied affinity needs a node that matches.",
+		ConsequenceOf: []string{"quota-exhausted", "resource-quota"},
+		Link:          "/cluster/pods",
+		LinkLabel:     "Pods",
 	}
 	for _, event := range unplaceable {
 		finding.Evidence = append(finding.Evidence, eventEvidence(event))

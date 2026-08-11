@@ -65,7 +65,7 @@ func newDiagnosticsHandlerFull(t *testing.T, allow bool, snapshots staticSnapsho
 		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots,
 			Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots,
 			ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots,
-			KubeVersion: snapshots, History: history, Evidence: ev},
+			KubeVersion: snapshots, Quotas: snapshots, History: history, Evidence: ev},
 		kube.UnavailableProber{}, nil, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
 		nil, nil, func() time.Time { return testNow }, logger)
 	if err != nil {
@@ -195,6 +195,7 @@ func TestDiagnosticsInputReachesEveryPublishedSource(t *testing.T) {
 		ok: true, podsOK: true, eventsOK: true, backupsOK: true,
 		poolersOK: true, poolerPodsOK: true, quorumOK: true,
 		catalogsOK: true, declaredOK: true, infraOK: true, kubeVersionOK: true,
+		quotasOK: true,
 	}
 	h := newDiagnosticsHandlerFull(t, true, all, stubHistory{has: true}, stubEvidence{})
 	in := h.diagnosticsInput()
@@ -246,6 +247,7 @@ func TestEvidenceQuotesSurviveTheEnvelope(t *testing.T) {
 	h := newDiagnosticsHandler(t, true, staticSnapshots{})
 	view := h.buildDiagnosticsView(
 		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil),
+		diagnose.Input{},
 		diagnose.Result{Findings: []diagnose.Finding{{
 			ID: "postgres-fatal", Severity: diagnose.SeverityWarning,
 			Summary:  "PostgreSQL logged a FATAL-severity record.",
@@ -255,5 +257,63 @@ func TestEvidenceQuotesSurviveTheEnvelope(t *testing.T) {
 	got := view.Findings[0].Evidence[0].Detail
 	if !strings.Contains(got, `database \"absent_db\" does not exist`) {
 		t.Errorf("the message field did not survive the display bound; quote ends %q", got[max(0, len(got)-60):])
+	}
+}
+
+// TestGroupIncidentsNestsConsequencesUnderTheirCause proves the
+// incident view: a chain of matched findings renders as one root card
+// with its consequences inside, ordered nearest cause first, and an
+// unrelated finding stays its own card. A malformed cyclic relation
+// degrades to flat cards rather than losing a finding.
+func TestGroupIncidentsNestsConsequencesUnderTheirCause(t *testing.T) {
+	t.Parallel()
+	h := newDiagnosticsHandler(t, true, staticSnapshots{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil)
+
+	view := h.buildDiagnosticsView(req, diagnose.Input{}, diagnose.Result{Findings: []diagnose.Finding{
+		{ID: "root", Check: "root", Summary: "Root."},
+		{ID: "mid", Check: "mid", Summary: "Mid.", ConsequenceOf: []string{"root"}},
+		{ID: "leaf", Check: "leaf", Summary: "Leaf.", ConsequenceOf: []string{"mid"}},
+		{ID: "other", Check: "other", Summary: "Other."},
+	}})
+	if len(view.Findings) != 2 {
+		t.Fatalf("cards = %d, want the root and the unrelated finding", len(view.Findings))
+	}
+	root := view.Findings[0]
+	if root.ID != "root" || len(root.Consequences) != 2 {
+		t.Fatalf("root card = %+v", root)
+	}
+	if root.Consequences[0].ID != "mid" || root.Consequences[1].ID != "leaf" {
+		t.Errorf("chain not ordered nearest cause first: %+v", root.Consequences)
+	}
+
+	cyclic := h.buildDiagnosticsView(req, diagnose.Input{}, diagnose.Result{Findings: []diagnose.Finding{
+		{ID: "a", Check: "a", Summary: "A.", ConsequenceOf: []string{"b"}},
+		{ID: "b", Check: "b", Summary: "B.", ConsequenceOf: []string{"a"}},
+	}})
+	if len(cyclic.Findings) != 2 {
+		t.Errorf("a cyclic relation lost a finding: %+v", cyclic.Findings)
+	}
+}
+
+// TestClusterStateStripStatesTheOperator proves the header answers
+// "what state is the cluster in" from the operator's own words, and
+// answers "unknown" — never an empty healthy strip — when nothing was
+// observed.
+func TestClusterStateStripStatesTheOperator(t *testing.T) {
+	t.Parallel()
+	if state := clusterStateView(diagnose.Input{}); state.Observed || state.Phase != "unknown" {
+		t.Errorf("unobserved cluster rendered as %+v", state)
+	}
+
+	desired, ready := 3, 1
+	in := diagnose.Input{HasCluster: true, Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{
+		Present: true, Phase: "Creating a new replica", PhaseReason: "Creating replica quota-2",
+		CurrentPrimary: "quota-1", DesiredInstances: &desired, ReadyInstances: &ready,
+	}}}
+	state := clusterStateView(in)
+	if state.Phase != "Creating a new replica" || state.Instances != "1 of 3 ready" ||
+		state.Primary != "quota-1" || state.State != "degraded" {
+		t.Errorf("state strip = %+v", state)
 	}
 }

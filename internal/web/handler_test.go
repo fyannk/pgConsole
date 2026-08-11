@@ -58,10 +58,16 @@ type staticSnapshots struct {
 	infraOK       bool
 	kubeVersion   observe.KubeVersionSnapshot
 	kubeVersionOK bool
+	quotas        observe.QuotasSnapshot
+	quotasOK      bool
 }
 
 func (s staticSnapshots) CurrentKubeVersion() (observe.KubeVersionSnapshot, bool) {
 	return s.kubeVersion, s.kubeVersionOK
+}
+
+func (s staticSnapshots) CurrentQuotas() (observe.QuotasSnapshot, bool) {
+	return s.quotas, s.quotasOK
 }
 
 func (s staticSnapshots) Current() (observe.Snapshot, bool) {

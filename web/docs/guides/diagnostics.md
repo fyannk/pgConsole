@@ -11,14 +11,22 @@ statements about what is wrong and where, each anchored to the claim it
 rests on. It runs no probes and needs no extra Role — every check is a
 pure function over the snapshots the console already publishes.
 
-Two panels carry the screen, and the second is as load-bearing as the
-first:
+Three panels carry the screen:
 
-- **Findings** — what matched, most severe first. Every finding quotes
-  its evidence verbatim and names the origin of each quoted claim (the
-  operator, Kubernetes, a container log, the metrics exporter). A
-  finding restates and correlates; it never concludes something no
-  source reports.
+- **Cluster state** — the operator's own account first: phase and
+  reason, instances ready against declared, the current primary. A
+  reader asking "what is wrong" gets "what state is it in" answered
+  before any finding.
+- **Findings, grouped into incidents** — what matched, most severe
+  first. A finding whose declared cause also matched nests inside that
+  cause's card, so a chain like *archiving failed → WAL filled the
+  volume → PostgreSQL kept down* reads as one story with one root
+  instead of three alarms. The relation is catalog-pinned knowledge and
+  the card says so; every nested finding keeps its own quoted evidence.
+  Findings that carry it also show a **"What to do"** block — the
+  console's guidance, labeled as guidance and rendered apart from the
+  evidence, because advice is the one thing on this screen no source
+  reported.
 - **What was checked** — every check that ran, with its outcome. This
   is what keeps an empty screen honest: no findings means "none of
   these checks matched", never "the cluster is healthy".
@@ -70,6 +78,7 @@ A version the console has not observed leaves its pinned rules at
 |---|---|
 | Operator status: phases, conditions, backup phases, declared database objects, primary-move timing | The cluster collectors (always on). |
 | Events | The event collector (always on). Only events on the `Cluster` object and member pods are observable. |
+| Resource quotas | The `resourcequotas` grant in the Role (in the shipped example). It is what lets a quota refusal name the quota — ceiling and usage — instead of only the refused object's symptom. |
 | Container states | The pod collectors (always on). |
 | Log messages | `LOG_STREAM_ENABLED=true` (which requires `ALLOW_LOGS=true`). With following off, every log-backed check reports "could not run". |
 | Metric flags and thresholds | Metrics scraping enabled. |

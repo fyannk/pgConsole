@@ -9,6 +9,30 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **The diagnostics screen answers the reader's three questions.** A
+  cluster-state strip opens the page with the operator's own account —
+  phase and reason, instances ready against declared, the current
+  primary. Findings group into **incidents**: a finding whose declared
+  cause also matched nests inside that cause's card, so "archiving
+  failed → WAL filled the volume → PostgreSQL kept down" reads as one
+  story with one root instead of three alarms; the relation is
+  catalog-pinned and the card says so, and every nested finding keeps
+  its own quoted evidence. Findings now carry **"What to do"** —
+  console guidance, labeled as guidance and rendered apart from the
+  evidence, because advice is the one thing on the screen no source
+  reported.
+
+- **ResourceQuotas are observed** (`resourcequotas` `list`/`watch`, in
+  the shipped example Role), and a `quota-exhausted` check names the
+  quota behind a refusal: which quota, its ceiling, its reported usage.
+  It reads as a warning at capacity and escalates to critical when the
+  cluster is visibly short of its declared instances at the same time —
+  the refusal in progress. The unschedulable-pod and quota-refusal
+  findings nest beneath it as one incident. Deployments predating the
+  grant see the check report "could not run" until the Role is updated.
+
 ## [0.5.0] - 2026-08-10
 
 ### Added
