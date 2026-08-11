@@ -33,6 +33,28 @@ period. Pin an exact image tag and read the notes before upgrading.
   findings nest beneath it as one incident. Deployments predating the
   grant see the check report "could not run" until the Role is updated.
 
+- **A broken-cluster gallery for dev** (`hack/dev-problems.sh`): six
+  deliberately broken, deliberately tiny clusters beside the healthy
+  dev environment — quota-refused PVCs, a conflicting archive
+  destination, refused object-store credentials, a WAL volume and a
+  data volume that genuinely fill, a memory limit too small to
+  bootstrap — each with its own console. It exists to exercise the
+  catalog against real failures, and both fixes below came out of it.
+
+### Fixed
+
+- **A cluster that broke before its first instance pod had no
+  observable operator version**, so every pinned check stepped aside at
+  the exact moment the operator declared the cluster unrecoverable. The
+  bootstrap Jobs carry the same injected operator image, so the
+  observed child Jobs now expose it and the version falls back to it —
+  an instance pod still wins when one exists.
+
+- **The object-store credential check pinned AWS's wording.** MinIO
+  answers bad credentials with a bare 403 — "An error occurred (403)",
+  observed live — where AWS says `AccessDenied`, so a second rule,
+  `object-store-forbidden`, now covers the other dialect.
+
 ## [0.5.0] - 2026-08-10
 
 ### Added

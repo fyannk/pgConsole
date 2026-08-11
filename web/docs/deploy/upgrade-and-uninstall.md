@@ -33,6 +33,15 @@ bounded history honestly starts empty.
 - **Standalone**: change the `image:` in the Deployment and
   `kubectl rollout restart` (or re-apply).
 
+A release may also change the **Role**: a new read the console has
+learned to make. Re-apply the Role manifests whenever the changelog
+says the grants changed — the console degrades honestly without the
+grant (the affected panel or check reports that it could not look,
+never a wrong answer), but it stays degraded until the Role catches
+up. The first example is the `resourcequotas` read: without it, the
+`quota-exhausted` diagnostics check reports "could not run" on every
+run.
+
 In-flight CSRF confirmation tokens are minted from a random per-process key
 and are invalidated by the restart. This is harmless: a reviewer or
 operator simply reloads the confirmation page for a fresh token. A

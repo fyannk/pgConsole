@@ -375,15 +375,30 @@ func groupIncidents(findings []diagnose.Finding, rendered []FindingView) []Findi
 		children[root] = append(children[root], nested{index: i, depth: depth})
 	}
 
-	out := make([]FindingView, 0, len(roots))
+	type incident struct {
+		card  FindingView
+		worst diagnose.Severity
+	}
+	incidents := make([]incident, 0, len(roots))
 	for _, root := range roots {
-		card := rendered[root]
+		one := incident{card: rendered[root], worst: findings[root].Severity}
 		chain := children[root]
 		sort.SliceStable(chain, func(a, b int) bool { return chain[a].depth < chain[b].depth })
 		for _, consequence := range chain {
-			card.Consequences = append(card.Consequences, rendered[consequence.index])
+			one.card.Consequences = append(one.card.Consequences, rendered[consequence.index])
+			if s := findings[consequence.index].Severity; s > one.worst {
+				one.worst = s
+			}
 		}
-		out = append(out, card)
+		incidents = append(incidents, one)
+	}
+	// An incident sorts by the worst it contains: a warning-severity
+	// cause holding a critical consequence is a critical story, and the
+	// screen reads worst first.
+	sort.SliceStable(incidents, func(a, b int) bool { return incidents[a].worst > incidents[b].worst })
+	out := make([]FindingView, 0, len(incidents))
+	for _, one := range incidents {
+		out = append(out, one.card)
 	}
 	return out
 }
