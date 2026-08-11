@@ -144,6 +144,12 @@ type ChildFacts struct {
 	Active    *int32
 	Succeeded *int32
 	Failed    *int32
+	// BootstrapImage is the operator's own image on a Job's
+	// bootstrap-controller init container, empty elsewhere. It exists
+	// for the cluster that breaks before its first instance pod: the
+	// bootstrap Jobs are then the only place the operator's version is
+	// observable at all.
+	BootstrapImage string
 }
 
 // InfrastructureState is one complete observation of the set.

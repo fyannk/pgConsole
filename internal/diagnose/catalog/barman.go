@@ -59,6 +59,21 @@ func barmanRules() []diagnose.Rule {
 			When:   diagnose.LogContains{Substrings: []string{"AccessDenied"}},
 		},
 		{
+			// The same refusal in the other dialect. AWS answers bad
+			// credentials with an AccessDenied code; MinIO answers the
+			// same request with a bare 403 — observed live as "An error
+			// occurred (403) when calling the HeadBucket operation:
+			// Forbidden" — and one substring cannot cover both.
+			ID:        "object-store-forbidden",
+			Component: diagnose.ComponentBarman,
+			Severity:  diagnose.SeverityCritical,
+			Describes: "the object store answering 403 Forbidden",
+			Summary: "The object store answered 403 Forbidden, so the configured " +
+				"credentials do not grant this destination.",
+			Detail: bestEffort,
+			When:   diagnose.LogContains{Substrings: []string{"An error occurred (403)"}},
+		},
+		{
 			ID:        "object-store-unreachable",
 			Component: diagnose.ComponentBarman,
 			Severity:  diagnose.SeverityCritical,
