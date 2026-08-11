@@ -32,9 +32,11 @@ const MaxQuotas = 16
 type QuotaResourceFacts struct {
 	// Resource is the quota key, such as "requests.storage" or "pods".
 	Resource string
-	// Hard is the declared ceiling, as the API server states it.
+	// Hard is the declared ceiling, and Used the reported usage, in the
+	// quantity's canonical rendering — "1024Mi" reads back as "1Gi",
+	// the same value in the form Kubernetes itself normalizes to.
 	Hard string
-	// Used is the reported usage, as the API server states it.
+	// Used is the reported usage; empty when unreported.
 	Used string
 	// Exhausted reports used >= hard. It is derived at conversion from
 	// the two quantities above, which the reader can check against it.

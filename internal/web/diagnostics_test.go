@@ -154,7 +154,9 @@ func TestDiagnosticsRendersAFindingWithItsEvidence(t *testing.T) {
 
 // TestDiagnosticsRendersAnEventBackedFinding proves the screen carries a
 // refusal the API server already explained, quoted with its numbers
-// intact — which is why the quota finding needs no ResourceQuota read.
+// intact. The event finding stands on the refusal alone; the observed
+// ResourceQuotas are the other half of the story, carried by the
+// quota-exhausted check.
 func TestDiagnosticsRendersAnEventBackedFinding(t *testing.T) {
 	t.Parallel()
 	const message = `pods "orders-3" is forbidden: exceeded quota: compute, used: pods=8, limited: pods=8`
@@ -315,5 +317,27 @@ func TestClusterStateStripStatesTheOperator(t *testing.T) {
 	if state.Phase != "Creating a new replica" || state.Instances != "1 of 3 ready" ||
 		state.Primary != "quota-1" || state.State != "degraded" {
 		t.Errorf("state strip = %+v", state)
+	}
+}
+
+// TestIncidentsSortByTheWorstTheyContain proves a warning-severity
+// cause holding a critical consequence reads as a critical story: the
+// incident outranks a standalone warning that would otherwise tie it.
+func TestIncidentsSortByTheWorstTheyContain(t *testing.T) {
+	t.Parallel()
+	h := newDiagnosticsHandler(t, true, staticSnapshots{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil)
+
+	view := h.buildDiagnosticsView(req, diagnose.Input{}, diagnose.Result{Findings: []diagnose.Finding{
+		{ID: "lone", Check: "lone", Severity: diagnose.SeverityWarning, Summary: "Lone warning."},
+		{ID: "cause", Check: "cause", Severity: diagnose.SeverityWarning, Summary: "Warning cause."},
+		{ID: "effect", Check: "effect", Severity: diagnose.SeverityCritical, Summary: "Critical effect.",
+			ConsequenceOf: []string{"cause"}},
+	}})
+	if len(view.Findings) != 2 {
+		t.Fatalf("cards = %d, want two", len(view.Findings))
+	}
+	if view.Findings[0].ID != "cause" {
+		t.Errorf("the incident holding a critical did not sort first: %+v", view.Findings)
 	}
 }
