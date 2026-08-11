@@ -9,6 +9,8 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-11
+
 ### Added
 
 - **The diagnostics screen answers the reader's three questions.** A
@@ -54,6 +56,17 @@ period. Pin an exact image tag and read the notes before upgrading.
   answers bad credentials with a bare 403 — "An error occurred (403)",
   observed live — where AWS says `AccessDenied`, so a second rule,
   `object-store-forbidden`, now covers the other dialect.
+
+### Upgrading
+
+One thing to do, and it is the Role: this release adds the
+`resourcequotas` `list`/`watch` read, so re-apply the Role manifest
+beside the image bump. Skipping it breaks nothing — the console
+degrades honestly, with the `quota-exhausted` check reporting "could
+not run" and saying why — but the quota diagnostics stay dark until
+the grant lands. Everything else rides the image: the incident view,
+the state strip, and the guidance blocks appear on the existing
+`ALLOW_DIAGNOSTICS` surface with no new flag.
 
 ## [0.5.0] - 2026-08-10
 
@@ -404,7 +417,8 @@ First public release.
   independently prove replication health, data integrity, or restoreability,
   and it provides no SQL access, database contents, or Secret reads.
 
-[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/fyannk/pgConsole/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/fyannk/pgConsole/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/fyannk/pgConsole/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fyannk/pgConsole/compare/v0.2.0...v0.3.0
