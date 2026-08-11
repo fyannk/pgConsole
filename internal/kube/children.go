@@ -204,6 +204,15 @@ func (c *Client) convertJob(content map[string]any) (observe.ChildFacts, bool, e
 	setCreated(&facts, job.CreationTimestamp)
 	active, succeeded, failed := job.Status.Active, job.Status.Succeeded, job.Status.Failed
 	facts.Active, facts.Succeeded, facts.Failed = &active, &succeeded, &failed
+	// The operator injects its own image as this init container, which
+	// makes a bootstrap Job the operator-version source of last resort
+	// for a cluster that never got an instance pod.
+	for _, container := range job.Spec.Template.Spec.InitContainers {
+		if container.Name == "bootstrap-controller" {
+			facts.BootstrapImage = container.Image
+			break
+		}
+	}
 	return facts, c.ownedByCluster(&job.ObjectMeta), nil
 }
 

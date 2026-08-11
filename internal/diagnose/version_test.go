@@ -150,3 +150,42 @@ func TestVersionFactsAreObservedNeverAssumed(t *testing.T) {
 		t.Errorf("stale observation not marked in the provenance: %+v", kube)
 	}
 }
+
+// TestCNPGVersionFallsBackToTheBootstrapJob covers the cluster that
+// broke before its first instance pod: the bootstrap Job carries the
+// same injected operator image, and it is the source of last resort —
+// consulted only when no instance pod answers.
+func TestCNPGVersionFallsBackToTheBootstrapJob(t *testing.T) {
+	t.Parallel()
+	in := Input{
+		Now:               now,
+		HasPods:           true, // observed, and empty: initdb never succeeded
+		Pods:              observe.PodsSnapshot{},
+		HasInfrastructure: true,
+		Infrastructure: observe.InfrastructureSnapshot{Children: []observe.ChildFacts{
+			{Kind: "Job", Name: "oom-1-initdb",
+				BootstrapImage: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"},
+		}},
+	}
+	cnpg, ok := versionFacts(in)[ComponentCNPG]
+	if !ok || cnpg.Version != "1.30.0" {
+		t.Fatalf("CloudNativePG version = %+v, want 1.30.0 from the bootstrap Job", cnpg)
+	}
+	if !strings.Contains(cnpg.Object, "Job/oom-1-initdb") {
+		t.Errorf("provenance does not name the Job: %+v", cnpg)
+	}
+
+	// With an instance pod present, the pod wins: it is the running
+	// workload, not a relic of bootstrap.
+	in.Pods = observe.PodsSnapshot{Pods: []observe.PodFacts{{
+		Name: "oom-1",
+		Containers: []observe.ContainerFacts{{
+			Name: "bootstrap-controller", Init: true,
+			Image: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1",
+		}},
+	}}}
+	if cnpg := versionFacts(in)[ComponentCNPG]; cnpg.Version != "1.30.1" ||
+		!strings.Contains(cnpg.Object, "Pod/") {
+		t.Errorf("instance pod did not take precedence: %+v", cnpg)
+	}
+}

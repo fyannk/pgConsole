@@ -120,6 +120,28 @@ func versionFacts(in Input) VersionFacts {
 		}
 	}
 
+	// A cluster that broke before its first instance pod — a bootstrap
+	// job failing over and over — has no pod to read the version from,
+	// which is precisely when the operator's own verdicts matter most.
+	// The bootstrap Jobs carry the same injected image, so they are the
+	// source of last resort.
+	if _, known := facts[ComponentCNPG]; !known && in.HasInfrastructure {
+		for _, child := range in.Infrastructure.Children {
+			if child.Kind != "Job" || child.BootstrapImage == "" {
+				continue
+			}
+			if version, ok := imageTagVersion(child.BootstrapImage); ok {
+				facts[ComponentCNPG] = ComponentVersion{
+					Version: version,
+					Origin:  "console-parsed from Kubernetes-observed image",
+					Object:  fmt.Sprintf("Job/%s init container %s", child.Name, bootstrapControllerContainer),
+					Detail:  fmt.Sprintf("operator bootstrap image %q", child.BootstrapImage),
+				}
+				break
+			}
+		}
+	}
+
 	return facts
 }
 
