@@ -31,14 +31,15 @@ func logRules() []diagnose.Rule {
 	return []diagnose.Rule{
 		// ------------------------------------------------ WAL archiving
 		{
-			ID:        "cnpg-wal-archive-command-failed",
-			Component: diagnose.ComponentCNPG,
-			Requires:  pin(since128),
-			Severity:  diagnose.SeverityCritical,
-			Describes: "the archive_command wrapper failing",
-			Summary:   "The WAL archive command is failing, so WAL is accumulating on the instance.",
-			Detail:    streamCaveat,
-			When:      diagnose.LogContains{Substrings: []string{"failed to run wal-archive command"}},
+			ID:            "cnpg-wal-archive-command-failed",
+			Component:     diagnose.ComponentCNPG,
+			Requires:      pin(since128),
+			Severity:      diagnose.SeverityCritical,
+			Describes:     "the archive_command wrapper failing",
+			Summary:       "The WAL archive command is failing, so WAL is accumulating on the instance.",
+			Detail:        streamCaveat,
+			When:          diagnose.LogContains{Substrings: []string{"failed to run wal-archive command"}},
+			ConsequenceOf: []string{"cnpg-wal-archiving-failing"},
 		},
 		{
 			ID:        "cnpg-wal-archive-plugin-missing",
@@ -49,7 +50,8 @@ func logRules() []diagnose.Rule {
 			Summary:   "The configured WAL-archive plugin is not available in this pod, so nothing is being archived.",
 			Detail: "The plugin's sidecar socket is missing — the sidecar failed to start, " +
 				"or the pod predates the plugin and needs a rollout. " + streamCaveat,
-			When: diagnose.LogContains{Substrings: []string{"wal archive plugin is not available:"}},
+			When:      diagnose.LogContains{Substrings: []string{"wal archive plugin is not available:"}},
+			NextSteps: "Roll the instance pods so they gain the plugin sidecar, and check the sidecar's own container state if it fails to start.",
 		},
 		// -------------------------------------------------- WAL restore
 		{
@@ -156,6 +158,9 @@ func logRules() []diagnose.Rule {
 				"react; the pod-level view of the same state is the operator's " +
 				"not-enough-disk-space phase. " + streamCaveat,
 			When: diagnose.LogContains{Substrings: []string{"no free disk space for WALs"}},
+			NextSteps: "Grow the WAL volume (the storage class must allow expansion), or fix " +
+				"the archiving failure that filled it — archived WAL is recycled on its own.",
+			ConsequenceOf: []string{"cnpg-wal-archiving-failing"},
 		},
 		{
 			ID:        "cnpg-postgres-start-failed",
@@ -176,7 +181,8 @@ func logRules() []diagnose.Rule {
 			Summary:   "PostgreSQL exited with errors — this is what a crash-looping instance looks like from inside.",
 			Detail: "The instance manager terminates with it, so the kubelet restarts the " +
 				"pod and the restart count climbs. " + streamCaveat,
-			When: diagnose.LogContains{Substrings: []string{"PostgreSQL process exited with errors"}},
+			When:          diagnose.LogContains{Substrings: []string{"PostgreSQL process exited with errors"}},
+			ConsequenceOf: []string{"postgres-panic", "cnpg-wal-disk-full"},
 		},
 		// ----------------------------------------------- primary lease
 		{

@@ -105,6 +105,14 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["list", "watch"]
+  # Resource quotas: namespace-scoped standing configuration, read so a
+  # quota refusal can name the quota that made it — its ceiling and its
+  # reported usage — instead of only the refused object's symptom.
+  # Missing permission degrades the quota diagnostics to "could not
+  # run".
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["list", "watch"]
   # Optional: which repository backs the cluster. Missing permission
   # degrades to an unknown panel.
   - apiGroups: ["barmancloud.cnpg.io"]

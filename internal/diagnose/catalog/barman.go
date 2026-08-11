@@ -37,6 +37,10 @@ func barmanRules() []diagnose.Rule {
 				"refused to start archiving into it.",
 			Detail: bestEffort,
 			When:   diagnose.LogContains{Substrings: []string{"WAL archive check failed"}},
+			NextSteps: "Point the store at an empty destination or a distinct serverName. " +
+				"Reusing an old server folder on purpose means emptying it first — " +
+				"the refusal exists so one cluster cannot silently overwrite " +
+				"another's recovery data.",
 		},
 		{
 			ID:        "backup-destination-conflict",
@@ -57,6 +61,8 @@ func barmanRules() []diagnose.Rule {
 				"configured destination.",
 			Detail: bestEffort,
 			When:   diagnose.LogContains{Substrings: []string{"AccessDenied"}},
+			NextSteps: "Fix the store's credentials or the bucket policy they run into; " +
+				"archiving resumes on its own once a write succeeds.",
 		},
 		{
 			// The same refusal in the other dialect. AWS answers bad
@@ -72,6 +78,8 @@ func barmanRules() []diagnose.Rule {
 				"credentials do not grant this destination.",
 			Detail: bestEffort,
 			When:   diagnose.LogContains{Substrings: []string{"An error occurred (403)"}},
+			NextSteps: "Fix the store's credentials or the bucket policy they run into; " +
+				"archiving resumes on its own once a write succeeds.",
 		},
 		{
 			ID:        "object-store-unreachable",
@@ -82,6 +90,8 @@ func barmanRules() []diagnose.Rule {
 				"endpoint.",
 			Detail: bestEffort,
 			When:   diagnose.LogContains{Substrings: []string{"could not connect to", "endpoint"}},
+			NextSteps: "Check the endpoint URL, DNS from inside the namespace, and any " +
+				"NetworkPolicy between the instance pods and the store.",
 		},
 	}
 }

@@ -29,6 +29,7 @@ The default authority. Namespace-scoped, no mutating verb.
 | Volume claims | `""` | `persistentvolumeclaims` | `get`, `list`, `watch` |
 | Log tail | `""` | `pods/log` | `get` (omit when `ALLOW_LOGS=false`) |
 | Events | `""` | `events` | `list`, `watch` |
+| Resource quotas | `""` | `resourcequotas` | `list`, `watch` |
 | Workload owners | `apps` | `replicasets`, `deployments` | `get` |
 | Configuration and identity | `""` | `configmaps`, `serviceaccounts` | `get`, `list`, `watch` |
 | Disruption budgets | `policy` | `poddisruptionbudgets` | `get`, `list`, `watch` |

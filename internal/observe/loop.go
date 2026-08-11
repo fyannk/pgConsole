@@ -95,6 +95,7 @@ var (
 	_ feed[string, ImageCatalogChange]                  = (*ImageCatalogCollector)(nil)
 	_ feed[DatabaseObjectsState, DatabaseObjectsChange] = (*DatabaseObjectsCollector)(nil)
 	_ feed[InfrastructureState, InfrastructureChange]   = (*InfrastructureCollector)(nil)
+	_ feed[string, QuotaChange]                         = (*QuotaCollector)(nil)
 )
 
 // loop is the shared collector engine: seed, publish, follow, fold and

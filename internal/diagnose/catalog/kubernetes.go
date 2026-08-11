@@ -74,9 +74,12 @@ func kubernetesRules() []diagnose.Rule {
 				"check also catches every other container — a plugin sidecar or a " +
 				"pooler crash-looping breaks backups or connections while the " +
 				"instance itself reads healthy.",
-			When:      diagnose.ContainerState{Reasons: []string{"CrashLoopBackOff"}},
-			Link:      "/cluster/pods",
-			LinkLabel: "Pods",
+			When: diagnose.ContainerState{Reasons: []string{"CrashLoopBackOff"}},
+			NextSteps: "Read that container's log tail: the last lines before each exit " +
+				"name the reason the kubelet cannot.",
+			ConsequenceOf: []string{"cnpg-wal-disk-full", "cnpg-postgres-exited", "k8s-container-oom"},
+			Link:          "/cluster/pods",
+			LinkLabel:     "Pods",
 		},
 		{
 			ID:        "k8s-container-oom",
@@ -88,7 +91,10 @@ func kubernetesRules() []diagnose.Rule {
 				"so one sighting is one kill, not a count. For postgres it usually " +
 				"means the memory limit and the configured shared buffers plus work " +
 				"memory do not fit together.",
-			When:      diagnose.ContainerState{Reasons: []string{"OOMKilled"}},
+			When: diagnose.ContainerState{Reasons: []string{"OOMKilled"}},
+			NextSteps: "Raise the memory limit, or shrink what PostgreSQL is configured " +
+				"to use — shared buffers and per-connection work memory are the " +
+				"usual sum that no longer fits.",
 			Link:      "/cluster/pods",
 			LinkLabel: "Pods",
 		},

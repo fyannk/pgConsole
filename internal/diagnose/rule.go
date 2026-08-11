@@ -62,6 +62,12 @@ type Rule struct {
 	// alone are the finding — the rule fires whenever it applies, which
 	// is how "this version is itself the problem" is written.
 	When Condition
+	// NextSteps is the console-pinned guidance carried onto every
+	// finding this rule produces. See Finding.NextSteps.
+	NextSteps string
+	// ConsequenceOf names the checks this rule's findings follow from.
+	// See Finding.ConsequenceOf.
+	ConsequenceOf []string
 	// Link and LinkLabel are where the reader goes next. A condition may
 	// override them per match with something more specific.
 	Link      string
@@ -839,13 +845,16 @@ func evaluateRule(rule Rule, in Input) (Check, []Finding) {
 	findings := make([]Finding, 0, len(matches))
 	for _, match := range matches {
 		finding := Finding{
-			ID:        rule.ID + match.idSuffix,
-			Severity:  rule.Severity,
-			Summary:   rule.Summary,
-			Detail:    rule.Detail,
-			Evidence:  append(match.evidence, pins...),
-			Link:      rule.Link,
-			LinkLabel: rule.LinkLabel,
+			ID:            rule.ID + match.idSuffix,
+			Check:         rule.ID,
+			Severity:      rule.Severity,
+			Summary:       rule.Summary,
+			Detail:        rule.Detail,
+			Evidence:      append(match.evidence, pins...),
+			NextSteps:     rule.NextSteps,
+			ConsequenceOf: rule.ConsequenceOf,
+			Link:          rule.Link,
+			LinkLabel:     rule.LinkLabel,
 		}
 		if match.summary != "" {
 			finding.Summary = match.summary

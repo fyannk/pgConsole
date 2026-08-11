@@ -71,7 +71,8 @@ func postgresRules() []diagnose.Rule {
 			Detail: "A panic crashes the postmaster and forces crash recovery. Read from " +
 				"the container's log while following it, best effort: the count below " +
 				"is a floor and an absence here rules nothing out.",
-			When: diagnose.LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
+			When:          diagnose.LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
+			ConsequenceOf: []string{"cnpg-wal-disk-full"},
 		},
 		{
 			// The threshold is pinned knowledge, like the EOL boundary:

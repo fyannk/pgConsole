@@ -39,7 +39,11 @@ func phaseRules() []diagnose.Rule {
 				"backup recreates the cluster); a bootstrap or replica-creation job " +
 				"exhausted its retries (the job's own logs carry the error); no pod is " +
 				"active at all; or a replica-promotion token does not match this cluster.",
-			When:      diagnose.ClusterPhase{AnyOf: []string{"Cluster is unrecoverable and needs manual intervention"}},
+			When: diagnose.ClusterPhase{AnyOf: []string{"Cluster is unrecoverable and needs manual intervention"}},
+			NextSteps: "Match the quoted reason to its remedy: a failed job means reading " +
+				"that job's own logs, where the underlying error is; missing PVCs " +
+				"mean restoring the cluster from a backup; a wrong promotion token " +
+				"means regenerating it from the source cluster's demotion token.",
 			Link:      "/cluster/overview",
 			LinkLabel: "Cluster overview",
 		},
@@ -162,9 +166,13 @@ func phaseRules() []diagnose.Rule {
 			Detail: "This is the end state of a filling WAL volume — most often WAL " +
 				"archiving having failed for long enough to fill it. The volume must " +
 				"grow, or the archiving failure that filled it must be fixed.",
-			When:      diagnose.ClusterPhase{AnyOf: []string{"Not enough disk space"}},
-			Link:      "/cluster/overview",
-			LinkLabel: "Cluster overview",
+			When: diagnose.ClusterPhase{AnyOf: []string{"Not enough disk space"}},
+			NextSteps: "Grow the affected volume (the storage class must allow expansion), " +
+				"or fix the archiving failure that filled it. The operator restarts " +
+				"PostgreSQL on its own once space exists.",
+			ConsequenceOf: []string{"cnpg-wal-disk-full", "cnpg-wal-archiving-failing"},
+			Link:          "/cluster/overview",
+			LinkLabel:     "Cluster overview",
 		},
 		{
 			// Not a phase but the same kind of claim: operator status

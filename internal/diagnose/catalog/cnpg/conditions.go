@@ -38,7 +38,16 @@ func conditionRules() []diagnose.Rule {
 				"operator then keeps PostgreSQL down for lack of disk. The quoted " +
 				"message is the archiver's own error — typically credentials, the " +
 				"destination, or the plugin sidecar.",
-			When:      diagnose.ClusterCondition{Type: "ContinuousArchiving", Status: "False"},
+			When: diagnose.ClusterCondition{Type: "ContinuousArchiving", Status: "False"},
+			NextSteps: "Read the quoted archiver error: wrong credentials and a bad " +
+				"destination are fixed in the object-store configuration, a " +
+				"non-empty destination needs a different serverName or an emptied " +
+				"folder, and a missing plugin sidecar needs a pod rollout. Archiving " +
+				"must succeed before the WAL volume fills; once it does, the " +
+				"operator archives the backlog on its own.",
+			ConsequenceOf: []string{"wal-archive-not-empty", "object-store-denied",
+				"object-store-forbidden", "object-store-unreachable",
+				"backup-destination-conflict", "cnpg-wal-archive-plugin-missing"},
 			Link:      "/backups",
 			LinkLabel: "Backups",
 		},
