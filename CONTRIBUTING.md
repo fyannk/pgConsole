@@ -195,6 +195,25 @@ scripting disabled, and that tables survive a 375px viewport. It needs
 Node and downloads a pinned Chromium on first run; it needs no cluster.
 Screenshots and a summary land in `artifacts/ui/`.
 
+## Merging
+
+The ruleset on `main` requires every check listed in
+[`ci.yml`](.github/workflows/ci.yml) plus both CodeQL analyses, and
+requires that review threads be resolved. It requires no approvals: the
+gate is the pipeline and the reading, not a rubber stamp. Copilot is
+requested on every pull request automatically; its review is always a
+comment, never an approval, so it cannot approve a change — but an
+unresolved thread it opens does hold the merge until someone answers it.
+
+Dependabot's patch and minor bumps queue themselves through
+[`automerge.yml`](.github/workflows/automerge.yml) and land the moment
+the required checks go green. Majors are left for a person.
+
+The Go version lives in `go.mod` alone. CI reads it with setup-go's
+`go-version-file`, so a toolchain bump is one line, not three. The
+builder image in the `Dockerfile` carries its own pin, which Dependabot
+keeps current.
+
 ## Documentation
 
 User-facing behavior changes must come with doc updates in `web/docs/`.

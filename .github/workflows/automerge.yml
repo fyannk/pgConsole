@@ -1,0 +1,54 @@
+name: Dependabot auto-merge
+
+# Queues Dependabot's routine bumps for merge the moment the required
+# checks on main go green. Nothing merges early: auto-merge only tells
+# GitHub to merge once the branch ruleset is satisfied, so the same gates
+# a human would wait for still apply. Majors are left alone — those want
+# a person to read the changelog.
+
+on:
+  # pull_request_target, not pull_request: a workflow triggered by
+  # Dependabot on pull_request gets a read-only token and could not
+  # enable auto-merge. This job never checks out the pull request's
+  # code, so the elevated token never meets anything the branch wrote.
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  automerge:
+    name: Queue for merge on green
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      # Both are needed by `gh pr merge --auto`: the merge itself, and
+      # the pull request state it writes.
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Read the update Dependabot proposes
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Queue patch and minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Say why a major was left alone
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        run: |
+          echo "::notice::${{ steps.metadata.outputs.dependency-names }} is a major update; merge it by hand."
