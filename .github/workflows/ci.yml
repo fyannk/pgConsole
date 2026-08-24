@@ -22,7 +22,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # The event is part of the key because the daily schedule runs on the same
+  # ref as a push to main. Without it, the two share a group and
+  # cancel-in-progress lets the cron kill a push run mid-flight — including
+  # the release-artifacts job that only push runs reach.
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
