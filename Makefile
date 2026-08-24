@@ -2,7 +2,7 @@ GO ?= go
 IMAGE ?= pgconsole:dev
 GOVULNCHECK_VERSION ?= v1.6.0
 NPM_AUDIT_LEVEL ?= high
-GOLANGCI_LINT_VERSION ?= v2.12.2
+GOLANGCI_LINT_VERSION ?= v2.13.1
 GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 DIST_DIR ?= dist
 ARTIFACT_DIR ?= artifacts
@@ -56,6 +56,7 @@ lint: golangci-lint
 	./hack/check-boilerplate.sh
 	./hack/check-readonly.sh
 	./hack/check-deps.sh
+	./hack/check-go-version.sh
 
 golangci-lint:
 	$(GOLANGCI_LINT) run --timeout 10m ./...

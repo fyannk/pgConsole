@@ -38,7 +38,7 @@ go build ./... && go vet ./... && go test ./... -race -count=1
 
 must pass, and so must `make lint` and the boundary scans in
 [`hack/`](hack) (`check-readonly.sh`, `check-deps.sh`,
-`check-boilerplate.sh`).
+`check-boilerplate.sh`, `check-go-version.sh`).
 
 ## Repository invariants
 
@@ -211,10 +211,21 @@ Dependabot's patch and minor bumps queue themselves through
 [`automerge.yml`](.github/workflows/automerge.yml) and land the moment
 the required checks go green. Majors are left for a person.
 
-The Go version lives in `go.mod` alone. CI reads it with setup-go's
-`go-version-file`, so a toolchain bump is one line, not three. The
-builder image in the `Dockerfile` carries its own pin, which Dependabot
-keeps current.
+The Go version lives in `go.mod`. CI reads it with setup-go's
+`go-version-file`, so a toolchain bump is one line rather than one per
+workflow. The builder image in the `Dockerfile` has to carry the version
+too — an image tag cannot be read from a module file — and Dependabot
+moves that tag on its own schedule while nothing moves `go.mod` with it.
+[`hack/check-go-version.sh`](hack/check-go-version.sh) fails the build
+when the two disagree, because a release whose binaries and container
+were built by different toolchains is not a release the attestations can
+describe as one build.
+
+The linter version lives in the `Makefile`, which is what a contributor
+runs locally; CI reads it from there rather than carrying its own copy.
+It moves with the toolchain — a Go release is not lintable until
+staticcheck understands its syntax, so bumping one without the other
+fails the build rather than skipping the analysis.
 
 ## Documentation
 

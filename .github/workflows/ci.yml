@@ -16,9 +16,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GOLANGCI_LINT_VERSION: v2.12.2
-
 jobs:
   test:
     name: Build and test
@@ -40,9 +37,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Read the pinned linter version
+        id: linter
+        run: |
+          version=$(sed -n 's/^GOLANGCI_LINT_VERSION ?= //p' Makefile)
+          test -n "$version" || { echo "no GOLANGCI_LINT_VERSION in Makefile" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          version: ${{ steps.linter.outputs.version }}
           args: --config .golangci.yml --timeout 10m
       - name: Repository checks
         run: |
@@ -51,6 +54,7 @@ jobs:
           ./hack/check-boilerplate.sh
           ./hack/check-readonly.sh
           ./hack/check-deps.sh
+          ./hack/check-go-version.sh
 
   vuln:
     name: Vulnerability scan
