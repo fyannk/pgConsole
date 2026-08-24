@@ -197,13 +197,15 @@ Screenshots and a summary land in `artifacts/ui/`.
 
 ## Merging
 
-The ruleset on `main` requires every check listed in
-[`ci.yml`](.github/workflows/ci.yml) plus both CodeQL analyses, and
-requires that review threads be resolved. It requires no approvals: the
-gate is the pipeline and the reading, not a rubber stamp. Copilot is
-requested on every pull request automatically; its review is always a
-comment, never an approval, so it cannot approve a change — but an
-unresolved thread it opens does hold the merge until someone answers it.
+The ruleset on `main` requires every job
+[`ci.yml`](.github/workflows/ci.yml) runs on a pull request — the
+release job is push-only and is not among them — plus both CodeQL
+analyses and the code-scanning result, and requires that review threads
+be resolved. It requires no approvals: the gate is the pipeline and the
+reading, not a rubber stamp. Copilot is requested on every pull request
+automatically; its review is always a comment, never an approval, so it
+cannot approve a change — but an unresolved thread it opens does hold
+the merge until someone answers it.
 
 Dependabot's patch and minor bumps queue themselves through
 [`automerge.yml`](.github/workflows/automerge.yml) and land the moment
