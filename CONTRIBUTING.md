@@ -207,6 +207,15 @@ automatically; its review is always a comment, never an approval, so it
 cannot approve a change — but an unresolved thread it opens does hold
 the merge until someone answers it.
 
+Branches need not be up to date with `main` to merge. Requiring that
+would catch the case where two pull requests pass alone and break
+together, but nothing rebases a stale branch on its own: auto-merge only
+waits and merges, and Dependabot refreshes a branch when its manifest
+conflicts, not when `main` moves. The requirement would therefore trade
+a rare class of conflict for a queue that stalls on every merge.
+`ci.yml` runs on pushes to `main` as well, so a conflict that slips
+through surfaces there within minutes.
+
 Dependabot's patch and minor bumps queue themselves through
 [`automerge.yml`](.github/workflows/automerge.yml) and land the moment
 the required checks go green. Majors are left for a person.
