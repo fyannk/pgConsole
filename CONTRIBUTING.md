@@ -181,6 +181,17 @@ runtime, `test-multiarch` for both release architectures, `test-ui` for the
 console in a browser, and `test-e2e` for the pinned kind + CloudNativePG
 journey.
 
+`make test-fuzz` fuzzes the three parsers on the trust boundary, each
+against the invariant it owns rather than against "does not panic":
+`authz.ParseLevel` must stay a closed set and admit nothing that is not
+exactly a grantable level, `identity.Extractor` must return a bounded,
+trimmed, control-character-free user or none at all, and `redact.Safe`
+must emit a category and never the cause. It runs in `make check` and on
+every pull request at `FUZZ_TIME` (5s per target) — a smoke run, not a
+campaign. Raise it when chasing something: `FUZZ_TIME=10m make
+test-fuzz`. A failing input is written to `testdata/fuzz/` beside the
+target and becomes a regression case; commit it with the fix.
+
 `make audit` covers the two npm trees (`web/` and `hack/uitest/`) the way
 `make vuln` covers the Go one, resolving advisories from the lockfiles
 without installing either. It runs through

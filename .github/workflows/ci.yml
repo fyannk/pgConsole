@@ -41,7 +41,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: make build test test-race
+      - run: make build test test-fuzz test-race
 
   lint:
     name: Lint and static analysis
