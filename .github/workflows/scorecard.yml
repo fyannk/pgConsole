@@ -5,9 +5,11 @@ name: Scorecard
 # workflow patterns — and files what it finds as code-scanning alerts. It is
 # the check that notices when a later change quietly undoes one of them.
 on:
-  # Re-run when a ruleset changes, so a weakened branch protection is visible
-  # immediately rather than at the next scheduled run.
-  branch_protection_rule:
+  # No branch_protection_rule trigger. It fires for classic branch protection
+  # only, and this repository's protection is a ruleset — editing the ruleset
+  # starts nothing, so the trigger would be dead config claiming a coverage it
+  # does not have. There is no repository_ruleset workflow event to use
+  # instead; the weekly run and the push runs are what catch posture drift.
   schedule:
     - cron: '45 5 * * 2'
   push:
@@ -17,7 +19,10 @@ on:
 permissions: read-all
 
 concurrency:
-  group: scorecard-${{ github.ref }}
+  # The event is part of the key because the schedule and a push to main run
+  # on the same ref. Without it they share a group and cancel-in-progress
+  # lets one kill the other.
+  group: scorecard-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:

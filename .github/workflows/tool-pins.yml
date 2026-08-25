@@ -43,10 +43,14 @@ jobs:
       - name: Compare each pin against the module proxy
         id: pins
         run: |
+          # Redirect rather than pipe to tee: PIPESTATUS is a bash array, and
+          # this step would silently start reading the wrong exit code if the
+          # runner's default shell ever changed.
           set +e
-          ./hack/check-tool-pins.sh --bump | tee report.txt
-          rc=${PIPESTATUS[0]}
+          ./hack/check-tool-pins.sh --bump > report.txt 2>&1
+          rc=$?
           set -e
+          cat report.txt
           # 0 is everything current, 1 is drift, anything else is the script
           # failing to answer — which must not be read as "no drift".
           case "$rc" in

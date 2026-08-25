@@ -232,10 +232,11 @@ Dependabot's patch and minor bumps queue themselves through
 [`automerge.yml`](.github/workflows/automerge.yml) and land the moment
 the required checks go green. Majors are left for a person.
 
-It merges on an allowlist — `semver-patch` or `semver-minor`, named — and
-not on "anything that is not a major". An update type this workflow has
-not seen, or an empty one, closes the gate rather than arming a merge
-nobody chose.
+It merges on an allowlist — `version-update:semver-patch` or
+`version-update:semver-minor`, named in full as
+`dependabot/fetch-metadata` reports them — and not on "anything that is
+not a major". An update type this workflow has not seen, or an empty one,
+closes the gate rather than arming a merge nobody chose.
 
 That workflow merges with `AUTOMERGE_TOKEN`, a repository secret holding
 a fine-grained token with Contents and Pull requests set to read and
