@@ -229,8 +229,8 @@ a fine-grained token with Contents and Pull requests set to read and
 write on this repository. It is not decoration: a push made with the
 workflow's own `GITHUB_TOKEN` starts no workflow run, so a bump merged
 that way would land on `main` with the pipeline never running against
-the merged result — including the release and supply-chain job, which no
-pull request reaches because it is gated on `event_name == push`.
+the merged result — including the `release-artifacts` job, which no pull
+request reaches because it carries `if: github.event_name == 'push'`.
 Merging under a token that belongs to a person makes the merge an
 ordinary push. If the secret is missing or expired the workflow fails
 loudly and the bump waits for a human, rather than merging unobserved.
