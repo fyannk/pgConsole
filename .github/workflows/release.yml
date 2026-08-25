@@ -64,6 +64,10 @@ jobs:
         with:
           fetch-depth: 0
           ref: refs/tags/${{ steps.release.outputs.tag }}
+          # The release steps read the tag locally and publish with GH_TOKEN;
+          # none of them pushes, so the checkout credential is never used and
+          # need not survive into later steps.
+          persist-credentials: false
 
       - name: Verify tag and successful CI
         id: verified
