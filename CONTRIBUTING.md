@@ -253,6 +253,24 @@ It moves with the toolchain — a Go release is not lintable until
 staticcheck understands its syntax, so bumping one without the other
 fails the build rather than skipping the analysis.
 
+Both that pin and `GOVULNCHECK_VERSION` are invisible to Dependabot,
+which reads manifests — `go.mod`, the lockfiles, the `Dockerfile`,
+action refs — and not `Makefile` variables.
+[`hack/check-tool-pins.sh`](hack/check-tool-pins.sh) compares them
+against the module proxy, and
+[`tool-pins.yml`](.github/workflows/tool-pins.yml) runs it weekly and
+opens a pull request when one is behind. It proposes only; the required
+checks decide, which is the point — a linter bump can fail the build and
+a scanner bump can report something new.
+
+The script is deliberately not in `make check`. It needs the network,
+and it would turn CI red the day upstream tags a release, which has
+nothing to do with the change under test. `ENVTEST_K8S_VERSION`,
+`SETUP_ENVTEST_VERSION`, and the Node pins in `ci.yml` stay
+hand-maintained: envtest tracks what assets exist rather than a
+module's tags, and the Node pin names an LTS line on purpose. The
+script says so in a comment, so the omission reads as a decision.
+
 ## Documentation
 
 User-facing behavior changes must come with doc updates in `web/docs/`.
