@@ -13,13 +13,10 @@ on:
 
 # Publishing runs only for trusted tag pushes or maintainer dispatches and only
 # after ordinary CI succeeds for the exact annotated tag commit.
+# Restrictive at the top so anything added later inherits nothing. The one
+# job that publishes asks for what it needs, where it needs it.
 permissions:
-  actions: read
-  artifact-metadata: write
-  attestations: write
-  contents: write
-  id-token: write
-  packages: write
+  contents: read
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name || github.run_id }}
@@ -31,6 +28,13 @@ env:
 jobs:
   publish:
     name: Publish release
+    permissions:
+      actions: read # read the CI run for the exact tag commit
+      contents: write # create the release
+      packages: write # push the image to ghcr
+      id-token: write # OIDC, for keyless signing
+      attestations: write # publish the build attestation
+      artifact-metadata: write # and its metadata
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
