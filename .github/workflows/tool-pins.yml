@@ -75,6 +75,19 @@ jobs:
           git config user.name "$login"
           git config user.email "${uid}+${login}@users.noreply.github.com"
 
+          # actions/checkout fetches one branch, so origin/$BRANCH does not
+          # exist locally and --force-with-lease has no baseline to compare
+          # against: it rejects with "stale info" from the second run on.
+          # Fetch the branch when it exists and lease against exactly what
+          # was fetched; when it does not, there is nothing to force.
+          if git fetch -q origin \
+               "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null
+          then
+            lease="--force-with-lease=$BRANCH:$(git rev-parse "refs/remotes/origin/$BRANCH")"
+          else
+            lease=""
+          fi
+
           git checkout -B "$BRANCH"
           git add Makefile
           git commit -F - <<EOF
@@ -86,9 +99,10 @@ jobs:
           Makefile variables, which no manifest scanner reads.
           EOF
 
-          # force-with-lease: the branch belongs to this workflow, but a
-          # blind force would still discard a hand commit made on top.
-          git push --force-with-lease origin "$BRANCH"
+          # The lease is what keeps a hand commit made on this branch from
+          # being discarded: if the remote moved since the fetch above, the
+          # push is rejected rather than clobbering it.
+          git push $lease origin "$BRANCH"
 
           # An open pull request just took the new commit; only open one when
           # there is none.

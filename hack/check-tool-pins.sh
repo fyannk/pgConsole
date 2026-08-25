@@ -47,10 +47,12 @@ while IFS=' ' read -r var module; do
   fi
 
   # Stable tags only: a release candidate is not something to bump into.
+  # No sort: `go list -m -versions` already returns semver order, and
+  # `sort -V` is a GNU extension this script would otherwise need on a
+  # macOS contributor's machine.
   latest=$(go list -m -versions "$module" 2>/dev/null \
     | tr ' ' '\n' \
     | grep -e '^v[0-9][0-9.]*$' \
-    | sort -V \
     | tail -1)
   if [ -z "$latest" ]; then
     echo "could not resolve versions for $module" >&2
@@ -65,7 +67,21 @@ while IFS=' ' read -r var module; do
   echo "$var $current -> $latest"
   status=1
   if [ "$bump" = true ]; then
-    sed -i "s|^$var ?= $current\$|$var ?= $latest|" Makefile
+    # Not `sed -i`: the in-place flag differs between GNU and BSD, and a
+    # substitution that silently matches nothing would leave the Makefile
+    # untouched while the caller was told there was drift — which reaches
+    # the workflow as a commit with nothing staged. Rewrite through a
+    # temporary file and refuse to continue unless the new value is there.
+    tmp="Makefile.pins.$$"
+    sed "s|^$var ?= $current\$|$var ?= $latest|" Makefile > "$tmp"
+    if ! grep -q "^$var ?= $latest\$" "$tmp"; then
+      rm -f "$tmp"
+      echo "failed to rewrite $var in Makefile" >&2
+      exit 2
+    fi
+    # cat rather than mv: keeps the original file's mode and inode.
+    cat "$tmp" > Makefile
+    rm -f "$tmp"
   fi
 done <<EOF
 $tools
