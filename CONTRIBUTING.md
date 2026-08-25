@@ -238,9 +238,13 @@ It merges on an allowlist — `version-update:semver-patch` or
 not a major". An update type this workflow has not seen, or an empty one,
 closes the gate rather than arming a merge nobody chose.
 
-That workflow merges with `AUTOMERGE_TOKEN`, a repository secret holding
-a fine-grained token with Contents and Pull requests set to read and
-write on this repository. It is not decoration: a push made with the
+That workflow merges with `AUTOMERGE_TOKEN`, a fine-grained token with
+Contents and Pull requests set to read and write on this repository. It
+has to be registered **twice, in two different stores**, because the two
+workflows that use it are triggered differently: `automerge.yml` runs on
+`pull_request` and a Dependabot-triggered run sees only **Dependabot**
+secrets, while `tool-pins.yml` runs on a schedule and needs the same
+token as an ordinary **Actions** secret. It is not decoration: a push made with the
 workflow's own `GITHUB_TOKEN` starts no workflow run, so a bump merged
 that way would land on `main` with the pipeline never running against
 the merged result — including the `release-artifacts` job, which no pull
@@ -290,6 +294,15 @@ should be visible at once rather than at the next scheduled run. It
 audits what this repository does to itself: pinned actions, token
 permissions, release signing, dangerous workflow patterns. Findings land
 in code scanning beside the CodeQL ones.
+
+Every `actions/checkout` in this repository sets `persist-credentials:
+false` except the one in `tool-pins.yml`, which pushes the branch it
+proposes. The default leaves the job's token in `.git/config` for every
+later step to reach; nothing else here pushes, so nothing else needs it.
+`automerge.yml` runs on `pull_request` rather than `pull_request_target`
+for the same reason — it does not need the base repository's context, so
+it does not ask for it, and cannot be turned into a credential leak by a
+later change that adds a checkout.
 
 ## Documentation
 

@@ -7,11 +7,19 @@ name: Dependabot auto-merge
 # a person to read the changelog.
 
 on:
-  # pull_request_target, not pull_request: a workflow triggered by
-  # Dependabot on pull_request gets a read-only token and could not
-  # enable auto-merge. This job never checks out the pull request's
-  # code, so the elevated token never meets anything the branch wrote.
-  pull_request_target:
+  # pull_request, not pull_request_target. The earlier reasoning for the
+  # latter — that a Dependabot pull_request run gets a read-only token and
+  # could not enable auto-merge — stopped applying once the merge moved to
+  # AUTOMERGE_TOKEN. What remains is that pull_request_target runs in the
+  # base repository's context with its secrets available, and it is one
+  # careless `actions/checkout` of the head ref away from running a
+  # contributor's code with them. This workflow does not need that context,
+  # so it does not ask for it.
+  #
+  # The cost: AUTOMERGE_TOKEN has to be a *Dependabot* secret, because a
+  # Dependabot-triggered run sees only those. tool-pins.yml runs on a
+  # schedule and needs the same token as an ordinary Actions secret.
+  pull_request:
     types:
       - opened
       - reopened
@@ -57,8 +65,10 @@ jobs:
           steps.metadata.outputs.update-type == 'version-update:semver-minor'
         run: |
           test -n "$GH_TOKEN" || {
-            echo "::error::AUTOMERGE_TOKEN is unset. Auto-merge is off until" \
-                 "it is set; see CONTRIBUTING.md. Merge this by hand." >&2
+            echo "::error::AUTOMERGE_TOKEN is unset. It must be a Dependabot" \
+                 "secret, not an Actions one: this workflow runs on" \
+                 "pull_request, and a Dependabot-triggered run sees only" \
+                 "Dependabot secrets. See CONTRIBUTING.md." >&2
             exit 1
           }
           gh pr merge --auto --squash "$PR_URL"
