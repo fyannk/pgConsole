@@ -232,6 +232,11 @@ Dependabot's patch and minor bumps queue themselves through
 [`automerge.yml`](.github/workflows/automerge.yml) and land the moment
 the required checks go green. Majors are left for a person.
 
+It merges on an allowlist — `semver-patch` or `semver-minor`, named — and
+not on "anything that is not a major". An update type this workflow has
+not seen, or an empty one, closes the gate rather than arming a merge
+nobody chose.
+
 That workflow merges with `AUTOMERGE_TOKEN`, a repository secret holding
 a fine-grained token with Contents and Pull requests set to read and
 write on this repository. It is not decoration: a push made with the
@@ -276,6 +281,14 @@ nothing to do with the change under test. `ENVTEST_K8S_VERSION`,
 hand-maintained: envtest tracks what assets exist rather than a
 module's tags, and the Node pin names an LTS line on purpose. The
 script says so in a comment, so the omission reads as a decision.
+
+[`scorecard.yml`](.github/workflows/scorecard.yml) runs OpenSSF
+Scorecard weekly, on pushes to `main`, and whenever a ruleset changes —
+that last trigger is the point, because a weakened branch protection
+should be visible at once rather than at the next scheduled run. It
+audits what this repository does to itself: pinned actions, token
+permissions, release signing, dangerous workflow patterns. Findings land
+in code scanning beside the CodeQL ones.
 
 ## Documentation
 

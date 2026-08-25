@@ -48,8 +48,13 @@ jobs:
       # release and supply-chain job included, which no pull request
       # reaches. Merging under a token that belongs to a person makes the
       # merge an ordinary push and CI behaves as it does for anyone else.
+      # An allowlist rather than "not major": if update-type is ever empty or
+      # carries a value this workflow has not seen, the gate closes instead
+      # of arming a merge nobody chose. The negated form did the opposite.
       - name: Queue patch and minor updates
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        if: >-
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
         run: |
           test -n "$GH_TOKEN" || {
             echo "::error::AUTOMERGE_TOKEN is unset. Auto-merge is off until" \
@@ -61,7 +66,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
 
-      - name: Say why a major was left alone
-        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+      - name: Say why the bump was left alone
+        if: >-
+          steps.metadata.outputs.update-type != 'version-update:semver-patch' &&
+          steps.metadata.outputs.update-type != 'version-update:semver-minor'
         run: |
-          echo "::notice::${{ steps.metadata.outputs.dependency-names }} is a major update; merge it by hand."
+          echo "::notice::${{ steps.metadata.outputs.dependency-names }} has update-type '${{ steps.metadata.outputs.update-type }}', which is outside the auto-merge allowlist. Merge it by hand."
