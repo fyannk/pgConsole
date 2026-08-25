@@ -8,10 +8,10 @@ on:
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
+# Restrictive at the top; only deploy publishes, and only it is granted the
+# tokens to do so. build just produces an artifact.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -46,6 +46,9 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: build
+    permissions:
+      pages: write # publish the built site
+      id-token: write # OIDC, which is how deploy-pages authenticates
     runs-on: ubuntu-latest
     environment:
       name: github-pages
