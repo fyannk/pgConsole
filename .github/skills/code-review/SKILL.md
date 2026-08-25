@@ -5,9 +5,12 @@ license: Apache-2.0
 ---
 
 pgConsole is a read-only Kubernetes console for CloudNativePG clusters. It
-runs with in-cluster ServiceAccount credentials against production
-databases, so most of what matters in a review here is not style — it is
-whether a change quietly widens a boundary the architecture depends on.
+observes them through the Kubernetes API with in-cluster ServiceAccount
+credentials. It never connects to PostgreSQL and holds no database
+credential — invariant 2 forbids SQL drivers in the module graph at all.
+What it does hold is a live view of production clusters, so most of what
+matters in a review here is not style: it is whether a change quietly
+widens a boundary the architecture depends on.
 
 `make lint` already enforces style (`gofmt`, `staticcheck`, `errcheck`,
 `gosec`, `revive`, `godox`, and the rest of `.golangci.yml`). Do not spend
@@ -53,11 +56,24 @@ check whether `go.sum` movement is confined to tooling or reaches
 ### 3. Authorization is asserted, never decided
 
 Route admission comes from the trusted proxy's `X-PgToolBox-Level` header.
-There is no SubjectAccessReview and no cluster-scoped grant. A missing,
-empty, or unknown level must reach **nothing** — every content route is
-gated and there is no ungated baseline. If a change introduces a default,
-a fallback tier, or a route registered outside the gate, that is a
-security change, not a convenience. The fail-safe direction is closed.
+There is no SubjectAccessReview. A missing, empty, or unknown level must
+reach **nothing** — every content route is gated and there is no ungated
+baseline. If a change introduces a default, a fallback tier, or a route
+registered outside the gate, that is a security change, not a
+convenience. The fail-safe direction is closed. Note that setting
+`TRUSTED_LEVEL_HEADER` empty closes the console rather than opening it.
+
+The Role is namespaced in every mode but one, and the exception is narrow
+and opt-in: `ALLOW_CLUSTER_CATALOGS=true` plus
+[`deploy/cluster-catalog-role.yaml`](../../../deploy/cluster-catalog-role.yaml)
+grants `get` — never `list`, never `watch` — on `clusterimagecatalogs`,
+because a `Cluster` may draw its image from a cluster-scoped catalog.
+`hack/check-readonly.sh` enforces that no other manifest carries a
+`ClusterRole` and that this one grants nothing beyond that `get`. Do not
+flag that grant as a violation; **do** flag anything that widens it — a
+second `ClusterRole`, a `list` or `watch` added to it, or a cluster-scoped
+read reached without the flag. Any further cluster-scoped authority is a
+non-goal.
 
 ### 4. Uncertainty is preserved
 

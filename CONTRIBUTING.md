@@ -69,9 +69,15 @@ file said the opposite of the code for several releases.
    justification, a licence check, and an SBOM entry.
 3. **The console decides no authorization of its own.** Route admission is
    the trusted proxy's asserted `X-PgToolBox-Level`; there is no
-   SubjectAccessReview and no cluster-scoped grant. A missing, empty, or
-   unknown level reaches **nothing** — every content route is gated and
-   there is no ungated baseline. The fail-safe direction is closed.
+   SubjectAccessReview. A missing, empty, or unknown level reaches
+   **nothing** — every content route is gated and there is no ungated
+   baseline. The fail-safe direction is closed. The Role is namespaced in
+   every mode but one: `ALLOW_CLUSTER_CATALOGS=true` plus
+   [`deploy/cluster-catalog-role.yaml`](deploy/cluster-catalog-role.yaml)
+   grants `get` — never `list`, never `watch` — on `clusterimagecatalogs`,
+   and `hack/check-readonly.sh` enforces that no other manifest carries a
+   `ClusterRole`. Any further cluster-scoped authority is a non-goal;
+   [`AGENTS.md`](AGENTS.md) describes the exception in full.
 4. **Preserve uncertainty.** No layer may turn a broken watch, a forbidden
    response, or missing data into a healthy, current cluster: honest values
    are `unknown` and `stale`.
