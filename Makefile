@@ -2,13 +2,17 @@ GO ?= go
 IMAGE ?= pgconsole:dev
 GOVULNCHECK_VERSION ?= v1.7.0
 NPM_AUDIT_LEVEL ?= high
+# Per target, and matching pgObjectStoreViewer. Short on purpose: this is a
+# smoke run on every pull request, not a fuzzing campaign. Raise it locally
+# when chasing something — FUZZ_TIME=10m make test-fuzz.
+FUZZ_TIME ?= 5s
 GOLANGCI_LINT_VERSION ?= v2.13.1
 GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 DIST_DIR ?= dist
 ARTIFACT_DIR ?= artifacts
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build clean dev-up test test-race test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln audit check docs package docker-build supply-chain supply-chain-published release-check
+.PHONY: build clean dev-up test test-race test-fuzz test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln audit check docs package docker-build supply-chain supply-chain-published release-check
 
 build:
 	mkdir -p bin
@@ -25,6 +29,15 @@ test:
 
 test-race:
 	$(GO) test -race ./...
+
+# The three trust-boundary parsers, each fuzzed against the invariant it
+# owns rather than against "does not panic": the level parser must stay
+# closed, the identity extractor must return a bounded and sanitised user,
+# and the redaction boundary must emit a category and never a cause.
+test-fuzz:
+	$(GO) test ./internal/authz -run '^$$' -fuzz '^FuzzParseLevel$$' -fuzztime=$(FUZZ_TIME) -parallel=1
+	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzExtractorFromRequest$$' -fuzztime=$(FUZZ_TIME) -parallel=1
+	$(GO) test ./internal/redact -run '^$$' -fuzz '^FuzzSafe$$' -fuzztime=$(FUZZ_TIME) -parallel=1
 
 ENVTEST_K8S_VERSION ?= 1.34.1
 SETUP_ENVTEST_VERSION ?= release-0.24
@@ -75,7 +88,7 @@ audit:
 	./hack/check-npm-audit.sh web $(NPM_AUDIT_LEVEL)
 	./hack/check-npm-audit.sh hack/uitest $(NPM_AUDIT_LEVEL)
 
-check: lint test test-race vuln audit
+check: lint test test-fuzz test-race vuln audit
 
 docs:
 	cd web && npm ci && npm run typecheck && npm run build
