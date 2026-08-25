@@ -62,7 +62,7 @@ small set of explicitly enabled day-2 actions.
 
 pgConsole reads only in-cluster ServiceAccount credentials, so the development
 path runs it inside a disposable kind cluster. You need Docker, kind, kubectl,
-Go 1.26+, and `make`:
+Go 1.26.6+, and `make`:
 
 ```bash
 git clone https://github.com/fyannk/pgConsole.git

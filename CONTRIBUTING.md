@@ -13,7 +13,9 @@ violating something the linters cannot see.
 
 ## Development environment
 
-- Go 1.26+ (the module pins the toolchain in [`go.mod`](go.mod)).
+- Go 1.26.6+ (the floor and the toolchain both live in
+  [`go.mod`](go.mod); see the note there for why the floor is not the
+  1.26.4 the module graph derives).
 - `make`, `docker` (or `podman`).
 - For the Docusaurus site: Node ≥ 20 and `npm` (CI uses Node 22).
 

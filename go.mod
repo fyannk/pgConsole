@@ -1,6 +1,11 @@
 module github.com/fyannk/pgConsole
 
-go 1.26.4
+// The module graph derives 1.26.4 (cloudnative-pg/api requires it). The
+// floor is held above that deliberately: 1.26.4 and 1.26.5 carry the
+// standard-library vulnerabilities in GO-2026-6218, -6091, -6090, -6089,
+// -5972, and -5026, which this code reaches. Building against them must
+// fail rather than produce a binary govulncheck would reject.
+go 1.26.6
 
 toolchain go1.27.0
 
