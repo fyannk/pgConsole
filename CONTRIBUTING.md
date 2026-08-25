@@ -224,6 +224,17 @@ Dependabot's patch and minor bumps queue themselves through
 [`automerge.yml`](.github/workflows/automerge.yml) and land the moment
 the required checks go green. Majors are left for a person.
 
+That workflow merges with `AUTOMERGE_TOKEN`, a repository secret holding
+a fine-grained token with Contents and Pull requests set to read and
+write on this repository. It is not decoration: a push made with the
+workflow's own `GITHUB_TOKEN` starts no workflow run, so a bump merged
+that way would land on `main` with the pipeline never running against
+the merged result — including the release and supply-chain job, which no
+pull request reaches because it is gated on `event_name == push`.
+Merging under a token that belongs to a person makes the merge an
+ordinary push. If the secret is missing or expired the workflow fails
+loudly and the bump waits for a human, rather than merging unobserved.
+
 The Go version lives in `go.mod`. CI reads it with setup-go's
 `go-version-file`, so a toolchain bump is one line rather than one per
 workflow. The builder image in the `Dockerfile` has to carry the version
