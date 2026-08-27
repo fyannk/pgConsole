@@ -9,6 +9,48 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-27
+
+A rebuild, not a behaviour change. Nothing about how the console works is
+different from 0.6.0; the binaries and the container are built by a Go
+without eight standard-library vulnerabilities that 0.6.0's were built
+with.
+
+### Security
+
+- **Rebuilt on Go 1.27.0.** The 0.6.0 artifacts were built with Go
+  1.26.5, and `govulncheck` reports the published binary as affected by
+  eight standard-library advisories disclosed after that release:
+  [GO-2026-6218](https://pkg.go.dev/vuln/GO-2026-6218) (`net/url`),
+  [GO-2026-6091](https://pkg.go.dev/vuln/GO-2026-6091) (`html/template`),
+  [GO-2026-6090](https://pkg.go.dev/vuln/GO-2026-6090) (`crypto/tls`),
+  [GO-2026-6089](https://pkg.go.dev/vuln/GO-2026-6089) and
+  [GO-2026-5026](https://pkg.go.dev/vuln/GO-2026-5026) (`net/http`),
+  [GO-2026-6088](https://pkg.go.dev/vuln/GO-2026-6088) (`encoding/xml`),
+  [GO-2026-5972](https://pkg.go.dev/vuln/GO-2026-5972) (`encoding/asn1`),
+  and [GO-2026-5942](https://pkg.go.dev/vuln/GO-2026-5942) (`net`). The
+  console parses forwarded headers, serves HTML templates, and speaks TLS
+  to the Kubernetes API, so several of these are on paths it uses. The
+  scan shipped with 0.6.0 was clean when it ran — every one of these was
+  disclosed afterwards.
+
+- **The Go version can no longer drift.** It lives in `go.mod` alone, CI
+  reads it from there, and `hack/check-go-version.sh` fails the build if
+  the container's builder image disagrees. The language floor is 1.26.6,
+  above what the module graph derives, so building from source with
+  `GOTOOLCHAIN=local` cannot reproduce a vulnerable binary either.
+
+- **Dependency updates** merged since 0.6.0: `golang.org/x/text`,
+  `golang.org/x/term`, the pinned GitHub Actions, and the builder image.
+
+### Changed
+
+- Nothing user-facing. The remaining commits are CI and repository
+  tooling: auto-merge gated on the full pipeline, a weekly watcher for
+  the tool versions Dependabot cannot see, OpenSSF Scorecard, fuzz
+  targets on the authorization, identity, and redaction parsers, and a
+  code-review skill carrying the repository's invariants.
+
 ## [0.6.0] - 2026-08-11
 
 ### Added
