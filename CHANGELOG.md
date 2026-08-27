@@ -12,9 +12,10 @@ period. Pin an exact image tag and read the notes before upgrading.
 ## [0.6.1] - 2026-08-27
 
 A rebuild, not a behaviour change. Nothing about how the console works is
-different from 0.6.0; the binaries and the container are built by a Go
-without eight standard-library vulnerabilities that 0.6.0's were built
-with.
+different from 0.6.0. What changed is the toolchain underneath: the
+binaries and the container are now built with Go 1.27.0, which does not
+carry the eight standard-library vulnerabilities that the Go 1.26.5 used
+for 0.6.0 does.
 
 ### Security
 
