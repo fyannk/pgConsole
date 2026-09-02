@@ -9,6 +9,21 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Diagnostics honour staleness on every source.** The cluster, pod,
+  pooler-pod, event and infrastructure snapshots all carry a stale flag
+  when their collector loses contact, but only the backup and
+  database-object checks consulted it. A phase, condition, primary-move,
+  container-state or event check — and the quota, scheduling, image-pull
+  and volume detectors — could report "clear" from a snapshot the
+  console already knew was stale, or quote stale evidence as current.
+  Every such check now reports "could not run" and names staleness as
+  the reason, matching what the backup checks always did. Supporting
+  evidence read from a stale snapshot (the instance shortfall beside a
+  quota finding, the provisioner event beside an unbound claim) is left
+  out rather than quoted.
+
 ## [0.6.1] - 2026-08-27
 
 A rebuild, not a behaviour change. Nothing about how the console works is

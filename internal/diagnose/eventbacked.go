@@ -83,8 +83,8 @@ func (quotaDetector) Describes() string {
 }
 
 func (d quotaDetector) Detect(in Input) ([]Finding, string) {
-	if !in.HasEvents {
-		return nil, "events have not been observed yet"
+	if reason := eventsUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	matched := warningEvents(in.Events.Events, "FailedCreate", "FailedScheduling")
 	var quota []observe.EventFacts
@@ -124,7 +124,10 @@ func (d quotaDetector) Detect(in Input) ([]Finding, string) {
 // both are known. It is context on a refusal, never a finding of its own:
 // a cluster can be mid-scale for entirely ordinary reasons.
 func instanceShortfall(in Input) (Evidence, bool) {
-	if !in.HasCluster || in.Cluster.Cluster.DesiredInstances == nil || !in.HasPods {
+	// Both counts must be current: a stale roster or a stale declared
+	// count would state a shortfall the cluster may no longer have.
+	if !in.HasCluster || in.Cluster.Stale || in.Cluster.Cluster.DesiredInstances == nil ||
+		podsUnavailable(in) != "" {
 		return Evidence{}, false
 	}
 	desired := *in.Cluster.Cluster.DesiredInstances
@@ -151,8 +154,8 @@ func (schedulingDetector) Describes() string {
 }
 
 func (d schedulingDetector) Detect(in Input) ([]Finding, string) {
-	if !in.HasEvents {
-		return nil, "events have not been observed yet"
+	if reason := eventsUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	var unplaceable []observe.EventFacts
 	for _, event := range warningEvents(in.Events.Events, "FailedScheduling") {
@@ -202,8 +205,8 @@ func (imagePullDetector) Describes() string {
 }
 
 func (d imagePullDetector) Detect(in Input) ([]Finding, string) {
-	if !in.HasPods {
-		return nil, "instance pods have not been observed yet"
+	if reason := podsUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	var findings []Finding
 	for _, pod := range in.Pods.Pods {
@@ -256,8 +259,8 @@ func (volumeDetector) Describes() string {
 }
 
 func (d volumeDetector) Detect(in Input) ([]Finding, string) {
-	if !in.HasInfrastructure {
-		return nil, "the cluster's volumes have not been observed yet"
+	if reason := infrastructureUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	var unbound []observe.VolumeFacts
 	for _, volume := range in.Infrastructure.Volumes {
@@ -287,7 +290,7 @@ func (d volumeDetector) Detect(in Input) ([]Finding, string) {
 		})
 	}
 	// The claim states that it is not bound; the event states why.
-	if in.HasEvents {
+	if eventsUnavailable(in) == "" {
 		for _, event := range warningEvents(in.Events.Events,
 			"ProvisioningFailed", "FailedBinding", "VolumeBindingFailed") {
 			finding.Evidence = append(finding.Evidence, eventEvidence(event))
