@@ -121,16 +121,26 @@ func (c *Client) Fetch(ctx context.Context) (observe.ClusterState, error) {
 	seed := c.seedRecord(scopeCluster)
 	seed.add(obj.Object)
 	seed.commit(true)
-	return observe.ClusterState{Facts: facts, ResourceVersion: obj.GetResourceVersion()}, nil
+	return observe.ClusterState{Facts: facts}, nil
 }
 
 // Watch starts a watch scoped to the configured name by field selector.
 // The watch context is not bounded by the request timeout: a watch is
 // long-lived by design and ends with the connection or the caller.
-func (c *Client) Watch(ctx context.Context, fromResourceVersion string) (observe.Watch, error) {
+//
+// It deliberately sends no resource version. The seed is a pinned get,
+// and a single object's version is its last modification: on a cluster
+// idle longer than the server's watch window it is already expired, and
+// a watch resumed from it dies instantly with 410 Expired on every
+// retry, freezing the console on a permanently stale snapshot. An unset
+// version means "current state": the server re-delivers the object as
+// one synthetic Added, which the collector folds harmlessly, then
+// streams changes. The cost is a bounded blind spot — a deletion landing
+// between the get and the watch start is unseen until the next re-seed —
+// which is the same window every contact loss already owns.
+func (c *Client) Watch(ctx context.Context) (observe.Watch, error) {
 	w, err := c.dyn.Resource(clusterGVR).Namespace(c.opts.Namespace).Watch(ctx, metav1.ListOptions{
 		FieldSelector:       "metadata.name=" + c.opts.ClusterName,
-		ResourceVersion:     fromResourceVersion,
 		AllowWatchBookmarks: false,
 	})
 	if err != nil {
@@ -158,11 +168,7 @@ func pumpCluster(event watch.Event) (observe.ClusterState, bool, bool) {
 		if err != nil {
 			return observe.ClusterState{}, false, true
 		}
-		rv := ""
-		if meta, ok := event.Object.(metav1.Object); ok {
-			rv = meta.GetResourceVersion()
-		}
-		return observe.ClusterState{Facts: facts, ResourceVersion: rv}, true, false
+		return observe.ClusterState{Facts: facts}, true, false
 	case watch.Deleted:
 		return observe.ClusterState{Facts: observe.ClusterFacts{Present: false}}, true, false
 	case watch.Bookmark:

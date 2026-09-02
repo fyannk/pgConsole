@@ -9,6 +9,20 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Cluster and FailoverQuorum watches no longer resume from the
+  pinned get's resource version.** A single object's resource version is
+  its last modification, and on a cluster idle longer than the API
+  server's watch window it is already expired — so every watch resumed
+  from it died instantly with `410 Expired`, the re-seed handed back the
+  same version, and the console froze on "Showing the last good view"
+  (with a `contact lost` log line every second) even though contact was
+  fine. The two singleton watches now start from the server's current
+  state, which re-delivers the object once and then streams changes; the
+  list-seeded watches were never affected, because a re-list always
+  yields a fresh version.
+
 ## [0.6.1] - 2026-08-27
 
 A rebuild, not a behaviour change. Nothing about how the console works is

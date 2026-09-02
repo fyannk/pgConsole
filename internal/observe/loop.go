@@ -25,8 +25,11 @@ import (
 // feed is one observed resource seen from the collector loop: a complete
 // seed, a watch resumed from that seed, and the fold of one watch item
 // into retained state. C is what the seed hands the watch — a resource
-// version for a source watching one kind, the whole seed state for a
-// source merging several. E is one watch item.
+// version for a source listing one kind, the whole seed state for a
+// source merging several, and nothing (struct{}) for a singleton source
+// pinned to one name, whose get yields no watch-safe cursor and whose
+// watch therefore starts from the server's current state. E is one watch
+// item.
 //
 // Implemented by every collector in this package: Collector (Cluster),
 // PodCollector, EventCollector, BackupCollector and
@@ -84,14 +87,14 @@ type feed[C any, E any] interface {
 // It also makes the doc comment above checkable: if a collector stops
 // satisfying the contract, this stops compiling.
 var (
-	_ feed[string, ClusterState]                        = (*Collector)(nil)
+	_ feed[struct{}, ClusterState]                      = (*Collector)(nil)
 	_ feed[string, PodEvent]                            = (*PodCollector)(nil)
 	_ feed[string, EventChange]                         = (*EventCollector)(nil)
 	_ feed[BackupCatalogState, BackupChange]            = (*BackupCollector)(nil)
 	_ feed[AccessReviewState, AccessRequestChange]      = (*AccessReviewCollector)(nil)
 	_ feed[string, PoolerChange]                        = (*PoolerCollector)(nil)
 	_ feed[string, PodEvent]                            = (*PoolerPodCollector)(nil)
-	_ feed[string, FailoverQuorumState]                 = (*FailoverQuorumCollector)(nil)
+	_ feed[struct{}, FailoverQuorumState]               = (*FailoverQuorumCollector)(nil)
 	_ feed[string, ImageCatalogChange]                  = (*ImageCatalogCollector)(nil)
 	_ feed[DatabaseObjectsState, DatabaseObjectsChange] = (*DatabaseObjectsCollector)(nil)
 	_ feed[InfrastructureState, InfrastructureChange]   = (*InfrastructureCollector)(nil)
