@@ -81,6 +81,28 @@ finding nests under the operator's archiving condition when both are
 current, which is the console placing the repository's observation
 beside the operator's claim without merging the two.
 
+## Checks that count over time
+
+Every other source is a snapshot of now, so a fault visible only in
+repetition — a pod destroyed and remade over and over, a definition two
+controllers keep rewriting in turn — is invisible to a check that reads
+the present. Two checks read the **object timeline** instead, and count
+what it records inside a trailing window:
+
+| Check | Counts |
+|---|---|
+| `k8s-pod-replaced-repeatedly` | Distinct object identities under one pod name. Counting identities rather than edits separates a replacement from a change: an edited pod stays one object, a replaced one is a new object wearing the old name. |
+| `k8s-definition-rewritten-repeatedly` | Records of the definition changing, as opposed to the status, with the field managers the API server attributed the writes to. Two managers alternating is one undoing the other. |
+
+The timeline coalesces rapid repeats and evicts old revisions to stay
+inside its bounds, so a count taken from it can only under-report. A
+match is therefore sound and **an absence rules nothing out** — the same
+footing as the log checks, and both findings say so. A record the
+console only discovered after losing contact is counted but flagged,
+because its timing is bounded rather than known.
+
+With `HISTORY_ENABLED=false` both checks report "could not run".
+
 ## Thresholds and holding windows
 
 A metric check states the number it applies in its own check row, so
@@ -171,6 +193,7 @@ adding the release to the verified list and letting that check pass.
 | Pooler queue depth | Metrics scraping enabled; the PgBouncer exporter's window. |
 | Failover quorum | The failover-quorum collector (always on). Absence of the resource is a clear result: the cluster runs no quorum. |
 | Image catalogs | The image-catalog collector (always on) for namespaced catalogs; a cluster-scoped catalog needs the optional lookup enabled, and reads "could not run" otherwise. |
+| Object timeline | `HISTORY_ENABLED=true` (the default). With history off, the checks that count over time report "could not run". |
 | Repository evidence | The repository-evidence consumer configured, the sidecar answering, and a completed scan. Every way the channel can be silent — not configured, never answered, contact lost, no scan yet, the sidecar's own staleness, an unrecognised report variant — is named as the reason a repository check could not run. |
 
 ## Log-backed findings and their window

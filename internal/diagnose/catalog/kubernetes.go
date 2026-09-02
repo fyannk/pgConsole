@@ -14,7 +14,12 @@
 
 package catalog
 
-import "github.com/fyannk/pgConsole/internal/diagnose"
+import (
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/history"
+)
 
 // kubernetesRules are the claims about Kubernetes itself: the kubelet
 // and scheduler failures that keep a member pod from running, in the
@@ -35,6 +40,11 @@ import "github.com/fyannk/pgConsole/internal/diagnose"
 // CloudNativePG's: the status-unreachable phase check and the
 // instance-isolation log check.
 func kubernetesRules() []diagnose.Rule {
+	// timelineNote is the standing qualifier on a count taken from the
+	// object timeline.
+	const timelineNote = "The timeline coalesces rapid repeats and evicts old revisions to " +
+		"stay inside its bounds, so the count is a floor and an absence rules " +
+		"nothing out."
 	return []diagnose.Rule{
 		{
 			ID:        "k8s-volume-mount-failed",
@@ -117,6 +127,55 @@ func kubernetesRules() []diagnose.Rule {
 				"CreateContainerConfigError", "CreateContainerError"}},
 			Link:      "/cluster/pods",
 			LinkLabel: "Pods",
+		},
+		{
+			// The two timeline rules. Both read the object history
+			// rather than a current snapshot, because what they report
+			// is repetition: no single observation of a replaced pod or
+			// a rewritten definition is wrong, and the fault is only
+			// visible in the count. They are Kubernetes claims because
+			// object lifecycle is the API server's own vocabulary —
+			// creation, deletion, and the field manager that wrote last
+			// mean the same thing whichever operator owns the object.
+			ID:        "k8s-pod-replaced-repeatedly",
+			Component: diagnose.ComponentKubernetes,
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a pod replaced several times inside an hour",
+			Summary:   "A pod has been replaced several times in the last hour.",
+			Detail: "Each replacement is a new object wearing the same name, so this " +
+				"counts identities rather than edits. A rollout replaces each member " +
+				"once; several replacements of one name in an hour is something " +
+				"destroying it faster than it settles — a failing probe, an evicting " +
+				"node, or a controller and an operator disagreeing about whether it " +
+				"should exist. " + timelineNote,
+			When: diagnose.HistoryIncarnations{Kind: "Pod", Identities: 3, Within: time.Hour},
+			NextSteps: "Open the timeline for that name and read what ended each " +
+				"incarnation. The pod's own events say who deleted it; a kubelet " +
+				"eviction and an operator replacement look nothing alike there.",
+			Link:      "/history",
+			LinkLabel: "History",
+		},
+		{
+			ID:        "k8s-definition-rewritten-repeatedly",
+			Component: diagnose.ComponentKubernetes,
+			Severity:  diagnose.SeverityWarning,
+			Describes: "an object whose definition is rewritten again and again inside an hour",
+			Summary:   "An object's definition is being rewritten again and again.",
+			Detail: "Repeated writes to the definition, as opposed to the status, mean " +
+				"something keeps changing what the object should be. Two writers " +
+				"disagreeing is the usual cause — a deployment pipeline reapplying " +
+				"what a mutating webhook or an autoscaler immediately changes back — " +
+				"and each rewrite restarts whatever reconciliation the change implies. " +
+				"The field managers below are the API server's own record of who " +
+				"wrote last. " + timelineNote,
+			When: diagnose.HistoryChanges{
+				Changes: []history.Change{history.ChangeSpec}, Count: 5, Within: time.Hour},
+			NextSteps: "The named field managers are the writers. Where two of them " +
+				"alternate, one is undoing the other, and the fix is upstream of this " +
+				"cluster: reconcile what the pipeline applies with what the admitting " +
+				"webhook or autoscaler expects.",
+			Link:      "/history",
+			LinkLabel: "History",
 		},
 		{
 			// The version-only rule, mirroring postgres-eol: the observed

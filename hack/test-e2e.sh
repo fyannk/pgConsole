@@ -268,7 +268,18 @@ grep -qF "Cluster in healthy state" "$OUT/forbidden.html" || { log "last-good co
 log "forbidden RBAC: retained last-good, visibly stale, never current"
 
 log "restoring RBAC recovers without restart"
-kubectl apply -f deploy/kubernetes-example.yaml > /dev/null
+# Demonstration 1 restarted the API server, and kubectl validates a manifest
+# client-side by downloading the server's OpenAPI document. That document is
+# served again only once the API server has rebuilt its aggregated schema, so
+# this apply can fail with "failed to download openapi" for a while after the
+# restart — observed twice in CI. Retry until discovery catches up rather than
+# failing the run on that race, in the same shape as the custom-resource apply
+# below. Output is not silenced, so a genuine failure is visible in the log.
+k=0
+until kubectl apply -f deploy/kubernetes-example.yaml; do
+  k=$((k + 1)); [ "$k" -le 12 ] || { log "RBAC never restored (API server discovery lag)"; exit 1; }
+  sleep 5
+done
 wait_page_contains "current — age" 180 restored.html
 log "recovered after RBAC restoration"
 

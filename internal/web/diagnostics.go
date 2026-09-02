@@ -205,6 +205,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	if h.sources.DatabaseObjects != nil {
 		in.DatabaseObjects, in.HasDatabaseObjects = h.sources.DatabaseObjects.CurrentDatabaseObjects()
 	}
+	if h.sources.History != nil {
+		in.History, in.HasHistory = h.sources.History.Snapshot()
+	}
 	if h.sources.Evidence != nil {
 		in.Evidence, in.HasEvidence = h.sources.Evidence.CurrentEvidence(), true
 	}
