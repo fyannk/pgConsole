@@ -496,9 +496,6 @@ func (c InstantNonZero) evaluate(_ string, in Input) ([]conditionMatch, string) 
 	return matches, ""
 }
 
-// instantMetricName resolves an instant key to the exporter's metric
-// name, so evidence quotes the exporter's vocabulary rather than the
-// console's.
 // InstantZero matches an instance whose latest reading of one
 // point-in-time flag is zero — the exact inverse of InstantNonZero, for
 // the flags where the fault is an absence rather than a presence. An
@@ -604,6 +601,9 @@ func readingInstances(readings map[string]map[string]metrics.Instant) []string {
 	return instances
 }
 
+// instantMetricName resolves an instant key to the exporter's metric
+// name, so evidence quotes the exporter's vocabulary rather than the
+// console's.
 func instantMetricName(key string) string {
 	for _, def := range metrics.Instance.Instants {
 		if def.Key == key {
@@ -961,7 +961,7 @@ func sustained(samples []seriesReading, now time.Time, span time.Duration) []ser
 	return trailing
 }
 
-// seriesReading is one instance's latest sample of a series.
+// seriesReading is one sample of one instance's series.
 type seriesReading struct {
 	value float64
 	at    int64
