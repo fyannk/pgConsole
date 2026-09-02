@@ -1937,6 +1937,14 @@ details.chained .sev { margin-right: var(--space-2); }
 details.chained[data-severity="critical"] .sev { background: var(--bad-weak); color: var(--bad); }
 details.chained[data-severity="warning"] .sev { background: var(--warn-weak); color: var(--warn); }
 details.chained[data-severity="note"] .sev { background: var(--surface-2); color: var(--text-muted); }
+details.chained > summary .origin-tag { margin-left: var(--space-2); font-weight: 400; }
+
+/* Near misses: causes the catalog names that also matched, but on an
+   object or at a time the relation does not cover. Listed, not nested,
+   with the relation's own reason. */
+.finding-related { margin: 0 0 var(--space-3); }
+.finding-related ul { margin: 0; padding-left: 1.25em; }
+.finding-related li { font-size: var(--text-sm); margin: 0 0 var(--space-1); }
 
 /* The checks account. The summary line carries each outcome as a
    counted, state-coloured chip; each group is a details element so the

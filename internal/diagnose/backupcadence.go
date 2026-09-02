@@ -91,6 +91,7 @@ func (d backupCadenceDetector) finding(in Input, schedule observe.ScheduledBacku
 	observed := countRecentBackups(in.Backups.Backups, schedule.Method, in.Now)
 	finding := Finding{
 		ID:       "backup-cadence/" + schedule.Name,
+		Subject:  EntityRef{Kind: "ScheduledBackup", Name: schedule.Name},
 		Severity: SeverityCritical,
 		Summary: fmt.Sprintf(
 			"ScheduledBackup %s is set to run %d times a day.", schedule.Name, perDay),

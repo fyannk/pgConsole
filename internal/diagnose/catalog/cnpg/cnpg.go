@@ -46,6 +46,13 @@ func Rules() []diagnose.Rule {
 	return rules
 }
 
+// VerifiedReleases are the operator releases whose source trees the
+// catalog's strings were read from, verbatim. The pin verification
+// (make verify-pins) fetches each tree and greps every pinned rule's
+// strings in it; widening a span means adding the release here and
+// letting that check pass, not trusting that nothing moved.
+var VerifiedReleases = []string{"1.28.4", "1.29.2", "1.30.0"}
+
 // The verified spans. A span is widened only by verifying the strings
 // in another release's tree.
 const (

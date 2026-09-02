@@ -72,7 +72,8 @@ func backupRules() []diagnose.Rule {
 			Detail: "Suspension is deliberate and easy to forget, like fencing. While " +
 				"it holds, the recovery window this schedule was providing stops " +
 				"growing.",
-			When: diagnose.ScheduledBackupSuspended{},
+			When:   diagnose.ScheduledBackupSuspended{},
+			Pinned: []string{`json:"suspend,omitempty"`},
 		},
 		{
 			// The cadence detector catches a schedule firing too often;
@@ -91,7 +92,8 @@ func backupRules() []diagnose.Rule {
 				"it declines to schedule at all while the cluster is not healthy. A " +
 				"next run more than half an hour in the past means backups from this " +
 				"schedule are not being taken, whatever else looks fine.",
-			When: diagnose.ScheduledBackupOverdue{Grace: 30 * time.Minute},
+			When:   diagnose.ScheduledBackupOverdue{Grace: 30 * time.Minute},
+			Pinned: []string{`json:"nextScheduleTime,omitempty"`},
 		},
 	}
 }

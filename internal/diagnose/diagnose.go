@@ -89,6 +89,26 @@ type Evidence struct {
 	Detail string
 }
 
+// EntityRef names the object a finding is about, in the console's
+// shared vocabulary: a Kubernetes kind and a name, such as Pod/orders-1
+// or Backup/orders-20260902. A finding about a container is about its
+// pod, and a finding about the cluster as a whole carries the Cluster
+// kind with no name — the console watches one cluster, so the kind
+// alone identifies it. The zero value means the finding names no single
+// object, which is honest for a detector that aggregates several.
+type EntityRef struct {
+	Kind string
+	Name string
+}
+
+// String renders the reference as kind/name, or the kind alone.
+func (e EntityRef) String() string {
+	if e.Name == "" {
+		return e.Kind
+	}
+	return e.Kind + "/" + e.Name
+}
+
 // Finding is one correlated statement about what is wrong.
 type Finding struct {
 	// ID is the stable detector-scoped identifier, used for ordering
@@ -97,6 +117,18 @@ type Finding struct {
 	// Check names the detector or rule that produced this finding, so
 	// findings can be related to each other by their producers.
 	Check string
+	// Subject is the object the finding is about, when it is about one.
+	// It is what lets a relation between two findings ask "the same
+	// pod?" instead of assuming that two matches in one cluster must be
+	// one incident.
+	Subject EntityRef
+	// At is when the observation the finding rests on was made, as the
+	// source reported it: an event's last occurrence, a log line's most
+	// recent match, a backup's creation. Zero when the source carries no
+	// time — a condition or a phase is a current state, not an instant —
+	// and a relation with a time window then cannot be enforced and says
+	// so rather than pretending.
+	At time.Time
 	// Severity orders the finding on the screen.
 	Severity Severity
 	// Summary is one sentence stating what is wrong, in plain language.
@@ -114,17 +146,129 @@ type Finding struct {
 	// reported. Empty when the summary and evidence say everything.
 	NextSteps string
 	// ConsequenceOf names the checks whose findings this one follows
-	// from, in preference order. When one of them also matched in the
-	// same run, the screen presents this finding beneath it as part of
-	// one incident rather than as a second alarm. The relation is
-	// catalog-pinned knowledge, stated as such; each nested finding
-	// keeps its own evidence.
-	ConsequenceOf []string
+	// from, in preference order, each with the scope and window inside
+	// which the relation is claimed. When one of them also matched in
+	// the same run on a finding that satisfies the relation, the screen
+	// presents this finding beneath it as part of one incident rather
+	// than as a second alarm. The relation is catalog-pinned knowledge,
+	// stated as such; each nested finding keeps its own evidence.
+	ConsequenceOf []Relation
 	// Link is where the reader goes next — always a screen, never an
 	// action. Diagnostics proposes; it does not remediate.
 	Link string
 	// LinkLabel names the link.
 	LinkLabel string
+}
+
+// Scope is where a causal relation is claimed to hold: between any two
+// findings in the cluster, or only between findings about the same pod.
+// A cluster-level cause — an operator condition, a phase, a namespace
+// quota — relates to effects anywhere; a pod-level cause, such as a
+// full WAL volume read from one instance's log, explains a crash on that
+// instance and says nothing about a crash on another.
+type Scope int
+
+const (
+	// ScopeCluster relates findings anywhere in the cluster. The zero
+	// value, so a relation written without a scope claims the widest
+	// one and reads as such.
+	ScopeCluster Scope = iota
+	// ScopePod relates only findings about the same pod. Both findings
+	// must name a pod; a relation pinned to a pod that either side does
+	// not name does not hold.
+	ScopePod
+)
+
+// String is the scope in the words the screen uses.
+func (s Scope) String() string {
+	if s == ScopePod {
+		return "same pod"
+	}
+	return "same cluster"
+}
+
+// Strength is how firmly the catalog claims a relation, in two
+// qualitative grades rather than a number nobody could calibrate.
+type Strength int
+
+const (
+	// StrengthEstablished marks a mechanism the upstream component
+	// documents or implements: archiving that fails retains WAL, a
+	// container the kernel killed is restarted by the kubelet. The
+	// default, because a relation that does not deserve it should be
+	// written as plausible on purpose.
+	StrengthEstablished Strength = iota
+	// StrengthPlausible marks a common pattern the catalog names without
+	// a mechanism it can point to: a refused volume claim usually means a
+	// quota, but the scheduler's message is the only thing that says so.
+	StrengthPlausible
+)
+
+// String is the strength in the words the screen uses.
+func (s Strength) String() string {
+	if s == StrengthPlausible {
+		return "plausible"
+	}
+	return "established mechanism"
+}
+
+// Relation is one declared causal edge: the finding carrying it is a
+// consequence of the named check's findings, inside the scope and the
+// time window given. Scope and window are what turn "both matched" into
+// "these two matches are one incident"; without them, any two findings
+// the catalog ever related would nest whatever objects they were about.
+type Relation struct {
+	// Cause is the ID of the check whose findings this one follows from.
+	Cause string
+	// Scope is where the relation holds. See Scope.
+	Scope Scope
+	// Within bounds how far apart the two findings' observations may be
+	// for the relation to hold; zero means no bound. It is enforced only
+	// when both findings carry a time — a state with no instant cannot
+	// be placed in a window, and the relation then rests on scope alone.
+	Within time.Duration
+	// Strength is how firmly the relation is claimed. See Strength.
+	Strength Strength
+}
+
+// Holds reports whether the relation joins the effect to a candidate
+// cause finding, and when it does not, why — in words the screen can
+// show beside the finding that stayed separate.
+func (r Relation) Holds(effect, cause Finding) (bool, string) {
+	if cause.Check != r.Cause {
+		return false, "not the named cause"
+	}
+	if r.Scope == ScopePod {
+		if effect.Subject.Kind != "Pod" || cause.Subject.Kind != "Pod" ||
+			effect.Subject.Name == "" || cause.Subject.Name == "" {
+			return false, "the catalog relates the two only on the same pod, and one of them names none"
+		}
+		if effect.Subject.Name != cause.Subject.Name {
+			return false, "the catalog relates the two only on the same pod; this one is on " +
+				cause.Subject.String()
+		}
+	}
+	if r.Within > 0 && !effect.At.IsZero() && !cause.At.IsZero() {
+		gap := effect.At.Sub(cause.At)
+		if gap < 0 {
+			gap = -gap
+		}
+		if gap > r.Within {
+			return false, "the catalog relates the two only within " + r.Within.String() +
+				"; these observations are " + gap.Round(time.Minute).String() + " apart"
+		}
+	}
+	return true, ""
+}
+
+// String is the relation's terms as the screen states them beneath a
+// nested finding: strength, scope, and the window when there is one.
+func (r Relation) String() string {
+	terms := r.Strength.String() + " · " + r.Scope.String()
+	if r.Within > 0 {
+		terms += " · within " + r.Within.String()
+	}
+	return terms
 }
 
 // CheckOutcome reports what became of one detector in a run.

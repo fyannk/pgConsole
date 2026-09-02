@@ -39,7 +39,8 @@ func databaseRules() []diagnose.Rule {
 				"this database, role, publication or subscription to be there finds " +
 				"it missing or outdated. The operator's own message below names the " +
 				"refusal, and nothing changes until its cause is fixed.",
-			When: diagnose.DeclaredObjectFailed{},
+			When:   diagnose.DeclaredObjectFailed{},
+			Pinned: []string{`json:"applied,omitempty"`},
 		},
 	}
 }

@@ -49,6 +49,15 @@ type Rule struct {
 	// the rule applies to every version the console encounters — a claim
 	// the author makes by leaving it empty, not a default.
 	Requires []Requirement
+	// Pinned lists the upstream source strings the pin was verified
+	// against, when the condition's own literals are not verbatim source
+	// strings — a metric name the exporter assembles at runtime, a JSON
+	// envelope the log pipe emits — or when the condition carries none,
+	// such as a comparison of two status fields. The pin verification
+	// greps these in each verified release's tree instead of the
+	// condition's literals. Empty for the common rule whose phase,
+	// condition, event reason, or log line is itself the source string.
+	Pinned []string
 	// Severity of the finding when the rule matches.
 	Severity Severity
 	// Describes states what the rule looks for, for the check row.
@@ -65,9 +74,10 @@ type Rule struct {
 	// NextSteps is the console-pinned guidance carried onto every
 	// finding this rule produces. See Finding.NextSteps.
 	NextSteps string
-	// ConsequenceOf names the checks this rule's findings follow from.
-	// See Finding.ConsequenceOf.
-	ConsequenceOf []string
+	// ConsequenceOf names the checks this rule's findings follow from,
+	// with the scope and window of each relation. See
+	// Finding.ConsequenceOf.
+	ConsequenceOf []Relation
 	// Link and LinkLabel are where the reader goes next. A condition may
 	// override them per match with something more specific.
 	Link      string
@@ -86,6 +96,13 @@ type Requirement struct {
 // nothing out on 1.27.
 func (r Requirement) String() string {
 	return string(r.Component) + " " + r.Constraint
+}
+
+// Satisfied reports whether an observed version meets the constraint.
+// Exported for the pin verification, which asks the same question of
+// each verified release that the evaluator asks of the observed one.
+func (r Requirement) Satisfied(version string) bool {
+	return satisfies(version, r.Constraint)
 }
 
 // Condition is one observation a rule can wait for. Implementations are
@@ -113,9 +130,18 @@ type conditionMatch struct {
 	summary string
 	// evidence is the quoted claims, in reading order.
 	evidence []Evidence
+	// subject is the object the match is about, when it is about one.
+	subject EntityRef
+	// at is when the matched observation was made, when the source
+	// carries a time.
+	at time.Time
 	// link and linkLabel override the rule's when set.
 	link, linkLabel string
 }
+
+// clusterSubject is the subject of a finding about the cluster as a
+// whole: the console watches one, so the kind alone names it.
+var clusterSubject = EntityRef{Kind: "Cluster"}
 
 // LogContains matches a line in a followed container log carrying every
 // substring. Substrings rather than patterns, deliberately: a rule is a
@@ -161,6 +187,8 @@ func (c LogContains) evaluate(ruleID string, in Input) ([]conditionMatch, string
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + observation.Pod + "/" + observation.Container,
+			subject:  EntityRef{Kind: "Pod", Name: observation.Pod},
+			at:       observation.LastSeen,
 			evidence: []Evidence{
 				{
 					Origin: "container log (best effort)",
@@ -220,6 +248,9 @@ func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	// finding with the same line.
 	const maxQuoted = 3
 	var evidence []Evidence
+	// The newest matching event names the subject and the time: the
+	// list is newest first, and one finding quotes up to three.
+	var newest *observe.EventFacts
 	for _, event := range in.Events.Events {
 		if len(evidence) >= maxQuoted {
 			break
@@ -253,6 +284,10 @@ func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 		}
 		if carriesAll {
 			evidence = append(evidence, eventEvidence(event))
+			if newest == nil {
+				first := event
+				newest = &first
+			}
 		}
 	}
 	if len(evidence) == 0 {
@@ -260,7 +295,11 @@ func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	}
 	// One finding quoting every matched event: the events are the same
 	// refusal repeating, not separate incidents.
-	return []conditionMatch{{evidence: evidence}}, ""
+	return []conditionMatch{{
+		evidence: evidence,
+		subject:  EntityRef{Kind: newest.Kind, Name: newest.Object},
+		at:       newest.LastSeen,
+	}}, ""
 }
 
 // BackupPhase matches Backup objects sitting in one of the given phases
@@ -305,6 +344,8 @@ func (c BackupPhase) evaluate(_ string, in Input) ([]conditionMatch, string) {
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + backup.Name,
+			subject:  EntityRef{Kind: "Backup", Name: backup.Name},
+			at:       backup.CreatedAt,
 			evidence: []Evidence{{
 				Origin: "operator-reported",
 				Object: "Backup/" + backup.Name,
@@ -358,7 +399,7 @@ func (c ClusterCondition) evaluate(_ string, in Input) ([]conditionMatch, string
 		if condition.Message != "" {
 			detail += ": " + condition.Message
 		}
-		return []conditionMatch{{evidence: []Evidence{{
+		return []conditionMatch{{subject: clusterSubject, evidence: []Evidence{{
 			Origin: "operator-reported",
 			Object: "Cluster condition " + c.Type,
 			Detail: detail,
@@ -396,7 +437,7 @@ func (c ClusterPhase) evaluate(_ string, in Input) ([]conditionMatch, string) {
 		if in.Cluster.Cluster.PhaseReason != "" {
 			detail += ": " + in.Cluster.Cluster.PhaseReason
 		}
-		return []conditionMatch{{evidence: []Evidence{{
+		return []conditionMatch{{subject: clusterSubject, evidence: []Evidence{{
 			Origin: "operator-reported",
 			Object: "Cluster",
 			Detail: detail,
@@ -440,6 +481,8 @@ func (c InstantNonZero) evaluate(_ string, in Input) ([]conditionMatch, string) 
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + instance,
+			subject:  EntityRef{Kind: "Pod", Name: instance},
+			at:       time.Unix(reading.At, 0),
 			evidence: []Evidence{{
 				Origin: "console-scraped from the instance exporter",
 				Object: "instance " + instance,
@@ -522,6 +565,7 @@ func (c ContainerState) evaluate(_ string, in Input) ([]conditionMatch, string) 
 			}
 			matches = append(matches, conditionMatch{
 				idSuffix: "/" + pod.Name + "/" + container.Name,
+				subject:  EntityRef{Kind: "Pod", Name: pod.Name},
 				evidence: []Evidence{{
 					Origin: "Kubernetes-observed",
 					Object: "Pod/" + pod.Name,
@@ -570,7 +614,7 @@ func (c PrimaryMismatch) evaluate(_ string, in Input) ([]conditionMatch, string)
 	if cluster.TargetPrimary == "pending" {
 		detail += `; "pending" is the operator's marker for a failover decided with no candidate chosen yet`
 	}
-	return []conditionMatch{{evidence: []Evidence{{
+	return []conditionMatch{{subject: clusterSubject, at: *cluster.TargetPrimaryTimestamp, evidence: []Evidence{{
 		Origin: "operator-reported",
 		Object: "Cluster primaries",
 		Detail: detail,
@@ -598,6 +642,7 @@ func (ScheduledBackupSuspended) evaluate(_ string, in Input) ([]conditionMatch, 
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + schedule.Name,
+			subject:  EntityRef{Kind: "ScheduledBackup", Name: schedule.Name},
 			evidence: []Evidence{{
 				Origin: "operator-reported",
 				Object: "ScheduledBackup/" + schedule.Name,
@@ -651,6 +696,8 @@ func (c ScheduledBackupOverdue) evaluate(_ string, in Input) ([]conditionMatch, 
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + schedule.Name,
+			subject:  EntityRef{Kind: "ScheduledBackup", Name: schedule.Name},
+			at:       *schedule.NextScheduleTime,
 			evidence: []Evidence{{
 				Origin: "operator-reported",
 				Object: "ScheduledBackup/" + schedule.Name,
@@ -709,6 +756,8 @@ func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + instance,
+			subject:  EntityRef{Kind: "Pod", Name: instance},
+			at:       time.Unix(reading.at, 0),
 			evidence: []Evidence{{
 				Origin: "console-scraped from the instance exporter",
 				Object: "instance " + instance,
@@ -766,6 +815,7 @@ func (DeclaredObjectFailed) evaluate(_ string, in Input) ([]conditionMatch, stri
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + strings.ToLower(kind) + "/" + name,
+			subject:  EntityRef{Kind: kind, Name: name},
 			summary:  fmt.Sprintf("The operator cannot apply the declared %s %q.", kind, name),
 			evidence: []Evidence{{
 				Origin: "operator-reported",
@@ -841,6 +891,8 @@ func evaluateRule(rule Rule, in Input) (Check, []Finding) {
 		finding := Finding{
 			ID:            rule.ID + match.idSuffix,
 			Check:         rule.ID,
+			Subject:       match.subject,
+			At:            match.at,
 			Severity:      rule.Severity,
 			Summary:       rule.Summary,
 			Detail:        rule.Detail,
@@ -888,7 +940,7 @@ func ruleDescribes(rule Rule) string {
 func LogRules(rules []Rule) []logstream.Rule {
 	var derived []logstream.Rule
 	for _, rule := range rules {
-		if condition, ok := rule.When.(LogContains); ok {
+		if condition, ok := LogCondition(rule.When); ok {
 			derived = append(derived, logstream.Rule{
 				ID:       rule.ID,
 				Contains: condition.Substrings,
@@ -898,4 +950,149 @@ func LogRules(rules []Rule) []logstream.Rule {
 		}
 	}
 	return derived
+}
+
+// LogCondition finds the log condition a rule's When carries, at the
+// top or as one branch of an AllOf. A rule carries at most one: the
+// matcher keys observations by rule ID, so two log conditions in one
+// rule would be indistinguishable when the rule is evaluated. The
+// catalog's tests hold that line.
+func LogCondition(when Condition) (LogContains, bool) {
+	switch condition := when.(type) {
+	case LogContains:
+		return condition, true
+	case AllOf:
+		for _, branch := range condition.Of {
+			if found, ok := LogCondition(branch); ok {
+				return found, true
+			}
+		}
+	}
+	return LogContains{}, false
+}
+
+// AllOf matches when every branch matches, which is how a rule states a
+// corroboration: an operator condition and the log line that explains
+// it, on the same run. The honesty rules compose the obvious way — a
+// branch that could not run makes the whole condition one that could
+// not run, never one that came back clear, because "A and B" cannot be
+// ruled out while B is unreadable.
+//
+// The finding takes its subject, time, ID suffix and link from the
+// first branch's first match, and quotes every branch's evidence in
+// order: the first branch is the observation the rule is about, the
+// rest are what corroborate it.
+type AllOf struct {
+	Of []Condition
+}
+
+func (c AllOf) describe() string {
+	parts := make([]string, len(c.Of))
+	for i, branch := range c.Of {
+		parts[i] = branch.describe()
+	}
+	return strings.Join(parts, ", together with ")
+}
+
+func (c AllOf) evaluate(ruleID string, in Input) ([]conditionMatch, string) {
+	var lead conditionMatch
+	var corroboration []Evidence
+	for i, branch := range c.Of {
+		matches, unavailable := branch.evaluate(ruleID, in)
+		if unavailable != "" {
+			return nil, unavailable
+		}
+		if len(matches) == 0 {
+			return nil, ""
+		}
+		if i == 0 {
+			lead = matches[0]
+			for _, extra := range matches[1:] {
+				corroboration = append(corroboration, extra.evidence...)
+			}
+			continue
+		}
+		for _, match := range matches {
+			corroboration = append(corroboration, match.evidence...)
+		}
+	}
+	lead.evidence = append(append([]Evidence{}, lead.evidence...), corroboration...)
+	return []conditionMatch{lead}, ""
+}
+
+// PrimaryDisagreement matches an instance whose own account of its
+// role contradicts the operator's: PostgreSQL's pg_is_in_recovery(),
+// read from the exporter, says one thing about which instance accepts
+// writes, and the Cluster's currentPrimary says another. It is the one
+// condition that compares two sources instead of reading one, and it
+// reports the contradiction as such — neither side is presumed right.
+//
+// A primary move in flight is not a disagreement: while currentPrimary
+// and targetPrimary differ, the operator itself says the roles are
+// changing, and the instance's answer is expected to lag. The condition
+// stays clear until the move settles.
+type PrimaryDisagreement struct{}
+
+func (PrimaryDisagreement) describe() string {
+	return "an instance whose own recovery state contradicts the operator's current primary"
+}
+
+func (PrimaryDisagreement) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if reason := clusterUnavailable(in); reason != "" {
+		return nil, reason
+	}
+	if in.Metrics == nil {
+		return nil, "instance metrics are not scraped"
+	}
+	cluster := in.Cluster.Cluster
+	if cluster.CurrentPrimary == "" {
+		return nil, "the operator reports no current primary"
+	}
+	if cluster.TargetPrimary != "" && cluster.TargetPrimary != cluster.CurrentPrimary {
+		return nil, ""
+	}
+	readings := in.Metrics.InstantReadings()
+	instances := make([]string, 0, len(readings))
+	for instance := range readings {
+		instances = append(instances, instance)
+	}
+	sort.Strings(instances)
+	var matches []conditionMatch
+	for _, instance := range instances {
+		reading, reported := readings[instance]["in-recovery"]
+		if !reported {
+			continue
+		}
+		writable := reading.Value == 0
+		if writable == (instance == cluster.CurrentPrimary) {
+			continue
+		}
+		role := "in recovery, so not accepting writes"
+		if writable {
+			role = "not in recovery, so accepting writes"
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + instance,
+			subject:  EntityRef{Kind: "Pod", Name: instance},
+			at:       time.Unix(reading.At, 0),
+			summary: fmt.Sprintf("Instance %s reports itself %s, while the operator names %s as the primary.",
+				instance, role, cluster.CurrentPrimary),
+			evidence: []Evidence{
+				{
+					Origin: "operator-reported",
+					Object: "Cluster",
+					Detail: "currentPrimary " + cluster.CurrentPrimary,
+				},
+				{
+					Origin: "console-scraped from the instance exporter",
+					Object: "instance " + instance,
+					Detail: fmt.Sprintf("%s = %g (%s), read %s", instantMetricName("in-recovery"),
+						reading.Value, role, time.Unix(reading.At, 0).UTC().Format("15:04:05Z")),
+				},
+			},
+			link:      "/cluster/metrics",
+			linkLabel: "Metrics",
+		})
+	}
+	return matches, ""
 }

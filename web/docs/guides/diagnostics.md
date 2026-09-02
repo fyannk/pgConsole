@@ -22,7 +22,9 @@ Three panels carry the screen:
   cause's card, so a chain like *archiving failed → WAL filled the
   volume → PostgreSQL kept down* reads as one story with one root
   instead of three alarms. The relation is catalog-pinned knowledge and
-  the card says so; every nested finding keeps its own quoted evidence.
+  the card states its terms; every nested finding keeps its own quoted
+  evidence. See [how findings relate](#how-findings-relate) for what
+  the nesting rests on and what stays apart.
   Findings that carry it also show a **"What to do"** block — the
   console's guidance, labeled as guidance and rendered apart from the
   evidence, because advice is the one thing on this screen no source
@@ -44,6 +46,39 @@ particular thing. Each check answers one of four ways:
 | clear | Its inputs were readable and nothing matched. |
 | could not run | An input was never observed — log following off, metrics not scraped, a version not observed — or its collector has lost contact and the snapshot is stale. A check that could not run rules nothing out: a stale snapshot can neither clear a check nor match one. |
 | does not apply | The rule's version pins exclude the versions actually observed. Distinct from clear on purpose: the rule ruled itself out, not the failure. |
+
+## How findings relate
+
+Every finding names its **subject** — the object it is about, such as
+`Pod/orders-2` or `Backup/orders-20260902` — and, where its source
+reports one, the **time** of the observation: an event's last
+occurrence, a log line's most recent match, a backup's creation. A
+condition or a phase is a current state with no instant, so findings
+built on them carry no time.
+
+A catalog relation between two checks states three terms:
+
+| Term | Meaning |
+|---|---|
+| scope | *same cluster* (any two findings) or *same pod* (both must name the same pod). A cluster-level cause — an operator condition, a namespace quota — relates to effects anywhere; a pod-level cause, such as a full WAL volume read from one instance's log, explains a crash on that instance only. |
+| window | The largest gap allowed between the two observations. Enforced only when both findings carry a time; otherwise the relation rests on scope alone rather than inventing an instant. |
+| strength | *established mechanism* — something the upstream component documents or implements — or *plausible*, a common pattern the catalog names without a mechanism it can point to. |
+
+A finding nests under its cause only when the relation admits the
+pair. The nested card shows the terms it was admitted on. When a named
+cause also matched but on another object or outside the window, the
+finding stays its own card and lists the near miss beneath it with the
+relation's own reason — *the catalog relates the two only on the same
+pod; this one is on Pod/orders-1* — so a reader is told about the
+possible connection rather than handed a nesting the evidence does not
+support.
+
+One check compares two sources instead of reading one:
+`cnpg-primary-disagreement` sets the operator's `currentPrimary`
+against each instance's own `pg_is_in_recovery()`, read from the
+exporter. It reports the contradiction as the finding, quoting both,
+and presumes neither side right. A primary move in flight is not a
+disagreement and keeps the check clear until the move settles.
 
 ## Version pinning
 
@@ -71,6 +106,16 @@ The versions themselves are **observed, never configured**:
 
 A version the console has not observed leaves its pinned rules at
 "could not run" — never a silent skip and never a guess.
+
+The pins are **verified, not merely recorded**: `make verify-pins`
+(run in CI beside the other repository checks) fetches each verified
+CloudNativePG release's source through the Go module proxy and greps
+every pinned rule's strings in it — the phase, condition type, event
+reason, or log line the rule matches, or the source strings a rule
+names explicitly when its condition's literals are assembled at runtime
+(a metric name, a JSON envelope). A reworded upstream message fails the
+build instead of silently never matching, and widening a span means
+adding the release to the verified list and letting that check pass.
 
 ## What each check kind needs
 

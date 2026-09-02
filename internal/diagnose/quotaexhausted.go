@@ -71,6 +71,7 @@ func (d quotaExhaustedDetector) Detect(in Input) ([]Finding, string) {
 		finding := Finding{
 			ID:       "quota-exhausted/" + quota.Name,
 			Check:    "quota-exhausted",
+			Subject:  EntityRef{Kind: "ResourceQuota", Name: quota.Name},
 			Severity: SeverityWarning,
 			Summary: fmt.Sprintf("The namespace quota %q is exhausted for %s.",
 				quota.Name, strings.Join(exhausted, ", ")),

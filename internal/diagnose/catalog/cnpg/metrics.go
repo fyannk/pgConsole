@@ -32,6 +32,7 @@ func metricRules() []diagnose.Rule {
 				"one fewer member than the cluster's count suggests; a fenced primary " +
 				"is an outage.",
 			When:      diagnose.InstantNonZero{Key: "fencing-on"},
+			Pinned:    []string{"fencing_on"},
 			Link:      "/cluster/metrics",
 			LinkLabel: "Metrics",
 		},
@@ -46,6 +47,36 @@ func metricRules() []diagnose.Rule {
 				"the instance — the operator-side view of the same state is the " +
 				"waiting-for-user phase check.",
 			When:      diagnose.InstantNonZero{Key: "switchover-required"},
+			Pinned:    []string{"switchover_required"},
+			Link:      "/cluster/metrics",
+			LinkLabel: "Metrics",
+		},
+		{
+			// The one rule that compares two sources rather than reading
+			// one: the operator's currentPrimary against each instance's
+			// own pg_is_in_recovery(), which the exporter publishes under
+			// the pinned metric name. Neither side is presumed right — the
+			// finding is the contradiction itself. A primary move in flight
+			// is excluded, because then the operator is the one saying
+			// roles are changing.
+			ID:        "cnpg-primary-disagreement",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "an instance whose own recovery state contradicts the operator's current primary",
+			Summary:   "An instance and the operator disagree about which instance is the primary.",
+			Detail: "PostgreSQL's own answer to pg_is_in_recovery() on the instance does not " +
+				"match the role the Cluster status assigns it, with no primary move in " +
+				"flight to explain the lag. Two instances accepting writes is a split " +
+				"brain; a named primary that is in recovery is a cluster with no " +
+				"primary at all. Both quoted claims are current readings; the " +
+				"disagreement, not either side, is the finding.",
+			When:   diagnose.PrimaryDisagreement{},
+			Pinned: []string{"in_recovery"},
+			NextSteps: "Read the instance's log and the operator's log before touching " +
+				"anything: a stale exporter reading clears on the next scrape, while a " +
+				"real split brain needs the extra writer fenced. Do not promote or " +
+				"demote by hand while the two sources still disagree.",
 			Link:      "/cluster/metrics",
 			LinkLabel: "Metrics",
 		},

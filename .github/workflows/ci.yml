@@ -72,6 +72,8 @@ jobs:
           ./hack/check-readonly.sh
           ./hack/check-deps.sh
           ./hack/check-go-version.sh
+      - name: Verify catalog pins against the operator's source
+        run: make verify-pins
 
   vuln:
     name: Vulnerability scan

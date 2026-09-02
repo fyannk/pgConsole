@@ -14,7 +14,11 @@
 
 package catalog
 
-import "github.com/fyannk/pgConsole/internal/diagnose"
+import (
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/diagnose"
+)
 
 // postgresRules are the claims about PostgreSQL itself.
 func postgresRules() []diagnose.Rule {
@@ -32,6 +36,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Pinned:    []string{"error_severity"},
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a server log record with FATAL severity",
 			Summary:   "PostgreSQL logged a FATAL-severity record.",
@@ -65,14 +70,20 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Pinned:    []string{"error_severity"},
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a server log record with PANIC severity",
 			Summary:   "PostgreSQL panicked, which ends the whole server process.",
 			Detail: "A panic crashes the postmaster and forces crash recovery. Read from " +
 				"the container's log while following it, best effort: the count below " +
 				"is a floor and an absence here rules nothing out.",
-			When:          diagnose.LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
-			ConsequenceOf: []string{"cnpg-wal-disk-full"},
+			When: diagnose.LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
+			// The panic is the server on one instance failing to write WAL, so
+			// the relation is pinned to the pod and to the hour: both lines
+			// carry a time, and a disk-full line hours old on another
+			// instance explains nothing here.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-wal-disk-full", Scope: diagnose.ScopePod, Within: time.Hour}},
 		},
 		{
 			// The threshold is pinned knowledge, like the EOL boundary:
@@ -86,6 +97,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Pinned:    []string{"xid_age"},
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a database's transaction-id age near wraparound",
 			Summary:   "A database's transaction-id age is approaching wraparound, which ends in PostgreSQL refusing writes.",
@@ -102,6 +114,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Pinned:    []string{"mxid_age"},
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a database's multixact-id age near wraparound",
 			Summary:   "A database's multixact-id age is approaching wraparound, which ends in PostgreSQL refusing writes.",

@@ -274,8 +274,8 @@ func TestGroupIncidentsNestsConsequencesUnderTheirCause(t *testing.T) {
 
 	view := h.buildDiagnosticsView(req, diagnose.Input{}, diagnose.Result{Findings: []diagnose.Finding{
 		{ID: "root", Check: "root", Summary: "Root."},
-		{ID: "mid", Check: "mid", Summary: "Mid.", ConsequenceOf: []string{"root"}},
-		{ID: "leaf", Check: "leaf", Summary: "Leaf.", ConsequenceOf: []string{"mid"}},
+		{ID: "mid", Check: "mid", Summary: "Mid.", ConsequenceOf: []diagnose.Relation{{Cause: "root"}}},
+		{ID: "leaf", Check: "leaf", Summary: "Leaf.", ConsequenceOf: []diagnose.Relation{{Cause: "mid"}}},
 		{ID: "other", Check: "other", Summary: "Other."},
 	}})
 	if len(view.Findings) != 2 {
@@ -290,8 +290,8 @@ func TestGroupIncidentsNestsConsequencesUnderTheirCause(t *testing.T) {
 	}
 
 	cyclic := h.buildDiagnosticsView(req, diagnose.Input{}, diagnose.Result{Findings: []diagnose.Finding{
-		{ID: "a", Check: "a", Summary: "A.", ConsequenceOf: []string{"b"}},
-		{ID: "b", Check: "b", Summary: "B.", ConsequenceOf: []string{"a"}},
+		{ID: "a", Check: "a", Summary: "A.", ConsequenceOf: []diagnose.Relation{{Cause: "b"}}},
+		{ID: "b", Check: "b", Summary: "B.", ConsequenceOf: []diagnose.Relation{{Cause: "a"}}},
 	}})
 	if len(cyclic.Findings) != 2 {
 		t.Errorf("a cyclic relation lost a finding: %+v", cyclic.Findings)
@@ -332,7 +332,7 @@ func TestIncidentsSortByTheWorstTheyContain(t *testing.T) {
 		{ID: "lone", Check: "lone", Severity: diagnose.SeverityWarning, Summary: "Lone warning."},
 		{ID: "cause", Check: "cause", Severity: diagnose.SeverityWarning, Summary: "Warning cause."},
 		{ID: "effect", Check: "effect", Severity: diagnose.SeverityCritical, Summary: "Critical effect.",
-			ConsequenceOf: []string{"cause"}},
+			ConsequenceOf: []diagnose.Relation{{Cause: "cause"}}},
 	}})
 	if len(view.Findings) != 2 {
 		t.Fatalf("cards = %d, want two", len(view.Findings))
@@ -340,4 +340,63 @@ func TestIncidentsSortByTheWorstTheyContain(t *testing.T) {
 	if view.Findings[0].ID != "cause" {
 		t.Errorf("the incident holding a critical did not sort first: %+v", view.Findings)
 	}
+}
+
+// TestGroupIncidentsHonoursScopeAndWindow proves the nesting is
+// evidential: a pod-scoped relation joins findings on the same pod and
+// leaves one on another pod as its own card, listing the near miss with
+// the relation's reason; a window keeps a distant pair apart the same
+// way; and the nested card states the relation's terms.
+func TestGroupIncidentsHonoursScopeAndWindow(t *testing.T) {
+	t.Parallel()
+	h := newDiagnosticsHandler(t, true, staticSnapshots{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil)
+	pod := func(name string) diagnose.EntityRef { return diagnose.EntityRef{Kind: "Pod", Name: name} }
+	at := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+
+	view := h.buildDiagnosticsView(req, diagnose.Input{}, diagnose.Result{Findings: []diagnose.Finding{
+		{ID: "disk/orders-1", Check: "disk", Summary: "Disk full on 1.", Subject: pod("orders-1"), At: at},
+		{ID: "disk/orders-2", Check: "disk", Summary: "Disk full on 2.", Subject: pod("orders-2"), At: at},
+		{ID: "crash/orders-2", Check: "crash", Summary: "Crash on 2.", Subject: pod("orders-2"),
+			ConsequenceOf: []diagnose.Relation{{Cause: "disk", Scope: diagnose.ScopePod}}},
+		{ID: "crash/orders-3", Check: "crash", Summary: "Crash on 3.", Subject: pod("orders-3"),
+			ConsequenceOf: []diagnose.Relation{{Cause: "disk", Scope: diagnose.ScopePod}}},
+		{ID: "panic/orders-1", Check: "panic", Summary: "Panic on 1.", Subject: pod("orders-1"), At: at.Add(-3 * time.Hour),
+			ConsequenceOf: []diagnose.Relation{{Cause: "disk", Scope: diagnose.ScopePod, Within: time.Hour}}},
+	}})
+	cards := map[string]FindingView{}
+	for _, card := range view.Findings {
+		cards[card.ID] = card
+	}
+	if len(cards) != 4 {
+		t.Fatalf("cards = %v, want disk×2, the crash on 3, and the distant panic as roots", cardIDs(view.Findings))
+	}
+	if two := cards["disk/orders-2"]; len(two.Consequences) != 1 || two.Consequences[0].ID != "crash/orders-2" {
+		t.Errorf("the crash on 2 did not nest under the disk on 2: %+v", two.Consequences)
+	} else if two.Consequences[0].Via != "established mechanism · same pod" {
+		t.Errorf("nested card states %q as its terms", two.Consequences[0].Via)
+	}
+	if one := cards["disk/orders-1"]; len(one.Consequences) != 0 {
+		t.Errorf("the disk on 1 gained a consequence it does not explain: %+v", one.Consequences)
+	}
+	three := cards["crash/orders-3"]
+	if len(three.Related) != 2 {
+		t.Fatalf("the crash on 3 should list both disk findings as near misses: %+v", three.Related)
+	}
+	if !strings.Contains(three.Related[0].Because, "same pod") || three.Related[0].Object != "Pod/orders-1" {
+		t.Errorf("near miss does not say why: %+v", three.Related[0])
+	}
+	panicked := cards["panic/orders-1"]
+	if len(panicked.Related) != 2 || !strings.Contains(panicked.Related[0].Because, "apart") {
+		t.Errorf("the distant panic should stay a root with the window as the reason: %+v", panicked.Related)
+	}
+}
+
+// cardIDs lists the root cards' IDs.
+func cardIDs(cards []FindingView) []string {
+	ids := make([]string, len(cards))
+	for i, card := range cards {
+		ids[i] = card.ID
+	}
+	return ids
 }

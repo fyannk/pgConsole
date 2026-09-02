@@ -100,6 +100,8 @@ func (d quotaDetector) Detect(in Input) ([]Finding, string) {
 
 	finding := Finding{
 		ID:       "resource-quota",
+		Subject:  EntityRef{Kind: quota[0].Kind, Name: quota[0].Object},
+		At:       quota[0].LastSeen,
 		Severity: SeverityCritical,
 		Summary:  "The namespace quota is refusing objects this cluster needs.",
 		Detail: "The API server rejected a create, so the object does not exist and " +
@@ -107,7 +109,7 @@ func (d quotaDetector) Detect(in Input) ([]Finding, string) {
 			"quota's own numbers.",
 		NextSteps: "Raise the quota's ceiling or lower what the cluster asks for; the " +
 			"operator retries refused objects on its own once room exists.",
-		ConsequenceOf: []string{"quota-exhausted"},
+		ConsequenceOf: []Relation{{Cause: "quota-exhausted"}},
 		Link:          "/cluster/pods",
 		LinkLabel:     "Pods",
 	}
@@ -170,6 +172,8 @@ func (d schedulingDetector) Detect(in Input) ([]Finding, string) {
 	}
 	finding := Finding{
 		ID:       "pod-scheduling",
+		Subject:  EntityRef{Kind: unplaceable[0].Kind, Name: unplaceable[0].Object},
+		At:       unplaceable[0].LastSeen,
 		Severity: SeverityWarning,
 		Summary:  "A pod cannot be scheduled onto any node.",
 		Detail:   "The pod exists and will stay Pending until the constraint below is satisfied.",
@@ -178,9 +182,14 @@ func (d schedulingDetector) Detect(in Input) ([]Finding, string) {
 			"an exhausted storage quota is the common cause — while insufficient " +
 			"cpu or memory needs node capacity or smaller requests, and an " +
 			"unsatisfied affinity needs a node that matches.",
-		ConsequenceOf: []string{"quota-exhausted", "resource-quota"},
-		Link:          "/cluster/pods",
-		LinkLabel:     "Pods",
+		// Plausible, not established: the scheduler's message is the only
+		// thing that ties an unplaceable pod to a refused claim.
+		ConsequenceOf: []Relation{
+			{Cause: "quota-exhausted", Strength: StrengthPlausible},
+			{Cause: "resource-quota", Strength: StrengthPlausible},
+		},
+		Link:      "/cluster/pods",
+		LinkLabel: "Pods",
 	}
 	for _, event := range unplaceable {
 		finding.Evidence = append(finding.Evidence, eventEvidence(event))
@@ -216,6 +225,7 @@ func (d imagePullDetector) Detect(in Input) ([]Finding, string) {
 			}
 			findings = append(findings, Finding{
 				ID:       "image-pull/" + pod.Name + "/" + container.Name,
+				Subject:  EntityRef{Kind: "Pod", Name: pod.Name},
 				Severity: SeverityCritical,
 				Summary: fmt.Sprintf("Container %s in pod %s cannot pull its image.",
 					container.Name, pod.Name),
@@ -281,6 +291,11 @@ func (d volumeDetector) Detect(in Input) ([]Finding, string) {
 		Detail:    "An instance cannot start without its data volume, so the pod stays Pending.",
 		Link:      "/objects",
 		LinkLabel: "Objects",
+	}
+	// One unbound claim is the finding's subject; several are the
+	// cluster's problem, and the finding names no single one.
+	if len(unbound) == 1 {
+		finding.Subject = EntityRef{Kind: "PersistentVolumeClaim", Name: unbound[0].Name}
 	}
 	for _, volume := range unbound {
 		finding.Evidence = append(finding.Evidence, Evidence{
