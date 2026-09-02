@@ -190,6 +190,16 @@ The versions themselves are **observed, never configured**:
 A version the console has not observed leaves its pinned rules at
 "could not run" — never a silent skip and never a guess.
 
+Some of the console's own knowledge expires on a calendar rather than
+on a release. A support boundary moves when upstream retires the next
+version, and nothing in the observed world changes to announce it, so
+the two end-of-life rules and the verified-release list each carry the
+date their claim stops being safe to assert unreviewed. The catalog's
+tests fail once that date passes, naming what to go and read. A console
+that kept telling operators a supported version is unsupported — or
+said nothing about one that no longer is — would be worse than a red
+build.
+
 The pins are **verified, not merely recorded**: `make verify-pins`
 (run in CI beside the other repository checks) fetches each verified
 CloudNativePG release's source through the Go module proxy and greps

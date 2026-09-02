@@ -71,6 +71,21 @@ type Rule struct {
 	// alone are the finding — the rule fires whenever it applies, which
 	// is how "this version is itself the problem" is written.
 	When Condition
+	// ReviewBy is the date, as YYYY-MM-DD, by which this rule's
+	// console-pinned knowledge stops being safe to assert unreviewed.
+	// It is for the claims that go stale on a calendar rather than on a
+	// release: a support boundary moves when upstream retires the next
+	// version, and nothing in the observed world changes to say so.
+	//
+	// The console verifies the operator's strings against the operator's
+	// source, and this is the same discipline turned on its own claims:
+	// the catalog's tests fail once the date passes, so a stale boundary
+	// stops the build instead of quietly telling operators that a
+	// supported version is unsupported, or worse, saying nothing about
+	// one that is. Empty means the rule states nothing that expires —
+	// a phase, an event reason and a log line are true until the string
+	// changes, which the pin verification already catches.
+	ReviewBy string
 	// NextSteps is the console-pinned guidance carried onto every
 	// finding this rule produces. See Finding.NextSteps.
 	NextSteps string
