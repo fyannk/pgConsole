@@ -44,7 +44,7 @@ func pod(name, uid string, minutesAgo int) history.Entry {
 func TestHistoryIncarnationsCountsIdentitiesNotEdits(t *testing.T) {
 	t.Parallel()
 	rule := Rule{ID: "replaced", Summary: "Replaced.", When: HistoryIncarnations{
-		Kind: "Pod", Count: 3, Within: time.Hour}}
+		Kind: "Pod", Identities: 3, Within: time.Hour}}
 
 	if check, _ := evaluateRule(rule, Input{Now: now}); check.Outcome != CheckUnavailable ||
 		!strings.Contains(check.Because, "not recorded") {
@@ -75,9 +75,13 @@ func TestHistoryIncarnationsCountsIdentitiesNotEdits(t *testing.T) {
 		findings[0].ID != "replaced/pod/orders-1" {
 		t.Errorf("finding = %s on %+v, want the replaced pod", findings[0].ID, findings[0].Subject)
 	}
-	if !strings.Contains(findings[0].Summary, "replaced 3 times") ||
+	// Three identities prove two replacements happened inside the
+	// window, and the first identity may itself have replaced one from
+	// before it — so the claim is a floor, and the evidence carries the
+	// count it was derived from.
+	if !strings.Contains(findings[0].Summary, "replaced at least 2 times") ||
 		!strings.Contains(findings[0].Evidence[0].Detail, "3 distinct object identities") {
-		t.Errorf("finding does not state the count: %+v", findings[0])
+		t.Errorf("finding does not state the count honestly: %+v", findings[0])
 	}
 
 	// The third identity falls outside the window, so the window is
@@ -86,6 +90,41 @@ func TestHistoryIncarnationsCountsIdentitiesNotEdits(t *testing.T) {
 		pod("orders-1", "uid-a", 200), pod("orders-1", "uid-b", 30), pod("orders-1", "uid-c", 10))
 	if check, _ := evaluateRule(rule, stale); check.Outcome != CheckClear {
 		t.Errorf("outcome = %v with one identity outside the window, want clear", check.Outcome)
+	}
+}
+
+// TestTimelineGroupsByObjectNotByName proves the grouping key is the
+// whole object coordinate: two objects of different kinds that share a
+// name are two timelines, not one, so neither one's records inflate the
+// other's count or borrow its kind.
+func TestTimelineGroupsByObjectNotByName(t *testing.T) {
+	t.Parallel()
+	rule := Rule{ID: "rewritten", Summary: "Rewritten.", When: HistoryChanges{
+		Changes: []history.Change{history.ChangeSpec}, Count: 3, Within: time.Hour}}
+	shared := func(kind, uid string, minutesAgo int) history.Entry {
+		return history.Entry{
+			Kind: kind, Name: "orders", UID: uid, Change: history.ChangeSpec,
+			ObservedAt: now.Add(-time.Duration(minutesAgo) * time.Minute),
+		}
+	}
+	// Two of each: enough to reach the threshold only if the two kinds
+	// were wrongly counted as one object.
+	split := timeline(
+		shared("Pooler", "pooler-uid", 40), shared("Pooler", "pooler-uid", 30),
+		shared("Service", "service-uid", 20), shared("Service", "service-uid", 10))
+	if check, findings := evaluateRule(rule, split); check.Outcome != CheckClear {
+		t.Errorf("outcome = %v, want clear: two names that collide are two objects: %+v",
+			check.Outcome, findings)
+	}
+
+	// The same four records on one object do reach it, and the finding
+	// names that object's own kind.
+	together := timeline(
+		shared("Pooler", "pooler-uid", 40), shared("Pooler", "pooler-uid", 30),
+		shared("Pooler", "pooler-uid", 20))
+	_, findings := evaluateRule(rule, together)
+	if len(findings) != 1 || findings[0].Subject != (EntityRef{Kind: "Pooler", Name: "orders"}) {
+		t.Errorf("findings = %+v, want one on Pooler/orders", findings)
 	}
 }
 
@@ -137,7 +176,7 @@ func TestHistoryChangesNamesTheWriters(t *testing.T) {
 func TestTimelineCountsDiscloseAContactGap(t *testing.T) {
 	t.Parallel()
 	rule := Rule{ID: "replaced", Summary: "Replaced.", When: HistoryIncarnations{
-		Kind: "Pod", Count: 2, Within: time.Hour}}
+		Kind: "Pod", Identities: 2, Within: time.Hour}}
 	gapped := pod("orders-1", "uid-b", 20)
 	gapped.AfterGap = true
 	_, findings := evaluateRule(rule, timeline(pod("orders-1", "uid-a", 40), gapped))

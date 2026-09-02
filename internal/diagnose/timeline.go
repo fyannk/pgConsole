@@ -39,11 +39,27 @@ import (
 // an absence rules nothing out — the same footing as the log checks,
 // and every rule built on these conditions says so.
 
+// objectKey identifies one object across its incarnations: everything
+// that makes it that object except the identity a replacement changes.
+// Grouping by name alone would merge objects that merely share a name —
+// a Pooler and the Service the operator names after it — into one
+// inflated count, so the whole coordinate is the key and the UID
+// deliberately is not part of it.
+type objectKey struct {
+	Group, Version, Kind string
+	Namespace, Name      string
+}
+
+// String renders the key for ordering.
+func (k objectKey) String() string {
+	return k.Group + "/" + k.Version + "/" + k.Kind + "/" + k.Namespace + "/" + k.Name
+}
+
 // windowed is the entries of one bounded kind observed inside the
-// trailing window, grouped by object name in a stable order.
-func windowed(in Input, kind string, span time.Duration) ([]string, map[string][]history.Entry) {
+// trailing window, grouped by object in a stable order.
+func windowed(in Input, kind string, span time.Duration) ([]objectKey, map[objectKey][]history.Entry) {
 	cutoff := in.Now.Add(-span)
-	byName := map[string][]history.Entry{}
+	byObject := map[objectKey][]history.Entry{}
 	for _, entry := range in.History.Entries {
 		if kind != "" && entry.Kind != kind {
 			continue
@@ -51,14 +67,18 @@ func windowed(in Input, kind string, span time.Duration) ([]string, map[string][
 		if entry.ObservedAt.Before(cutoff) {
 			continue
 		}
-		byName[entry.Name] = append(byName[entry.Name], entry)
+		key := objectKey{
+			Group: entry.Group, Version: entry.Version, Kind: entry.Kind,
+			Namespace: entry.Namespace, Name: entry.Name,
+		}
+		byObject[key] = append(byObject[key], entry)
 	}
-	names := make([]string, 0, len(byName))
-	for name := range byName {
-		names = append(names, name)
+	keys := make([]objectKey, 0, len(byObject))
+	for key := range byObject {
+		keys = append(keys, key)
 	}
-	sort.Strings(names)
-	return names, byName
+	sort.Slice(keys, func(a, b int) bool { return keys[a].String() < keys[b].String() })
+	return keys, byObject
 }
 
 // gapNote reports how many of the entries were discovered only after a
@@ -97,8 +117,11 @@ type HistoryIncarnations struct {
 	// Kind bounds the objects considered; empty considers every kind
 	// the timeline records.
 	Kind string
-	// Count is the number of distinct identities that matches.
-	Count int
+	// Identities is the number of distinct identities that matches. It
+	// is one more than the replacements it implies: going from one
+	// identity to the next is one replacement, so three identities
+	// inside the window prove two replacements happened inside it.
+	Identities int
 	// Within is the trailing window.
 	Within time.Duration
 }
@@ -108,36 +131,40 @@ func (c HistoryIncarnations) describe() string {
 	if c.Kind != "" {
 		subject = "a " + c.Kind
 	}
-	return fmt.Sprintf("%s replaced at least %d times within %s", subject, c.Count, c.Within)
+	return fmt.Sprintf("%s seen under at least %d distinct identities within %s",
+		subject, c.Identities, c.Within)
 }
 
 func (c HistoryIncarnations) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	if reason := historyUnavailable(in); reason != "" {
 		return nil, reason
 	}
-	names, byName := windowed(in, c.Kind, c.Within)
+	objects, byObject := windowed(in, c.Kind, c.Within)
 	var matches []conditionMatch
-	for _, name := range names {
-		entries := byName[name]
+	for _, object := range objects {
+		entries := byObject[object]
 		seen := map[string]bool{}
 		for _, entry := range entries {
 			if entry.UID != "" {
 				seen[entry.UID] = true
 			}
 		}
-		if len(seen) < c.Count {
+		if len(seen) < c.Identities {
 			continue
 		}
-		kind := entries[0].Kind
+		// Each step from one identity to the next is one replacement,
+		// and the first identity may itself have replaced one from
+		// before the window — so this is a floor, and says so.
+		replacements := len(seen) - 1
 		matches = append(matches, conditionMatch{
-			idSuffix: "/" + strings.ToLower(kind) + "/" + name,
-			subject:  EntityRef{Kind: kind, Name: name},
+			idSuffix: "/" + strings.ToLower(object.Kind) + "/" + object.Name,
+			subject:  EntityRef{Kind: object.Kind, Name: object.Name},
 			at:       newest(entries),
-			summary: fmt.Sprintf("%s %s has been replaced %d times in the last %s.",
-				kind, name, len(seen), c.Within),
+			summary: fmt.Sprintf("%s %s has been replaced at least %d times in the last %s.",
+				object.Kind, object.Name, replacements, c.Within),
 			evidence: []Evidence{{
 				Origin: "console-observed timeline",
-				Object: kind + "/" + name,
+				Object: object.Kind + "/" + object.Name,
 				Detail: fmt.Sprintf("%d distinct object identities under this name since %s%s",
 					len(seen), in.Now.Add(-c.Within).UTC().Format("15:04:05Z"), gapNote(entries)),
 			}},
@@ -181,11 +208,11 @@ func (c HistoryChanges) evaluate(_ string, in Input) ([]conditionMatch, string) 
 	if reason := historyUnavailable(in); reason != "" {
 		return nil, reason
 	}
-	names, byName := windowed(in, c.Kind, c.Within)
+	objects, byObject := windowed(in, c.Kind, c.Within)
 	var matches []conditionMatch
-	for _, name := range names {
+	for _, object := range objects {
 		var counted []history.Entry
-		for _, entry := range byName[name] {
+		for _, entry := range byObject[object] {
 			for _, change := range c.Changes {
 				if entry.Change == change {
 					counted = append(counted, entry)
@@ -196,12 +223,11 @@ func (c HistoryChanges) evaluate(_ string, in Input) ([]conditionMatch, string) 
 		if len(counted) < c.Count {
 			continue
 		}
-		kind := counted[0].Kind
 		detail := fmt.Sprintf("%d records since %s%s", len(counted),
 			in.Now.Add(-c.Within).UTC().Format("15:04:05Z"), gapNote(counted))
 		evidence := []Evidence{{
 			Origin: "console-observed timeline",
-			Object: kind + "/" + name,
+			Object: object.Kind + "/" + object.Name,
 			Detail: detail,
 		}}
 		if actors := actorsOf(counted); actors != "" {
@@ -210,15 +236,16 @@ func (c HistoryChanges) evaluate(_ string, in Input) ([]conditionMatch, string) 
 			// what keeps rewriting this.
 			evidence = append(evidence, Evidence{
 				Origin: "Kubernetes-reported",
-				Object: kind + "/" + name,
+				Object: object.Kind + "/" + object.Name,
 				Detail: "last-touching field managers: " + actors,
 			})
 		}
 		matches = append(matches, conditionMatch{
-			idSuffix:  "/" + strings.ToLower(kind) + "/" + name,
-			subject:   EntityRef{Kind: kind, Name: name},
-			at:        newest(counted),
-			summary:   fmt.Sprintf("%s %s changed %d times in the last %s.", kind, name, len(counted), c.Within),
+			idSuffix: "/" + strings.ToLower(object.Kind) + "/" + object.Name,
+			subject:  EntityRef{Kind: object.Kind, Name: object.Name},
+			at:       newest(counted),
+			summary: fmt.Sprintf("%s %s changed %d times in the last %s.",
+				object.Kind, object.Name, len(counted), c.Within),
 			evidence:  evidence,
 			link:      "/history",
 			linkLabel: "History",

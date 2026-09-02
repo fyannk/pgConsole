@@ -148,7 +148,7 @@ func kubernetesRules() []diagnose.Rule {
 				"destroying it faster than it settles — a failing probe, an evicting " +
 				"node, or a controller and an operator disagreeing about whether it " +
 				"should exist. " + timelineNote,
-			When: diagnose.HistoryIncarnations{Kind: "Pod", Count: 3, Within: time.Hour},
+			When: diagnose.HistoryIncarnations{Kind: "Pod", Identities: 3, Within: time.Hour},
 			NextSteps: "Open the timeline for that name and read what ended each " +
 				"incarnation. The pod's own events say who deleted it; a kubelet " +
 				"eviction and an operator replacement look nothing alike there.",
