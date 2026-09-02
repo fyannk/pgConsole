@@ -42,19 +42,19 @@ const (
 func postgresRules() []diagnose.Rule {
 	return []diagnose.Rule{
 		{
-			// The substring is the JSON field CloudNativePG's log pipe
-			// wraps every PostgreSQL server record in, which is why a
-			// PostgreSQL rule carries a CloudNativePG pin: the message is
-			// the database's, the envelope is the operator's. Matching
-			// the envelope rather than a bare "FATAL:" keeps quoted
-			// errors in other components' lines from counting as the
-			// server speaking. The log pipe's field is verbatim-identical
-			// across the verified releases 1.28.4, 1.29.2 and 1.30.0.
+			// The severity is read from the field CloudNativePG's log pipe
+			// puts it in, which is why a PostgreSQL rule carries a
+			// CloudNativePG pin: the message is the database's, the
+			// envelope is the operator's. Reading the field rather than
+			// searching the line keeps a severity quoted inside some
+			// other component's message from counting as the server
+			// speaking, and it survives any reordering of the envelope's
+			// keys. The path is the one the operator's own log decoder
+			// declares, unchanged across the verified releases.
 			ID:        "postgres-fatal",
 			Component: diagnose.ComponentPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
-			Pinned:    []string{"error_severity"},
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a server log record with FATAL severity",
 			Summary:   "PostgreSQL logged a FATAL-severity record.",
@@ -63,8 +63,9 @@ func postgresRules() []diagnose.Rule {
 				"severity too; the quoted record says which this is. Read from the " +
 				"container's log while following it, best effort: the count below is " +
 				"a floor and an absence here rules nothing out.",
-			When: diagnose.LogContains{
-				Substrings: []string{`"error_severity":"FATAL"`},
+			When: diagnose.LogFields{
+				Fields: []diagnose.LogField{
+					{Path: "record.error_severity", Equals: "FATAL"}},
 				// PostgreSQL stamps routine lifecycle refusals FATAL too,
 				// and the operator's own probes provoke them on every
 				// start: a connection during startup, shutdown, or crash
@@ -88,14 +89,14 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
-			Pinned:    []string{"error_severity"},
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a server log record with PANIC severity",
 			Summary:   "PostgreSQL panicked, which ends the whole server process.",
 			Detail: "A panic crashes the postmaster and forces crash recovery. Read from " +
 				"the container's log while following it, best effort: the count below " +
 				"is a floor and an absence here rules nothing out.",
-			When: diagnose.LogContains{Substrings: []string{`"error_severity":"PANIC"`}},
+			When: diagnose.LogFields{Fields: []diagnose.LogField{
+				{Path: "record.error_severity", Equals: "PANIC"}}},
 			// The panic is the server on one instance failing to write WAL, so
 			// the relation is pinned to the pod and to the hour: both lines
 			// carry a time, and a disk-full line hours old on another

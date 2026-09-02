@@ -44,8 +44,9 @@ func TestCatalogDeclarationsAreComplete(t *testing.T) {
 		if rule.When == nil && len(rule.Requires) == 0 {
 			t.Errorf("rule %q has neither a condition nor a pin, so it would always fire", rule.ID)
 		}
-		if condition, ok := diagnose.LogCondition(rule.When); ok && len(condition.Substrings) == 0 {
-			t.Errorf("log rule %q has no substrings, so it could never match", rule.ID)
+		if matcher, ok := diagnose.LogRuleOf(rule.When); ok &&
+			len(matcher.Contains) == 0 && len(matcher.Fields) == 0 {
+			t.Errorf("log rule %q states nothing to match, so it could never fire", rule.ID)
 		}
 		if all, ok := rule.When.(diagnose.AllOf); ok && countLogConditions(all) > 1 {
 			t.Errorf("rule %q carries more than one log condition; the matcher keys by rule ID", rule.ID)
@@ -71,7 +72,7 @@ func countLogConditions(all diagnose.AllOf) int {
 	count := 0
 	for _, branch := range all.Of {
 		switch condition := branch.(type) {
-		case diagnose.LogContains:
+		case diagnose.LogContains, diagnose.LogFields:
 			count++
 		case diagnose.AllOf:
 			count += countLogConditions(condition)
@@ -87,20 +88,20 @@ func TestLogRulesMirrorTheCatalog(t *testing.T) {
 	t.Parallel()
 	derived := map[string]int{}
 	for _, rule := range LogRules() {
-		derived[rule.ID] = len(rule.Contains)
+		derived[rule.ID] = len(rule.Contains) + len(rule.Fields)
 	}
 	for _, rule := range Rules() {
-		condition, ok := diagnose.LogCondition(rule.When)
+		matcher, ok := diagnose.LogRuleOf(rule.When)
 		if !ok {
 			continue
 		}
-		substrings, present := derived[rule.ID]
+		tests, present := derived[rule.ID]
 		if !present {
 			t.Errorf("log rule %q not derived for the matcher", rule.ID)
 			continue
 		}
-		if substrings != len(condition.Substrings) {
-			t.Errorf("rule %q substring count diverges", rule.ID)
+		if tests != len(matcher.Contains)+len(matcher.Fields) {
+			t.Errorf("rule %q test count diverges", rule.ID)
 		}
 		delete(derived, rule.ID)
 	}

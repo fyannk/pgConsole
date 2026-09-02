@@ -177,6 +177,62 @@ func (c LogContains) describe() string {
 }
 
 func (c LogContains) evaluate(ruleID string, in Input) ([]conditionMatch, string) {
+	return logMatches(ruleID, in)
+}
+
+// LogFields matches a line of a followed container log by the values of
+// its named fields rather than by searching the whole line. The operator
+// writes JSON, so a rule that knows which field carries the string it
+// looks for can say so: a severity belongs in the severity field, and a
+// line quoting that severity inside some other field is not the server
+// reporting it.
+//
+// It is the more precise of the two log conditions and the less widely
+// usable: a rule can only be written this way once the field carrying
+// its string has actually been read out of the emitting component's
+// source. Where that is not established, LogContains stays the honest
+// choice.
+type LogFields struct {
+	// Fields are the tests, all of which must hold.
+	Fields []LogField
+	// Except are substrings any one of which withdraws the match, tested
+	// against the whole line exactly as LogContains tests them.
+	Except []string
+}
+
+// LogField is one test against a named field: its exact value, or a
+// substring of it where the component formats a value into the message.
+type LogField struct {
+	Path     string
+	Equals   string
+	Contains string
+}
+
+func (c LogFields) describe() string {
+	parts := make([]string, len(c.Fields))
+	for i, field := range c.Fields {
+		if field.Equals != "" {
+			parts[i] = fmt.Sprintf("%s is %q", field.Path, field.Equals)
+		} else {
+			parts[i] = fmt.Sprintf("%s contains %q", field.Path, field.Contains)
+		}
+	}
+	described := "a followed log line whose " + strings.Join(parts, " and ")
+	if len(c.Except) > 0 {
+		described += fmt.Sprintf(", excluding %d known-benign messages", len(c.Except))
+	}
+	return described
+}
+
+func (c LogFields) evaluate(ruleID string, in Input) ([]conditionMatch, string) {
+	return logMatches(ruleID, in)
+}
+
+// logMatches is what both log conditions do with a run: read what the
+// continuous matcher already retained under this rule's ID. Neither
+// condition re-tests a line here — the lines are long gone by the time a
+// run happens, which is the whole reason the matcher is continuous.
+func logMatches(ruleID string, in Input) ([]conditionMatch, string) {
 	if in.Logs == nil {
 		return nil, "log following is off, so nothing in the logs has been read"
 	}
@@ -1130,35 +1186,43 @@ func ruleDescribes(rule Rule) string {
 func LogRules(rules []Rule) []logstream.Rule {
 	var derived []logstream.Rule
 	for _, rule := range rules {
-		if condition, ok := LogCondition(rule.When); ok {
-			derived = append(derived, logstream.Rule{
-				ID:       rule.ID,
-				Contains: condition.Substrings,
-				Except:   condition.Except,
-				Summary:  rule.Summary,
-			})
+		if matcher, ok := LogRuleOf(rule.When); ok {
+			matcher.ID = rule.ID
+			matcher.Summary = rule.Summary
+			derived = append(derived, matcher)
 		}
 	}
 	return derived
 }
 
-// LogCondition finds the log condition a rule's When carries, at the
-// top or as one branch of an AllOf. A rule carries at most one: the
-// matcher keys observations by rule ID, so two log conditions in one
-// rule would be indistinguishable when the rule is evaluated. The
-// catalog's tests hold that line.
-func LogCondition(when Condition) (LogContains, bool) {
+// LogRuleOf derives the matcher rule a condition asks for, from either
+// log condition, at the top or as one branch of an AllOf. The returned
+// rule carries what to match and not the identity, which only the
+// catalog rule around it knows.
+//
+// A rule carries at most one log condition: the matcher keys
+// observations by rule ID, so two in one rule would be
+// indistinguishable when the rule is evaluated. The catalog's tests
+// hold that line.
+func LogRuleOf(when Condition) (logstream.Rule, bool) {
 	switch condition := when.(type) {
 	case LogContains:
-		return condition, true
+		return logstream.Rule{Contains: condition.Substrings, Except: condition.Except}, true
+	case LogFields:
+		fields := make([]logstream.FieldTest, len(condition.Fields))
+		for i, field := range condition.Fields {
+			fields[i] = logstream.FieldTest{
+				Path: field.Path, Equals: field.Equals, Contains: field.Contains}
+		}
+		return logstream.Rule{Fields: fields, Except: condition.Except}, true
 	case AllOf:
 		for _, branch := range condition.Of {
-			if found, ok := LogCondition(branch); ok {
+			if found, ok := LogRuleOf(branch); ok {
 				return found, true
 			}
 		}
 	}
-	return LogContains{}, false
+	return logstream.Rule{}, false
 }
 
 // AllOf matches when every branch matches, which is how a rule states a

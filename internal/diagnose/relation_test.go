@@ -226,7 +226,7 @@ func TestLogConditionIsFoundInsideAllOf(t *testing.T) {
 	if check, findings := evaluateRule(rules[1], in); check.Outcome != CheckMatched || len(findings) != 1 {
 		t.Errorf("nested log rule = %v (%s)", check.Outcome, check.Because)
 	}
-	if _, ok := LogCondition(rules[2].When); ok {
+	if _, ok := LogRuleOf(rules[2].When); ok {
 		t.Error("a rule without a log condition reported one")
 	}
 }

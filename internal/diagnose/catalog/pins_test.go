@@ -104,6 +104,24 @@ func conditionLiterals(when diagnose.Condition) []string {
 		return condition.Reasons
 	case diagnose.LogContains:
 		return condition.Substrings
+	case diagnose.LogFields:
+		literals := make([]string, 0, len(condition.Fields))
+		for _, field := range condition.Fields {
+			// Both halves have to exist in the tree the rule is pinned
+			// to. The path is the console's reading of the component's
+			// schema, verified a segment at a time because the dotted
+			// form is the console's own construction while each segment
+			// is a JSON tag the component declares. The value is the
+			// component's own string.
+			literals = append(literals, strings.Split(field.Path, ".")...)
+			if field.Equals != "" {
+				literals = append(literals, field.Equals)
+			}
+			if field.Contains != "" {
+				literals = append(literals, field.Contains)
+			}
+		}
+		return literals
 	case diagnose.BackupPhase:
 		return condition.AnyOf
 	case diagnose.AllOf:

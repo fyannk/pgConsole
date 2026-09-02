@@ -35,14 +35,15 @@ func logRules() []diagnose.Rule {
 	return []diagnose.Rule{
 		// ------------------------------------------------ WAL archiving
 		{
-			ID:            "cnpg-wal-archive-command-failed",
-			Component:     diagnose.ComponentCNPG,
-			Requires:      pin(since128),
-			Severity:      diagnose.SeverityCritical,
-			Describes:     "the archive_command wrapper failing",
-			Summary:       "The WAL archive command is failing, so WAL is accumulating on the instance.",
-			Detail:        streamCaveat,
-			When:          diagnose.LogContains{Substrings: []string{"failed to run wal-archive command"}},
+			ID:        "cnpg-wal-archive-command-failed",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "the archive_command wrapper failing",
+			Summary:   "The WAL archive command is failing, so WAL is accumulating on the instance.",
+			Detail:    streamCaveat,
+			When: diagnose.LogFields{Fields: []diagnose.LogField{
+				{Path: "msg", Equals: "failed to run wal-archive command"}}},
 			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-wal-archiving-failing"}},
 		},
 		{
@@ -114,7 +115,8 @@ func logRules() []diagnose.Rule {
 			Detail: "The quoted error carries the cause — connectivity to the primary, " +
 				"authentication, exhausted max_wal_senders, or disk. The cluster stays " +
 				"below its declared instance count until this succeeds. " + streamCaveat,
-			When: diagnose.LogContains{Substrings: []string{"Error joining node"}},
+			When: diagnose.LogFields{Fields: []diagnose.LogField{
+				{Path: "msg", Equals: "Error joining node"}}},
 		},
 		// ---------------------------------------------------- bootstrap
 		{
@@ -179,7 +181,8 @@ func logRules() []diagnose.Rule {
 			Describes: "the postmaster failing to launch",
 			Summary:   "PostgreSQL failed to start on an instance.",
 			Detail:    streamCaveat,
-			When:      diagnose.LogContains{Substrings: []string{"Unable to start PostgreSQL up"}},
+			When: diagnose.LogFields{Fields: []diagnose.LogField{
+				{Path: "msg", Equals: "Unable to start PostgreSQL up"}}},
 		},
 		{
 			ID:        "cnpg-postgres-exited",
@@ -190,7 +193,8 @@ func logRules() []diagnose.Rule {
 			Summary:   "PostgreSQL exited with errors — this is what a crash-looping instance looks like from inside.",
 			Detail: "The instance manager terminates with it, so the kubelet restarts the " +
 				"pod and the restart count climbs. " + streamCaveat,
-			When: diagnose.LogContains{Substrings: []string{"PostgreSQL process exited with errors"}},
+			When: diagnose.LogFields{Fields: []diagnose.LogField{
+				{Path: "msg", Equals: "PostgreSQL process exited with errors"}}},
 			// Both causes are read from the same instance's log, so the
 			// relation is pinned to the pod: a panic on one instance does not
 			// explain an exit on another. The panic is placed within the hour
