@@ -11,6 +11,29 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **Diagnostics read every source the console publishes.** Five
+  snapshots reached the engine and no check consumed them; each now
+  has one. `cnpg-pooler-short` reports a Pooler with fewer ready
+  instances than declared, and `cnpg-pooler-clients-waiting` reads the
+  PgBouncer exporter's longest client wait. `cnpg-quorum-standbys-short`
+  reports a failover quorum with fewer potentially synchronous standbys
+  than transactions wait for. `cnpg-image-catalog-missing` and
+  `cnpg-image-catalog-lacks-major` follow the Cluster's `imageCatalogRef`
+  to the catalog it names, and are declared causes of the operator's
+  own "incomplete or invalid image catalog" phase. Three repository
+  checks restate the repository-evidence sidecar's typed state for WAL
+  continuity, recovery coverage, and retention, naming every way the
+  channel can be silent as the reason they could not run; the WAL
+  finding nests under the operator's archiving condition. A test now
+  proves that withholding any one source from the engine changes what
+  a run reports, so a source can no longer be plumbed in and read by
+  nothing. The history snapshot, which no check read, no longer reaches
+  the engine.
+- **A golden test of the incident view** over the real catalog: the
+  object-store refusal, archiving failure, full WAL volume, panic, exit
+  and crash loop on one instance render as one card with every link
+  stating its terms, while a crash loop on another instance stays its
+  own card and names the near misses.
 - **Diagnostics relate findings on evidence, not on names.** Every
   finding now names its subject (the pod, backup, claim or quota it is
   about) and the time of the observation where its source reports one.

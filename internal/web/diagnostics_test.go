@@ -25,10 +25,12 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
 	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
@@ -409,4 +411,111 @@ func cardIDs(cards []FindingView) []string {
 		ids[i] = card.ID
 	}
 	return ids
+}
+
+type staticLogs []logstream.Observation
+
+func (l staticLogs) Observations() []logstream.Observation { return l }
+
+// TestDiagnosticsRendersTheWALChainAsOneIncident is the golden test of
+// the incident view over the real catalog: the flagship chain — the
+// object store refusing credentials, archiving failing, WAL filling the
+// volume, PostgreSQL panicking and exiting, the container crash-looping
+// — all on one instance renders as one card rooted at the refusal, with
+// every link stating its terms, while an unrelated crash loop on another
+// instance stays its own card and names the near misses.
+func TestDiagnosticsRendersTheWALChainAsOneIncident(t *testing.T) {
+	t.Parallel()
+	h := newDiagnosticsHandler(t, true, staticSnapshots{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil)
+	at := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	major := 17
+	observed := func(rule, pod, container, line string, minutesAgo int) logstream.Observation {
+		seen := at.Add(-time.Duration(minutesAgo) * time.Minute)
+		return logstream.Observation{RuleID: rule, Pod: pod, Container: container, Line: line,
+			FirstSeen: seen, LastSeen: seen, Count: 1}
+	}
+	member := func(name string) observe.PodFacts {
+		return observe.PodFacts{Name: name, Containers: []observe.ContainerFacts{
+			{Name: "bootstrap-controller", Init: true, Image: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"},
+			{Name: "postgres", Image: "ghcr.io/cloudnative-pg/postgresql:17.5", State: "waiting", Reason: "CrashLoopBackOff"},
+			{Name: "plugin-barman-cloud", Image: "ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.5.0"},
+		}}
+	}
+	in := diagnose.Input{
+		Now:        at,
+		HasCluster: true,
+		Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{
+			Present: true, PostgresMajorVersion: &major, CurrentPrimary: "orders-1", TargetPrimary: "orders-1",
+			Conditions: []observe.Condition{{Type: "ContinuousArchiving", Status: "False", Reason: "Failing",
+				Message: "unexpected failure invoking barman-cloud-wal-archive"}},
+		}},
+		HasPods: true,
+		Pods:    observe.PodsSnapshot{Pods: []observe.PodFacts{member("orders-1"), member("orders-2")}},
+		Logs: staticLogs{
+			observed("object-store-denied", "orders-1", "plugin-barman-cloud",
+				"An error occurred (AccessDenied) when calling the PutObject operation", 30),
+			observed("cnpg-wal-disk-full", "orders-1", "postgres", "no free disk space for WALs", 20),
+			observed("postgres-panic", "orders-1", "postgres", `{"error_severity":"PANIC","message":"could not write to file"}`, 10),
+			observed("cnpg-postgres-exited", "orders-1", "postgres", "PostgreSQL process exited with errors", 9),
+		},
+	}
+	view := h.buildDiagnosticsView(req, in, diagnose.Run(in, catalog.Rules()...))
+	cards := map[string]FindingView{}
+	for _, card := range view.Findings {
+		cards[card.ID] = card
+	}
+	if len(cards) != 2 {
+		t.Fatalf("cards = %v, want the incident and the unrelated crash loop", cardIDs(view.Findings))
+	}
+
+	root, ok := cards["object-store-denied/orders-1/plugin-barman-cloud"]
+	if !ok {
+		t.Fatalf("the incident is not rooted at the object store's refusal: %v", cardIDs(view.Findings))
+	}
+	nested := map[string]FindingView{}
+	for _, consequence := range root.Consequences {
+		nested[consequence.ID] = consequence
+	}
+	for _, id := range []string{
+		"cnpg-wal-archiving-failing",
+		"cnpg-wal-disk-full/orders-1/postgres",
+		"postgres-panic/orders-1/postgres",
+		"cnpg-postgres-exited/orders-1/postgres",
+		"k8s-container-crashloop/orders-1/postgres",
+	} {
+		if _, ok := nested[id]; !ok {
+			t.Errorf("%s is not inside the incident: %v", id, cardIDs(root.Consequences))
+		}
+	}
+	if len(root.Consequences) != 5 {
+		t.Errorf("incident holds %d consequences, want the five links of the chain: %v", len(root.Consequences), cardIDs(root.Consequences))
+	}
+	if root.Consequences[0].ID != "cnpg-wal-archiving-failing" || root.Consequences[1].ID != "cnpg-wal-disk-full/orders-1/postgres" {
+		t.Errorf("chain is not ordered nearest cause first: %v", cardIDs(root.Consequences))
+	}
+	if via := nested["postgres-panic/orders-1/postgres"].Via; !strings.Contains(via, "same pod") || !strings.Contains(via, "within 1h") {
+		t.Errorf("the panic's terms should state the pod scope and the enforced window: %q", via)
+	}
+	if via := nested["cnpg-wal-archiving-failing"].Via; !strings.Contains(via, "same cluster") {
+		t.Errorf("the condition's terms should state the cluster scope: %q", via)
+	}
+
+	decoy, ok := cards["k8s-container-crashloop/orders-2/postgres"]
+	if !ok {
+		t.Fatalf("the crash loop on the other instance was swallowed: %v", cardIDs(view.Findings))
+	}
+	if len(decoy.Related) == 0 {
+		t.Fatal("the unrelated crash loop lists no near miss")
+	}
+	var namesDisk bool
+	for _, miss := range decoy.Related {
+		if !strings.Contains(miss.Because, "same pod") {
+			t.Errorf("near miss does not give the pod scope as its reason: %+v", miss)
+		}
+		namesDisk = namesDisk || miss.ID == "cnpg-wal-disk-full/orders-1/postgres"
+	}
+	if !namesDisk {
+		t.Errorf("near misses do not name the disk-full finding on the other pod: %+v", decoy.Related)
+	}
 }

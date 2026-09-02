@@ -114,7 +114,11 @@ func phaseRules() []diagnose.Rule {
 			Detail: "No image means nothing can roll: pods keep their current image and a " +
 				"pending upgrade cannot start. The quoted reason names what is missing — " +
 				"usually the catalog itself, or an entry for the requested major version.",
-			When:      diagnose.ClusterPhase{AnyOf: []string{"Cluster has incomplete or invalid image catalog"}},
+			When: diagnose.ClusterPhase{AnyOf: []string{"Cluster has incomplete or invalid image catalog"}},
+			// The catalog checks read the same reference the operator
+			// failed to resolve, and say which way it failed.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-image-catalog-missing"}, {Cause: "cnpg-image-catalog-lacks-major"}},
 			Link:      "/cluster/overview",
 			LinkLabel: "Cluster overview",
 		},

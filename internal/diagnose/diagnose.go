@@ -40,7 +40,6 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/evidence"
-	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
@@ -398,11 +397,6 @@ type Input struct {
 	// reconciliation report on each.
 	DatabaseObjects    observe.DatabaseObjectsSnapshot
 	HasDatabaseObjects bool
-	// History is the bounded object-definition timeline. It is what lets
-	// a detector say when something changed rather than only that it is
-	// wrong now — the difference between a finding and a cause.
-	History    history.Snapshot
-	HasHistory bool
 	// Evidence is the repository-evidence sidecar's status, when one is
 	// wired. The console never reads object storage itself; this is the
 	// viewer's word, carried through.
