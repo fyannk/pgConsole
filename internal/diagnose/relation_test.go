@@ -100,6 +100,11 @@ func TestRelationTermsStateOnlyWhatWasEnforced(t *testing.T) {
 func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 	t.Parallel()
 	seen := now.Add(-5 * time.Minute)
+	// A scraped reading is judged against the sweep cadence, so this one
+	// is a sweep old rather than five minutes: the subject and time it
+	// carries are what this test is about, and a refused reading would
+	// never get far enough to carry them.
+	swept := now.Add(-30 * time.Second)
 	moved := now.Add(-20 * time.Minute)
 	created := now.Add(-time.Hour)
 
@@ -118,7 +123,7 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 	primary.Cluster.Cluster.TargetPrimaryTimestamp = &moved
 	pods := Input{Now: now, HasPods: true, Pods: observe.PodsSnapshot{Pods: []observe.PodFacts{{
 		Name: "orders-3", Containers: []observe.ContainerFacts{{Name: "postgres", Reason: "OOMKilled"}}}}}}
-	metric := Input{Now: now, Metrics: staticWindow{"orders-2": {"fencing-on": {At: seen.Unix(), Value: 1}}}}
+	metric := Input{Now: now, Metrics: staticWindow{"orders-2": {"fencing-on": {At: swept.Unix(), Value: 1}}}}
 	objects := Input{Now: now, HasDatabaseObjects: true, DatabaseObjects: observe.DatabaseObjectsSnapshot{
 		Databases: []observe.DatabaseFacts{{Name: "app", Declared: observe.Declared{Applied: boolPtr(false)}}}}}
 	for name, tc := range map[string]struct {
@@ -133,7 +138,7 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 		"phase":     {ClusterPhase{AnyOf: []string{"Waiting for user action"}}, cluster, clusterSubject, time.Time{}},
 		"primary":   {PrimaryMismatch{MinAge: time.Minute}, primary, clusterSubject, moved},
 		"container": {ContainerState{Reasons: []string{"OOMKilled"}}, pods, EntityRef{Kind: "Pod", Name: "orders-3"}, time.Time{}},
-		"metric":    {InstantNonZero{Key: "fencing-on"}, metric, EntityRef{Kind: "Pod", Name: "orders-2"}, seen},
+		"metric":    {InstantNonZero{Key: "fencing-on"}, metric, EntityRef{Kind: "Pod", Name: "orders-2"}, swept},
 		"declared":  {DeclaredObjectFailed{}, objects, EntityRef{Kind: "Database", Name: "app"}, time.Time{}},
 	} {
 		rule := Rule{ID: "subject", Summary: "Subject.", When: tc.when}

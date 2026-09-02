@@ -173,6 +173,8 @@ type replicaWindow struct {
 	series   map[string]map[string]float64
 }
 
+func (w replicaWindow) Interval() time.Duration { return metrics.DefaultInterval }
+
 func (w replicaWindow) Instances() []string { return nil }
 
 func (w replicaWindow) Range(key string, tier metrics.Tier) ([]int64, map[string][]*float64) {

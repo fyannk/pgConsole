@@ -9,6 +9,30 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A frozen metrics exporter no longer clears a check.** The scraped
+  metrics window was the one input never given the staleness treatment
+  the other sources got: the five conditions reading it took the newest
+  retained reading whatever its age, so a scraper that had lost an
+  exporter an hour ago left every metric-backed check reporting "clear"
+  — the screen stating it had looked and found nothing, when what it
+  had found was an hour-old number. Matches were the same fault
+  mirrored, reporting a past reading in the present tense, and
+  `cnpg-primary-disagreement` was worse still: it sets a live operator
+  report against a scraped one, so a reading frozen before a failover
+  manufactured the disagreement it exists to detect.
+
+  Readings are now judged one at a time — the scraper sweeps each
+  instance separately, so one lost exporter must not withdraw findings
+  about the instances still answering — against a horizon taken from
+  the window's own scrape cadence: three intervals, and never less than
+  a minute. Age is checked before value, so a stale reading below its
+  threshold withdraws the check rather than clearing it, and the reason
+  names how far behind the newest refused reading is. `MetricsWindow`
+  gained `Interval()` for the purpose, and `stale.go` now answers for
+  the metrics window as it does for every other source.
+
 ### Added
 
 - **The console's dated knowledge expires on purpose.** A support

@@ -548,8 +548,9 @@ func (c ClusterPhase) evaluate(_ string, in Input) ([]conditionMatch, string) {
 // quoted in the evidence.
 //
 // It reads the scraped window, so it is a claim about what the exporter
-// last reported — the read time is quoted so the reader can judge how
-// stale that claim is.
+// last reported. A reading the sweep has stopped refreshing is refused
+// rather than taken at face value, and the read time is quoted on the
+// ones that pass so the reader sees how current the claim is.
 type InstantNonZero struct {
 	// Key is the instant key in the instance metric catalog.
 	Key string
@@ -560,19 +561,17 @@ func (c InstantNonZero) describe() string {
 }
 
 func (c InstantNonZero) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if in.Metrics == nil {
-		return nil, "instance metrics are not scraped"
+	if reason := metricsUnavailable(in); reason != "" {
+		return nil, reason
 	}
+	fresh := freshnessOf(in.Metrics, in.Now, "of "+instantMetricName(c.Key))
 	readings := in.Metrics.InstantReadings()
-	instances := make([]string, 0, len(readings))
-	for instance := range readings {
-		instances = append(instances, instance)
-	}
-	sort.Strings(instances)
 	var matches []conditionMatch
-	for _, instance := range instances {
+	for _, instance := range readingInstances(readings) {
 		reading, reported := readings[instance][c.Key]
-		if !reported || reading.Value == 0 {
+		// Age is judged before value, so a stale zero is withheld
+		// rather than read as the flag being off.
+		if !reported || !fresh.current(reading.At) || reading.Value == 0 {
 			continue
 		}
 		matches = append(matches, conditionMatch{
@@ -588,6 +587,9 @@ func (c InstantNonZero) evaluate(_ string, in Input) ([]conditionMatch, string) 
 			link:      "/cluster/metrics",
 			linkLabel: "Metrics",
 		})
+	}
+	if len(matches) == 0 {
+		return nil, fresh.unavailable()
 	}
 	return matches, ""
 }
@@ -606,14 +608,15 @@ func (c InstantZero) describe() string {
 }
 
 func (c InstantZero) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if in.Metrics == nil {
-		return nil, "instance metrics are not scraped"
+	if reason := metricsUnavailable(in); reason != "" {
+		return nil, reason
 	}
+	fresh := freshnessOf(in.Metrics, in.Now, "of "+instantMetricName(c.Key))
 	readings := in.Metrics.InstantReadings()
 	var matches []conditionMatch
 	for _, instance := range readingInstances(readings) {
 		reading, reported := readings[instance][c.Key]
-		if !reported || reading.Value != 0 {
+		if !reported || !fresh.current(reading.At) || reading.Value != 0 {
 			continue
 		}
 		matches = append(matches, conditionMatch{
@@ -629,6 +632,9 @@ func (c InstantZero) evaluate(_ string, in Input) ([]conditionMatch, string) {
 			link:      "/cluster/metrics",
 			linkLabel: "Metrics",
 		})
+	}
+	if len(matches) == 0 {
+		return nil, fresh.unavailable()
 	}
 	return matches, ""
 }
@@ -652,15 +658,25 @@ func (c InstantShortfall) describe() string {
 }
 
 func (c InstantShortfall) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if in.Metrics == nil {
-		return nil, "instance metrics are not scraped"
+	if reason := metricsUnavailable(in); reason != "" {
+		return nil, reason
 	}
+	fresh := freshnessOf(in.Metrics, in.Now, "of "+instantMetricName(c.Observed))
 	readings := in.Metrics.InstantReadings()
 	var matches []conditionMatch
 	for _, instance := range readingInstances(readings) {
 		expected, hasExpected := readings[instance][c.Expected]
 		observed, hasObserved := readings[instance][c.Observed]
 		if !hasExpected || !hasObserved {
+			continue
+		}
+		// Both sides must be current: comparing a fresh count against a
+		// frozen expectation, or the reverse, invents a shortfall out of
+		// the gap between two sweeps. Both are judged rather than
+		// short-circuited, so the count the reason carries is a true
+		// count of what this check refused.
+		currentObserved, currentExpected := fresh.current(observed.At), fresh.current(expected.At)
+		if !currentObserved || !currentExpected {
 			continue
 		}
 		if expected.Value <= 0 || observed.Value >= expected.Value {
@@ -682,6 +698,9 @@ func (c InstantShortfall) evaluate(_ string, in Input) ([]conditionMatch, string
 			link:      "/cluster/metrics",
 			linkLabel: "Metrics",
 		})
+	}
+	if len(matches) == 0 {
+		return nil, fresh.unavailable()
 	}
 	return matches, ""
 }
@@ -938,13 +957,13 @@ type SeriesAbove struct {
 // reason neither is scraped.
 func (c SeriesAbove) window(in Input) (MetricsWindow, metrics.Catalog, string) {
 	if c.Pooler {
-		if in.PoolerMetrics == nil {
-			return nil, metrics.Pooler, "pooler metrics are not scraped"
+		if reason := poolerMetricsUnavailable(in); reason != "" {
+			return nil, metrics.Pooler, reason
 		}
 		return in.PoolerMetrics, metrics.Pooler, ""
 	}
-	if in.Metrics == nil {
-		return nil, metrics.Instance, "instance metrics are not scraped"
+	if reason := metricsUnavailable(in); reason != "" {
+		return nil, metrics.Instance, reason
 	}
 	return in.Metrics, metrics.Instance, ""
 }
@@ -993,11 +1012,20 @@ func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
 		instances = append(instances, instance)
 	}
 	sort.Strings(instances)
+	fresh := freshnessOf(window, in.Now, "of "+seriesMetricName(catalog, c.Key))
 	var matches []conditionMatch
 	unjudged := 0
 	for _, instance := range instances {
 		samples := readings[instance]
 		reading := samples[len(samples)-1]
+		// The newest retained sample is the only one that could speak
+		// for now, so its age decides whether this instance can be
+		// judged at all — before the threshold, so that an instance
+		// whose exporter froze below it is withheld rather than
+		// counted as being under the line.
+		if !fresh.current(reading.at) {
+			continue
+		}
 		if reading.value < c.Threshold {
 			continue
 		}
@@ -1037,10 +1065,17 @@ func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
 			linkLabel: label,
 		})
 	}
-	if len(matches) == 0 && unjudged > 0 {
-		return nil, fmt.Sprintf(
-			"the retained window holds fewer than two samples of %s, so nothing can be shown to have held for %s",
-			seriesMetricName(catalog, c.Key), c.For)
+	if len(matches) == 0 {
+		// Age first: "the sweep stopped" is the more specific account of
+		// a short window, and the one an operator can act on.
+		if reason := fresh.unavailable(); reason != "" {
+			return nil, reason
+		}
+		if unjudged > 0 {
+			return nil, fmt.Sprintf(
+				"the retained window holds fewer than two samples of %s, so nothing can be shown to have held for %s",
+				seriesMetricName(catalog, c.Key), c.For)
+		}
 	}
 	return matches, ""
 }
@@ -1375,8 +1410,8 @@ func (PrimaryDisagreement) evaluate(_ string, in Input) ([]conditionMatch, strin
 	if reason := clusterUnavailable(in); reason != "" {
 		return nil, reason
 	}
-	if in.Metrics == nil {
-		return nil, "instance metrics are not scraped"
+	if reason := metricsUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	cluster := in.Cluster.Cluster
 	if cluster.CurrentPrimary == "" {
@@ -1385,16 +1420,17 @@ func (PrimaryDisagreement) evaluate(_ string, in Input) ([]conditionMatch, strin
 	if cluster.TargetPrimary != "" && cluster.TargetPrimary != cluster.CurrentPrimary {
 		return nil, ""
 	}
+	fresh := freshnessOf(in.Metrics, in.Now, "of "+instantMetricName("in-recovery"))
 	readings := in.Metrics.InstantReadings()
-	instances := make([]string, 0, len(readings))
-	for instance := range readings {
-		instances = append(instances, instance)
-	}
-	sort.Strings(instances)
 	var matches []conditionMatch
-	for _, instance := range instances {
+	for _, instance := range readingInstances(readings) {
 		reading, reported := readings[instance]["in-recovery"]
-		if !reported {
+		// This condition sets a live operator report against a scraped
+		// one, so a frozen reading is not merely weak evidence: it
+		// manufactures the disagreement. An instance that was a standby
+		// before a failover still reads as one until the sweep resumes,
+		// and the operator has already moved on.
+		if !reported || !fresh.current(reading.At) {
 			continue
 		}
 		writable := reading.Value == 0
@@ -1427,6 +1463,9 @@ func (PrimaryDisagreement) evaluate(_ string, in Input) ([]conditionMatch, strin
 			link:      "/cluster/metrics",
 			linkLabel: "Metrics",
 		})
+	}
+	if len(matches) == 0 {
+		return nil, fresh.unavailable()
 	}
 	return matches, ""
 }

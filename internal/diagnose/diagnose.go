@@ -431,6 +431,12 @@ type Input struct {
 // A nil window means metrics are disabled or unobserved, which a
 // detector must report as "could not run" rather than as no data.
 type MetricsWindow interface {
+	// Interval is the scrape cadence the window is filled at. It is on
+	// the interface because a reading's age only means something
+	// against it: a check judging whether a reading still describes now
+	// calibrates against how often the console actually asks, rather
+	// than against a number written into the catalog.
+	Interval() time.Duration
 	// Instances names the instances the window holds series for.
 	Instances() []string
 	// Range returns the retained series for one key at one tier.

@@ -49,6 +49,8 @@ var fixtureSampleTimes = []int64{
 	now.Add(-20 * time.Minute).Unix(), now.Add(-10 * time.Minute).Unix(), now.Unix(),
 }
 
+func (w fixtureWindow) Interval() time.Duration { return metrics.DefaultInterval }
+
 func (w fixtureWindow) Instances() []string { return nil }
 
 func (w fixtureWindow) Range(key string, tier metrics.Tier) ([]int64, map[string][]*float64) {
