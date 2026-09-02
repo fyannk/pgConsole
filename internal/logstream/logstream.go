@@ -38,6 +38,7 @@ package logstream
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,44 @@ type Sink interface {
 	// the reason as far as it is known. Sinks that present content to a
 	// reader must surface this rather than joining across it.
 	Gap(pod, container string, at time.Time, reason string)
+	// Attached, Detached and Dropped bracket the windows in which a
+	// container's stream is actually being read. Gap says the record has
+	// a hole in it; these say whether one is open right now, which is a
+	// different question and the one a sink must answer before it lets a
+	// check report that it looked and found nothing.
+	//
+	// Attached means a stream is open and lines are arriving. Detached
+	// means none is, with the reason as far as it is known — including
+	// before the first attach, when nothing from the container has been
+	// read at all. Dropped means the container is no longer followed and
+	// its coverage should be forgotten rather than left standing open.
+	Attached(pod, container string, at time.Time)
+	Detached(pod, container string, at time.Time, reason string)
+	Dropped(pod, container string)
+}
+
+// Unread is one container whose stream is not being read at this
+// moment, with when the blind window opened and the reason as far as
+// the follower knows it.
+//
+// It is the log record's answer to the question every other source
+// answers with a staleness flag: not "was something missed once" —
+// following is best effort and every reconnect misses something — but
+// "is the console reading this container now". A check that would
+// report nothing wrong has to ask, because a rule looking for a line
+// cannot tell a container that never said it from one the console
+// stopped listening to.
+type Unread struct {
+	Pod, Container string
+	// Since is when the current blind window opened. It survives
+	// reconnect attempts that fail, so a container whose stream will not
+	// open reports how long that has been true rather than restarting
+	// its clock on every retry.
+	Since time.Time
+	// Reason is the follower's latest account of why nothing is being
+	// read. The latest rather than the first, because after a failed
+	// reconnect the newer one describes why the window is still open.
+	Reason string
 }
 
 // Sinks fans one stream out to several sinks in order.
@@ -77,6 +116,27 @@ type Sinks []Sink
 func (s Sinks) Observe(line Line) {
 	for _, sink := range s {
 		sink.Observe(line)
+	}
+}
+
+// Attached passes the transition to each sink.
+func (s Sinks) Attached(pod, container string, at time.Time) {
+	for _, sink := range s {
+		sink.Attached(pod, container, at)
+	}
+}
+
+// Detached passes the transition to each sink.
+func (s Sinks) Detached(pod, container string, at time.Time, reason string) {
+	for _, sink := range s {
+		sink.Detached(pod, container, at, reason)
+	}
+}
+
+// Dropped passes the transition to each sink.
+func (s Sinks) Dropped(pod, container string) {
+	for _, sink := range s {
+		sink.Dropped(pod, container)
 	}
 }
 
@@ -268,6 +328,11 @@ type Matcher struct {
 
 	mu       sync.RWMutex
 	observed map[observationKey]*Observation
+	// unread is the containers no stream is currently open for. It is
+	// kept beside the observations because the two answer one question
+	// together: what matched, and what the console was not in a position
+	// to see.
+	unread map[Member]Unread
 }
 
 type observationKey struct{ rule, pod, container string }
@@ -279,7 +344,7 @@ type observationKey struct{ rule, pod, container string }
 // observations until the container is forgotten.
 func NewMatcher(rules []Rule, maxAge time.Duration, now func() time.Time) *Matcher {
 	return &Matcher{rules: rules, decode: structured(rules), maxAge: maxAge, now: now,
-		observed: map[observationKey]*Observation{}}
+		observed: map[observationKey]*Observation{}, unread: map[Member]Unread{}}
 }
 
 // Observe analyses one line and keeps only a match.
@@ -319,9 +384,62 @@ func (m *Matcher) Observe(line Line) {
 
 // Gap is a no-op for the matcher. A missed line cannot be analysed, and
 // recording that some unknown line went unanalysed would add noise to
-// every observation without making any of them more true. The screen
-// states the stream's best-effort nature once, globally, instead.
+// every observation without making any of them more true. What a hole
+// in the record does mean for the matcher is carried by Detached
+// instead, which is about the window rather than the line.
 func (m *Matcher) Gap(string, string, time.Time, string) {}
+
+// Attached closes a container's blind window: lines are arriving again,
+// so what the matcher does not hold from here is what was not said.
+func (m *Matcher) Attached(pod, container string, _ time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.unread, Member{Pod: pod, Container: container})
+}
+
+// Detached opens one, or extends the one already open. The window's
+// start is kept from the first detachment rather than moved by each
+// failed reconnect: a stream that will not open has been unread since it
+// first went, and restarting the clock every two seconds would report a
+// half-hour outage as a new one.
+func (m *Matcher) Detached(pod, container string, at time.Time, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	member := Member{Pod: pod, Container: container}
+	window := Unread{Pod: pod, Container: container, Since: at, Reason: reason}
+	if open, already := m.unread[member]; already {
+		window.Since = open.Since
+	}
+	m.unread[member] = window
+}
+
+// Dropped forgets a container's coverage. A container that is no longer
+// followed is not one the console is blind to: it is gone, and holding
+// its window open would make every log check unavailable for as long as
+// the cluster remembered a pod that had been replaced.
+func (m *Matcher) Dropped(pod, container string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.unread, Member{Pod: pod, Container: container})
+}
+
+// Unread returns the containers no stream is currently open for, in a
+// stable order.
+func (m *Matcher) Unread() []Unread {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Unread, 0, len(m.unread))
+	for _, window := range m.unread {
+		out = append(out, window)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Pod != out[j].Pod {
+			return out[i].Pod < out[j].Pod
+		}
+		return out[i].Container < out[j].Container
+	})
+	return out
+}
 
 // Observations returns a stable copy, ordered by rule then pod then
 // container so a refresh that changes nothing does not reorder them.
@@ -356,6 +474,13 @@ func (m *Matcher) Forget(pod string) {
 	for key := range m.observed {
 		if key.pod == pod {
 			delete(m.observed, key)
+		}
+	}
+	// Its coverage goes with it: a pod that no longer exists is not one
+	// the console is failing to read.
+	for member := range m.unread {
+		if member.Pod == pod {
+			delete(m.unread, member)
 		}
 	}
 }

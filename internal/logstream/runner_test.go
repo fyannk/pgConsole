@@ -38,7 +38,11 @@ type scriptedSource struct {
 	opens   int
 }
 
-func (s *scriptedSource) Members() []Member { return s.members }
+func (s *scriptedSource) Members() []Member {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.members
+}
 
 func (s *scriptedSource) Follow(context.Context, string, string) (io.ReadCloser, error) {
 	s.mu.Lock()
@@ -63,6 +67,10 @@ type recordingSink struct {
 	mu    sync.Mutex
 	lines []Line
 	gaps  []string
+	// coverage is the attach and detach transitions in the order they
+	// arrived, so a test can assert the follower brackets its reading
+	// windows rather than only that it recorded holes.
+	coverage []string
 }
 
 func (r *recordingSink) Observe(line Line) {
@@ -75,6 +83,31 @@ func (r *recordingSink) Gap(_, _ string, _ time.Time, reason string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.gaps = append(r.gaps, reason)
+}
+
+func (r *recordingSink) Attached(pod, container string, _ time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.coverage = append(r.coverage, "attached "+pod+"/"+container)
+}
+
+func (r *recordingSink) Detached(pod, container string, _ time.Time, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.coverage = append(r.coverage, "detached "+pod+"/"+container+": "+reason)
+}
+
+func (r *recordingSink) Dropped(pod, container string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.coverage = append(r.coverage, "dropped "+pod+"/"+container)
+}
+
+// transitions is a copy of the coverage log.
+func (r *recordingSink) transitions() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.coverage...)
 }
 
 func (r *recordingSink) snapshot() ([]Line, []string) {
@@ -212,4 +245,80 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not met before the deadline")
+}
+
+// TestRunnerBracketsItsReadingWindows proves the follower says when it
+// is and is not reading a container, not merely that the record has
+// holes. The order is the contract: a container counts as unread from
+// the moment it is worth following, becomes read when a stream opens,
+// and goes back to unread the instant that stream ends.
+func TestRunnerBracketsItsReadingWindows(t *testing.T) {
+	t.Parallel()
+	source := &scriptedSource{
+		members: []Member{{Pod: "orders-1", Container: "postgres"}},
+		streams: []string{"a line\n"},
+	}
+	sink := &recordingSink{}
+	runner := NewRunner(source, sink, fixedClock{base}, quietLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = runner.Run(ctx) }()
+
+	waitFor(t, func() bool { return len(sink.transitions()) >= 3 })
+	cancel()
+	<-done
+
+	moves := sink.transitions()
+	if !strings.HasPrefix(moves[0], "detached orders-1/postgres: the follower has not attached") {
+		t.Errorf("first transition = %q, want unread before the first stream opens", moves[0])
+	}
+	if moves[1] != "attached orders-1/postgres" {
+		t.Errorf("second transition = %q, want the stream opening", moves[1])
+	}
+	if !strings.HasPrefix(moves[2], "detached orders-1/postgres: ") {
+		t.Errorf("third transition = %q, want the stream ending", moves[2])
+	}
+	// Following stops when the process does, and a container nobody is
+	// following any more is not one the console is failing to read.
+	if last := moves[len(moves)-1]; last != "dropped orders-1/postgres" {
+		t.Errorf("last transition = %q, want the coverage dropped on shutdown", last)
+	}
+}
+
+// TestRunnerDropsCoverageForAContainerThatLeaves guards the other end of
+// it. A pod that is replaced must not leave its window standing open —
+// that would make every log check unavailable for as long as the console
+// remembered a container that no longer exists.
+func TestRunnerDropsCoverageForAContainerThatLeaves(t *testing.T) {
+	t.Parallel()
+	source := &scriptedSource{
+		members: []Member{{Pod: "orders-1", Container: "postgres"}},
+		streams: []string{"a line\n"},
+	}
+	sink := &recordingSink{}
+	runner := NewRunner(source, sink, fixedClock{base}, quietLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = runner.Run(ctx) }()
+	waitFor(t, func() bool { return len(sink.transitions()) >= 2 })
+
+	// The roster loses the container; the next reconcile stops its
+	// follower, which drops the coverage on its way out.
+	source.mu.Lock()
+	source.members = nil
+	source.mu.Unlock()
+	runner.reconcile(ctx)
+
+	waitFor(t, func() bool {
+		for _, move := range sink.transitions() {
+			if move == "dropped orders-1/postgres" {
+				return true
+			}
+		}
+		return false
+	})
+	cancel()
+	<-done
 }

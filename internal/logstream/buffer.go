@@ -97,6 +97,20 @@ func (b *Buffer) Gap(pod, container string, at time.Time, reason string) {
 	b.append(streamKey{pod, container}, entry{at: at, text: reason, gap: true})
 }
 
+// Attached is a no-op for the buffer, as Detached and Dropped are. The
+// buffer holds the text of what was said, and a window in which nothing
+// was read leaves no text; the hole between two lines is already shown
+// by the marker Gap retains. Coverage is a question about what a check
+// may conclude from silence, which the matcher answers.
+func (b *Buffer) Attached(string, string, time.Time) {}
+
+// Detached is a no-op. See Attached.
+func (b *Buffer) Detached(string, string, time.Time, string) {}
+
+// Dropped is a no-op. See Attached; a container that goes away is
+// forgotten through Forget, which drops its retained text as well.
+func (b *Buffer) Dropped(string, string) {}
+
 func (b *Buffer) append(key streamKey, e entry) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -9,30 +9,6 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
-### Fixed
-
-- **A frozen metrics exporter no longer clears a check.** The scraped
-  metrics window was the one input never given the staleness treatment
-  the other sources got: the five conditions reading it took the newest
-  retained reading whatever its age, so a scraper that had lost an
-  exporter an hour ago left every metric-backed check reporting "clear"
-  — the screen stating it had looked and found nothing, when what it
-  had found was an hour-old number. Matches were the same fault
-  mirrored, reporting a past reading in the present tense, and
-  `cnpg-primary-disagreement` was worse still: it sets a live operator
-  report against a scraped one, so a reading frozen before a failover
-  manufactured the disagreement it exists to detect.
-
-  Readings are now judged one at a time — the scraper sweeps each
-  instance separately, so one lost exporter must not withdraw findings
-  about the instances still answering — against a horizon taken from
-  the window's own scrape cadence: three intervals, and never less than
-  a minute. Age is checked before value, so a stale reading below its
-  threshold withdraws the check rather than clearing it, and the reason
-  names how far behind the newest refused reading is. `MetricsWindow`
-  gained `Interval()` for the purpose, and `stale.go` now answers for
-  the metrics window as it does for every other source.
-
 ### Added
 
 - **The console's dated knowledge expires on purpose.** A support
@@ -149,6 +125,60 @@ period. Pin an exact image tag and read the notes before upgrading.
   now fails the build instead of silently never matching.
 
 ### Fixed
+
+- **A broken log stream no longer clears a check.** The log record is the
+  one source where absence is the whole signal: a log-backed rule fires
+  on a line appearing, so its clear result is the claim the line was not
+  written. That claim rests on the console having been listening, and
+  27 catalog rules — the largest group in the catalog — made it whether
+  it had been or not. `logMatches` withdrew only when following was
+  switched off; with following on and every stream broken it returned no
+  matches and no reason, which the engine turns into "clear".
+
+  The follower already computed the reason each stream ended and handed
+  it to `Sink.Gap`, where the matcher discarded it. Sinks are now told
+  when a container's stream opens and closes, so the matcher can report
+  which containers are going unheard, since when, and why. A log check
+  reports "could not run" while any of them is, and while the pod roster
+  itself cannot be read — without it the console cannot know which
+  containers ought to be talking. Matches stand regardless: a line that
+  was seen was seen. A hole in the past record still does not withhold a
+  clear, because following is best effort and a check that could never
+  clear after a pod restart would teach a reader to ignore the screen.
+
+- **A terminated container is no longer followed.** Its stream replays
+  the whole log from the beginning and closes at once, so the follower
+  reconnected forever against the API server, re-appended the same lines
+  to the buffer, and re-matched them in the matcher — refreshing their
+  last-seen instant, so a finding from a container that stopped talking
+  hours ago never expired. It bit hardest on the CloudNativePG
+  `bootstrap-controller` init container, which every instance pod carries
+  and which is terminated for the whole life of a running pod. The
+  follower now reads the containers the kubelet reports running, which
+  still includes an init container while it is doing something — a stuck
+  bootstrap being the case an operator most needs the log for.
+
+- **A frozen metrics exporter no longer clears a check.** The scraped
+  metrics window was the one input never given the staleness treatment
+  the other sources got: the five conditions reading it took the newest
+  retained reading whatever its age, so a scraper that had lost an
+  exporter an hour ago left every metric-backed check reporting "clear"
+  — the screen stating it had looked and found nothing, when what it
+  had found was an hour-old number. Matches were the same fault
+  mirrored, reporting a past reading in the present tense, and
+  `cnpg-primary-disagreement` was worse still: it sets a live operator
+  report against a scraped one, so a reading frozen before a failover
+  manufactured the disagreement it exists to detect.
+
+  Readings are now judged one at a time — the scraper sweeps each
+  instance separately, so one lost exporter must not withdraw findings
+  about the instances still answering — against a horizon taken from
+  the window's own scrape cadence: three intervals, and never less than
+  a minute. Age is checked before value, so a stale reading below its
+  threshold withdraws the check rather than clearing it, and the reason
+  names how far behind the newest refused reading is. `MetricsWindow`
+  gained `Interval()` for the purpose, and `stale.go` now answers for
+  the metrics window as it does for every other source.
 
 - **The Cluster and FailoverQuorum watches no longer resume from the
   pinned get's resource version.** A single object's resource version is

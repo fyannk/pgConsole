@@ -79,6 +79,8 @@ type fixtureLogs []logstream.Observation
 
 func (l fixtureLogs) Observations() []logstream.Observation { return l }
 
+func (l fixtureLogs) Unread() []logstream.Unread { return nil }
+
 // everythingObserved is an input in which every source the console
 // publishes is present, fresh, and carries something a check reacts
 // to. It is the fixture the consumption test withholds from, one source

@@ -142,6 +142,19 @@ func (r *Runner) stopAll() {
 
 // follow keeps one container's stream open, reconnecting with backoff.
 func (r *Runner) follow(ctx context.Context, member Member) {
+	// The container counts as unread from the moment it is worth
+	// following, not from the first failure. Between the reconciler
+	// naming it and the first stream opening, nothing from it has been
+	// seen -- and a check that cleared in that window would be reporting
+	// on a container the console had never listened to.
+	r.sink.Detached(member.Pod, member.Container, r.clock.Now(),
+		"the follower has not attached to this container's stream yet")
+	// Following stops when the container leaves the roster or the
+	// process ends. Either way its coverage is dropped rather than left
+	// standing open: a pod that no longer exists is not one the console
+	// is failing to read.
+	defer r.sink.Dropped(member.Pod, member.Container)
+
 	backoff := reconnectMin
 	for ctx.Err() == nil {
 		reason, err := r.readOnce(ctx, member)
@@ -158,6 +171,9 @@ func (r *Runner) follow(ctx context.Context, member Member) {
 		// next one opens: the unobserved window starts here, and dating
 		// it from the reconnect would misplace it by the whole backoff.
 		r.sink.Gap(member.Pod, member.Container, r.clock.Now(), reason)
+		// The same instant closes the reading window. Gap marks the hole
+		// in the record; this says the hole is still open.
+		r.sink.Detached(member.Pod, member.Container, r.clock.Now(), reason)
 
 		select {
 		case <-ctx.Done():
@@ -178,6 +194,7 @@ func (r *Runner) readOnce(ctx context.Context, member Member) (reason string, er
 		return "stream could not be opened; nothing from this container was observed", err
 	}
 	defer func() { _ = stream.Close() }()
+	r.sink.Attached(member.Pod, member.Container, r.clock.Now())
 
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 0, 4096), maxLineBytes)
