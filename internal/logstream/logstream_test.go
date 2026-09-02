@@ -464,3 +464,73 @@ func TestMalformedFieldTestMatchesNothing(t *testing.T) {
 		t.Errorf("a rule with one malformed test matched %+v, want nothing", got)
 	}
 }
+
+// TestMatcherTracksWhichContainersAreUnread proves the coverage the
+// matcher keeps beside its observations: which containers no stream is
+// open for, since when, and why.
+func TestMatcherTracksWhichContainersAreUnread(t *testing.T) {
+	t.Parallel()
+	m := NewMatcher(nil, 0, func() time.Time { return base })
+
+	if got := m.Unread(); len(got) != 0 {
+		t.Fatalf("a fresh matcher reports %d unread containers, want none", len(got))
+	}
+
+	m.Detached("orders-1", "postgres", base, "stream could not be opened")
+	unread := m.Unread()
+	if len(unread) != 1 {
+		t.Fatalf("unread = %+v, want the one detached container", unread)
+	}
+	if unread[0].Pod != "orders-1" || unread[0].Container != "postgres" {
+		t.Errorf("unread names %s/%s, want orders-1/postgres", unread[0].Pod, unread[0].Container)
+	}
+	if !unread[0].Since.Equal(base) || unread[0].Reason != "stream could not be opened" {
+		t.Errorf("unread = %+v, want the detach instant and its reason", unread[0])
+	}
+
+	// A failed reconnect does not restart the clock: the container has
+	// been unread since it first went, and reporting each retry as a new
+	// outage would hide how long the console has been blind.
+	m.Detached("orders-1", "postgres", base.Add(30*time.Second), "still could not be opened")
+	unread = m.Unread()
+	if !unread[0].Since.Equal(base) {
+		t.Errorf("Since = %v after a failed reconnect, want the window's original start", unread[0].Since)
+	}
+	if unread[0].Reason != "still could not be opened" {
+		t.Errorf("Reason = %q, want the follower's latest account", unread[0].Reason)
+	}
+
+	m.Attached("orders-1", "postgres", base.Add(time.Minute))
+	if got := m.Unread(); len(got) != 0 {
+		t.Errorf("unread = %+v after the stream opened, want none", got)
+	}
+
+	// And a container that goes away is not one the console is failing
+	// to read.
+	m.Detached("orders-2", "postgres", base, "stream ended")
+	m.Dropped("orders-2", "postgres")
+	if got := m.Unread(); len(got) != 0 {
+		t.Errorf("unread = %+v after the container was dropped, want none", got)
+	}
+}
+
+// TestMatcherOrdersUnreadContainersStably keeps a refresh that changes
+// nothing from reordering the reason a check gives.
+func TestMatcherOrdersUnreadContainersStably(t *testing.T) {
+	t.Parallel()
+	m := NewMatcher(nil, 0, func() time.Time { return base })
+	m.Detached("orders-2", "postgres", base, "b")
+	m.Detached("orders-1", "sidecar", base, "a")
+	m.Detached("orders-1", "postgres", base, "a")
+
+	var got []string
+	for _, unread := range m.Unread() {
+		got = append(got, unread.Pod+"/"+unread.Container)
+	}
+	want := []string{"orders-1/postgres", "orders-1/sidecar", "orders-2/postgres"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unread order = %v, want %v", got, want)
+		}
+	}
+}

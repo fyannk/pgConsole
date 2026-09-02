@@ -273,8 +273,8 @@ func orUnnamedField(path string) string {
 // condition re-tests a line here — the lines are long gone by the time a
 // run happens, which is the whole reason the matcher is continuous.
 func logMatches(ruleID string, in Input) ([]conditionMatch, string) {
-	if in.Logs == nil {
-		return nil, "log following is off, so nothing in the logs has been read"
+	if reason := logsUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	var matches []conditionMatch
 	for _, observation := range in.Logs.Observations() {
@@ -303,6 +303,12 @@ func logMatches(ruleID string, in Input) ([]conditionMatch, string) {
 			link:      "/logs/" + observation.Pod + "/" + observation.Container,
 			linkLabel: "Log tail",
 		})
+	}
+	// Matches stand whatever else went unread -- a line that was seen was
+	// seen. It is the empty result that cannot be published as a clear
+	// while a container is going unheard.
+	if len(matches) == 0 {
+		return nil, logsIncomplete(in)
 	}
 	return matches, ""
 }

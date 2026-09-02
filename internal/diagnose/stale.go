@@ -177,6 +177,60 @@ func infrastructureUnavailable(in Input) string {
 	return ""
 }
 
+// logsUnavailable is the reason nothing in the logs can be read at all,
+// empty when following is on. It answers only the on-or-off question;
+// whether a check that read them may clear is logsIncomplete.
+func logsUnavailable(in Input) string {
+	if in.Logs == nil {
+		return "log following is off, so nothing in the logs has been read"
+	}
+	return ""
+}
+
+// logsIncomplete is the reason a log check cannot report that it looked
+// and found nothing, empty when the follower is reading every container
+// it means to.
+//
+// The log record is the one source where absence is the whole signal: a
+// rule fires on a line appearing, so its clear result is the claim that
+// the line was not written. That claim rests entirely on the console
+// having been listening, and while a container's stream is not open it
+// was not. A hole in the past record is a different matter and not this
+// one -- following is best effort, every reconnect misses something, and
+// a check that could never clear because a pod once restarted would
+// teach a reader to ignore the screen. What withholds a clear is a
+// window that is open now.
+func logsIncomplete(in Input) string {
+	if in.Logs == nil {
+		return ""
+	}
+	// The follower's roster is the pod list. Without it the console does
+	// not know which containers ought to be talking, so it cannot know
+	// that it is listening to all of them -- and a container it has
+	// never heard of is one whose silence proves nothing.
+	if reason := podsUnavailable(in); reason != "" {
+		return "which containers should be talking is unknown, because " + reason
+	}
+	unread := in.Logs.Unread()
+	if len(unread) == 0 {
+		return ""
+	}
+	first := unread[0]
+	where := fmt.Sprintf("%s container %s", first.Pod, first.Container)
+	if len(unread) > 1 {
+		where = fmt.Sprintf("%s and %d other container", where, len(unread)-1)
+		if len(unread) > 2 {
+			where += "s"
+		}
+	}
+	since := ""
+	if !first.Since.IsZero() {
+		since = fmt.Sprintf(" for %s", in.Now.Sub(first.Since).Round(time.Second))
+	}
+	return fmt.Sprintf("no log stream is open for %s%s (%s), so a line written there would not have been seen",
+		where, since, first.Reason)
+}
+
 // metricsUnavailable is the reason the instance metrics window cannot be
 // read, empty when it can.
 func metricsUnavailable(in Input) string {

@@ -25,6 +25,7 @@ import (
 
 	"github.com/fyannk/pgConsole/internal/config"
 	"github.com/fyannk/pgConsole/internal/kube"
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // testConfig returns a valid configuration bound to an ephemeral port.
@@ -164,5 +165,52 @@ func TestApplicationNeverLogsConfiguredValues(t *testing.T) {
 		if strings.Contains(logs.String(), secretish) {
 			t.Errorf("lifecycle log contains configured value %q", secretish)
 		}
+	}
+}
+
+// TestFollowableSkipsContainersThatAreNotRunning pins the roster the log
+// follower is given. A terminated container has said everything it is
+// going to say and replays its whole log on every reconnect, which would
+// keep re-appending the same lines to the buffer and re-matching them in
+// the matcher — refreshing a finding's last-seen instant forever, so a
+// line from a container that stopped talking hours ago would never
+// expire.
+//
+// The case that matters is the CloudNativePG bootstrap-controller init
+// container, which every instance pod carries and which is terminated
+// for the whole life of a running pod.
+func TestFollowableSkipsContainersThatAreNotRunning(t *testing.T) {
+	t.Parallel()
+	snap := observe.PodsSnapshot{Pods: []observe.PodFacts{{
+		Name: "orders-1",
+		Containers: []observe.ContainerFacts{
+			{Name: "bootstrap-controller", Init: true, State: "terminated"},
+			{Name: "postgres", State: "running"},
+			{Name: "pending-sidecar", State: "waiting"},
+			{Name: "unreported", State: ""},
+		},
+	}}}
+	got := followable(snap)
+	if len(got) != 1 {
+		t.Fatalf("followable = %+v, want only the running container", got)
+	}
+	if got[0].Pod != "orders-1" || got[0].Container != "postgres" {
+		t.Errorf("followable = %+v, want orders-1/postgres", got[0])
+	}
+}
+
+// TestFollowableReadsARunningInitContainer is the other side: an init
+// container is worth following exactly while it is doing something, and
+// a bootstrap that is stuck is the case an operator most needs the log
+// for.
+func TestFollowableReadsARunningInitContainer(t *testing.T) {
+	t.Parallel()
+	snap := observe.PodsSnapshot{Pods: []observe.PodFacts{{
+		Name:       "orders-1",
+		Containers: []observe.ContainerFacts{{Name: "bootstrap-controller", Init: true, State: "running"}},
+	}}}
+	got := followable(snap)
+	if len(got) != 1 || got[0].Container != "bootstrap-controller" {
+		t.Fatalf("followable = %+v, want the running init container", got)
 	}
 }

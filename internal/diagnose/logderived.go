@@ -25,4 +25,9 @@ import "github.com/fyannk/pgConsole/internal/logstream"
 // console that is not reading logs has not ruled out anything in them.
 type LogObservations interface {
 	Observations() []logstream.Observation
+	// Unread is the containers whose streams are not being read at this
+	// moment. It is what stops a log check from clearing while the
+	// console is blind: a rule looking for a line cannot tell a
+	// container that never said it from one nobody was listening to.
+	Unread() []logstream.Unread
 }

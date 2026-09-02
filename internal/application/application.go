@@ -276,13 +276,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 			if !ok {
 				return nil
 			}
-			var out []logstream.Member
-			for _, pod := range snap.Pods {
-				for _, container := range pod.Containers {
-					out = append(out, logstream.Member{Pod: pod.Name, Container: container.Name})
-				}
-			}
-			return out
+			return followable(snap)
 		}
 		runners = append(runners, logstream.NewRunner(
 			logstream.NewSource(members, deps.LogStreamOpener),
@@ -430,4 +424,36 @@ func (a *App) Serve(ctx context.Context) error {
 		a.logger.Info("stopped")
 	}
 	return result
+}
+
+// followable is the containers worth following: the ones the kubelet
+// reports running.
+//
+// A container that has terminated has said everything it is going to
+// say, and one still waiting has not started. Following either is not
+// merely wasted -- it is wrong three times over. The stream opens,
+// replays the whole log from the beginning and closes at once, so the
+// follower reconnects forever against the API server, which is the loop
+// the runner's own backoff exists to prevent. Every replay re-appends
+// the same lines to the buffer. And every replay re-matches the same
+// lines in the matcher, refreshing their last-seen instant, so a
+// finding from a container that stopped talking hours ago never
+// expires -- the console reporting the past as the present, in the one
+// place it has already said it will not.
+//
+// It matters most for the CloudNativePG bootstrap-controller init
+// container, which every instance pod carries and which is terminated
+// for the whole life of a running pod. While it is genuinely worth
+// reading -- a bootstrap that is stuck -- it is running, and followed.
+func followable(snap observe.PodsSnapshot) []logstream.Member {
+	var out []logstream.Member
+	for _, pod := range snap.Pods {
+		for _, container := range pod.Containers {
+			if container.State != "running" {
+				continue
+			}
+			out = append(out, logstream.Member{Pod: pod.Name, Container: container.Name})
+		}
+	}
+	return out
 }

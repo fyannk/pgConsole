@@ -72,6 +72,39 @@ nothing on the screen would look wrong.
 An instance still being swept is unaffected: a finding on it stands
 whether or not another instance's exporter has gone quiet.
 
+### Log checks, and why silence has to be earned
+
+The log record is the one source where absence is the entire signal. A
+log-backed check fires on a line appearing, so its clear result is the
+claim that the line was **not written** — and that claim rests wholly on
+the console having been listening. While a container's stream is not
+open, it was not.
+
+So a log check reports "could not run" whenever the follower is not
+reading every container it means to, naming which container, for how
+long, and the follower's own account of why. It does the same when the
+pod roster cannot be read at all, because without it the console does
+not know which containers ought to be talking, and a container it has
+never heard of is one whose silence proves nothing.
+
+A hole in the *past* record is a different matter and does not withhold
+a clear. Following is best effort: a stream ends on every container
+restart, and a check that could never clear because a pod once restarted
+would teach a reader to ignore the screen. What withholds a clear is a
+blind window that is open now.
+
+Matches are unaffected — a line that was seen was seen. An unread
+container elsewhere is a reason not to conclude silence, never a reason
+to withdraw a finding the console actually has.
+
+The follower reads the containers the kubelet reports **running**. A
+container that has terminated has said everything it is going to say,
+and one still waiting has not started; not having a stream open to
+either is not blindness. This is also why a terminated container's log
+stops being re-read: its stream replays the whole log from the beginning
+on every reconnect, which would keep a finding's last-seen instant fresh
+forever and let a line from hours ago read as current.
+
 ## How findings relate
 
 Every finding names its **subject** — the object it is about, such as

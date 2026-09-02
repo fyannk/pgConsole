@@ -417,6 +417,8 @@ type staticLogs []logstream.Observation
 
 func (l staticLogs) Observations() []logstream.Observation { return l }
 
+func (l staticLogs) Unread() []logstream.Unread { return nil }
+
 // TestDiagnosticsRendersTheWALChainAsOneIncident is the golden test of
 // the incident view over the real catalog: the flagship chain — the
 // object store refusing credentials, archiving failing, WAL filling the

@@ -33,6 +33,8 @@ type staticObservations []logstream.Observation
 
 func (s staticObservations) Observations() []logstream.Observation { return s }
 
+func (s staticObservations) Unread() []logstream.Unread { return nil }
+
 // clusterInput is an input whose operator status reports the given
 // PostgreSQL major version.
 func clusterInput(major int) Input {
@@ -100,10 +102,11 @@ func TestLogRuleWithFollowingOffCannotBeClear(t *testing.T) {
 }
 
 // TestLogRuleFollowingOnWithNoMatchIsClear proves the other side: with
-// following on and nothing matched, the check is genuinely clear.
+// following on, the roster readable and every container being read,
+// nothing matched is genuinely clear.
 func TestLogRuleFollowingOnWithNoMatchIsClear(t *testing.T) {
 	t.Parallel()
-	check, _ := evaluateRule(logRule(), Input{Now: now, Logs: staticObservations{}})
+	check, _ := evaluateRule(logRule(), Input{Now: now, HasPods: true, Logs: staticObservations{}})
 	if check.Outcome != CheckClear {
 		t.Errorf("outcome = %v with following on and no match, want clear", check.Outcome)
 	}
