@@ -59,14 +59,16 @@ func (c *Client) FetchFailoverQuorum(ctx context.Context) (observe.FailoverQuoru
 	seed := c.seedRecord(scopeFailoverQuorum)
 	seed.add(obj.Object)
 	seed.commit(true)
-	return observe.FailoverQuorumState{Facts: facts, ResourceVersion: obj.GetResourceVersion()}, nil
+	return observe.FailoverQuorumState{Facts: facts}, nil
 }
 
-// WatchFailoverQuorum follows the one quorum object by name.
-func (c *Client) WatchFailoverQuorum(ctx context.Context, fromResourceVersion string) (observe.FailoverQuorumWatch, error) {
+// WatchFailoverQuorum follows the one quorum object by name. Like
+// (*Client).Watch for Cluster, it sends no resource version: a singleton
+// get yields no watch-safe cursor, so the watch starts from current state
+// and re-delivers the object as one synthetic Added.
+func (c *Client) WatchFailoverQuorum(ctx context.Context) (observe.FailoverQuorumWatch, error) {
 	w, err := c.dyn.Resource(failoverQuorumGVR).Namespace(c.opts.Namespace).Watch(ctx, metav1.ListOptions{
 		FieldSelector:       "metadata.name=" + c.opts.ClusterName,
-		ResourceVersion:     fromResourceVersion,
 		AllowWatchBookmarks: false,
 	})
 	if err != nil {
@@ -90,11 +92,7 @@ func pumpFailoverQuorum(event watch.Event) (observe.FailoverQuorumState, bool, b
 		if err != nil {
 			return observe.FailoverQuorumState{}, false, true
 		}
-		rv := ""
-		if meta, ok := event.Object.(metav1.Object); ok {
-			rv = meta.GetResourceVersion()
-		}
-		return observe.FailoverQuorumState{Facts: facts, ResourceVersion: rv}, true, false
+		return observe.FailoverQuorumState{Facts: facts}, true, false
 	case watch.Deleted:
 		return observe.FailoverQuorumState{Facts: observe.FailoverQuorumFacts{Present: false}}, true, false
 	case watch.Bookmark:

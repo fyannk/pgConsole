@@ -268,12 +268,27 @@ func TestAccessShapeAgainstRealRBAC(t *testing.T) {
 		t.Fatalf("fetched facts wrong: %+v", state.Facts)
 	}
 
-	// The name-scoped watch delivers updates under the same Role.
-	w, err := client.Watch(ctx, state.ResourceVersion)
+	// The name-scoped watch delivers updates under the same Role. It
+	// starts from the server's current state — the seed's pinned get
+	// carries no watch-safe cursor — so the first result re-delivers the
+	// object as it stands, and changes follow.
+	w, err := client.Watch(ctx)
 	if err != nil {
 		t.Fatalf("Watch: %v", err)
 	}
 	defer w.Stop()
+
+	select {
+	case got, ok := <-w.Results():
+		if !ok {
+			t.Fatal("watch closed before re-delivering current state")
+		}
+		if got.Facts.Phase != "Setting up primary" {
+			t.Fatalf("initial re-delivery phase = %q", got.Facts.Phase)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("watch did not re-deliver current state")
+	}
 
 	setStatus(t, ie, map[string]any{"phase": "Cluster in healthy state"})
 

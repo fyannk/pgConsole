@@ -54,27 +54,28 @@ func NewCollector(source Source, store *Store, clock Clock, logger *slog.Logger)
 // Run blocks until ctx is done, maintaining the store. It always returns
 // nil: cancellation is the one clean exit.
 func (c *Collector) Run(ctx context.Context) error {
-	return newLoop[string, ClusterState](c, c.clock, c.logger).Run(ctx)
+	return newLoop[struct{}, ClusterState](c, c.clock, c.logger).Run(ctx)
 }
 
 // op names this resource in contact-loss logs.
 func (c *Collector) op() string { return "cluster" }
 
-// seed takes the pinned get and returns the resource version the
-// name-scoped watch resumes from. An absent cluster is a successful
-// observation, not an error, so it seeds like any other.
-func (c *Collector) seed(ctx context.Context) (string, error) {
+// seed takes the pinned get. An absent cluster is a successful
+// observation, not an error, so it seeds like any other. It hands the
+// watch nothing: a singleton get yields no watch-safe cursor — see
+// ClusterState.
+func (c *Collector) seed(ctx context.Context) (struct{}, error) {
 	state, err := c.source.Fetch(ctx)
 	if err != nil {
-		return "", err
+		return struct{}{}, err
 	}
 	c.facts = state.Facts
-	return state.ResourceVersion, nil
+	return struct{}{}, nil
 }
 
-// follow starts the name-scoped watch from the seed's resource version.
-func (c *Collector) follow(ctx context.Context, from string) (<-chan ClusterState, func(), error) {
-	w, err := c.source.Watch(ctx, from)
+// follow starts the name-scoped watch from the server's current state.
+func (c *Collector) follow(ctx context.Context, _ struct{}) (<-chan ClusterState, func(), error) {
+	w, err := c.source.Watch(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
