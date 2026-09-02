@@ -209,8 +209,8 @@ func (c EventMatch) describe() string {
 }
 
 func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if !in.HasEvents {
-		return nil, "events have not been observed yet"
+	if reason := eventsUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	types := c.Types
 	if len(types) == 0 {
@@ -344,11 +344,8 @@ func (c ClusterCondition) describe() string {
 }
 
 func (c ClusterCondition) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if !in.HasCluster {
-		return nil, "the Cluster has not been observed yet"
-	}
-	if !in.Cluster.Cluster.Present {
-		return nil, "the API server reports no Cluster object"
+	if reason := clusterUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	for _, condition := range in.Cluster.Cluster.Conditions {
 		if condition.Type != c.Type || condition.Status != c.Status {
@@ -388,11 +385,8 @@ func (c ClusterPhase) describe() string {
 }
 
 func (c ClusterPhase) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if !in.HasCluster {
-		return nil, "the Cluster has not been observed yet"
-	}
-	if !in.Cluster.Cluster.Present {
-		return nil, "the API server reports no Cluster object"
+	if reason := clusterUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	for _, phase := range c.AnyOf {
 		if in.Cluster.Cluster.Phase != phase {
@@ -493,8 +487,11 @@ func (c ContainerState) describe() string {
 }
 
 func (c ContainerState) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if !in.HasPods {
-		return nil, "instance pods have not been observed yet"
+	if reason := podsUnavailable(in); reason != "" {
+		return nil, reason
+	}
+	if reason := poolerPodsUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	pods := in.Pods.Pods
 	if in.HasPoolerPods {
@@ -551,13 +548,10 @@ func (c PrimaryMismatch) describe() string {
 }
 
 func (c PrimaryMismatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if !in.HasCluster {
-		return nil, "the Cluster has not been observed yet"
+	if reason := clusterUnavailable(in); reason != "" {
+		return nil, reason
 	}
 	cluster := in.Cluster.Cluster
-	if !cluster.Present {
-		return nil, "the API server reports no Cluster object"
-	}
 	if cluster.CurrentPrimary == "" || cluster.TargetPrimary == "" ||
 		cluster.CurrentPrimary == cluster.TargetPrimary {
 		return nil, ""

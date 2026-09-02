@@ -42,7 +42,7 @@ particular thing. Each check answers one of four ways:
 |---|---|
 | matched | The check found what it looks for; its findings are above. |
 | clear | Its inputs were readable and nothing matched. |
-| could not run | An input was never observed — log following off, metrics not scraped, a version not observed. A check that could not run rules nothing out. |
+| could not run | An input was never observed — log following off, metrics not scraped, a version not observed — or its collector has lost contact and the snapshot is stale. A check that could not run rules nothing out: a stale snapshot can neither clear a check nor match one. |
 | does not apply | The rule's version pins exclude the versions actually observed. Distinct from clear on purpose: the rule ruled itself out, not the failure. |
 
 ## Version pinning
