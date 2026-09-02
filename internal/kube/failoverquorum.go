@@ -62,10 +62,10 @@ func (c *Client) FetchFailoverQuorum(ctx context.Context) (observe.FailoverQuoru
 	return observe.FailoverQuorumState{Facts: facts}, nil
 }
 
-// WatchFailoverQuorum follows the one quorum object by name. Like the
-// Cluster watch it sends no resource version — a singleton get yields no
-// watch-safe cursor, see Watch — so it starts from current state and
-// re-delivers the object as one synthetic Added.
+// WatchFailoverQuorum follows the one quorum object by name. Like
+// (*Client).Watch for Cluster, it sends no resource version: a singleton
+// get yields no watch-safe cursor, so the watch starts from current state
+// and re-delivers the object as one synthetic Added.
 func (c *Client) WatchFailoverQuorum(ctx context.Context) (observe.FailoverQuorumWatch, error) {
 	w, err := c.dyn.Resource(failoverQuorumGVR).Namespace(c.opts.Namespace).Watch(ctx, metav1.ListOptions{
 		FieldSelector:       "metadata.name=" + c.opts.ClusterName,
