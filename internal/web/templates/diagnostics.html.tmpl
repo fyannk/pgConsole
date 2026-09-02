@@ -5,11 +5,14 @@
   account of what was checked.
 
   Findings are grouped into incidents: a finding whose declared cause
-  also matched nests inside that cause's card, so a chain like
-  "archiving failed → WAL filled the volume → postgres kept down" reads
-  as one story with one root instead of three alarms. The relation is
-  catalog-pinned knowledge and the card says so; every nested finding
-  keeps its own quoted evidence.
+  also matched — on the same pod where the relation says so, within
+  its window where both carry a time — nests inside that cause's card,
+  so a chain like "archiving failed → WAL filled the volume → postgres
+  kept down" reads as one story with one root instead of three alarms.
+  The relation is catalog-pinned knowledge and the card states its
+  terms; every nested finding keeps its own quoted evidence. A cause
+  that matched but on another object or at another time stays its own
+  card, and the near miss is listed with the relation's reason.
 
   Guidance ("what to do") renders apart from the evidence and is
   labeled as the console's: advice is the one thing on this screen no
@@ -78,7 +81,7 @@
         <p class="chain-label">In consequence — the catalog relates these to the finding above; each keeps its own evidence:</p>
         {{- range .Consequences}}
         <details class="chained" data-severity="{{.Severity}}">
-          <summary><span class="sev">{{.Severity}}</span> {{.Summary}}</summary>
+          <summary><span class="sev">{{.Severity}}</span> {{.Summary}}{{if .Via}} <span class="origin-tag">{{.Via}}</span>{{end}}</summary>
           {{- if .Detail}}
           <p class="finding-detail">{{.Detail}}</p>
           {{- end}}
@@ -99,6 +102,16 @@
           {{- end}}
         </details>
         {{- end}}
+      </div>
+      {{- end}}
+      {{- if .Related}}
+      <div class="finding-related">
+        <p class="chain-label">Possibly related — the catalog names these as causes of the finding above, but not on this object or at this time, so each stays its own card:</p>
+        <ul>
+          {{- range .Related}}
+          <li>{{.Summary}}{{if .Object}} <strong>{{.Object}}</strong>{{end}} <span class="origin-tag">{{.Because}}</span></li>
+          {{- end}}
+        </ul>
       </div>
       {{- end}}
       {{- if .Link}}

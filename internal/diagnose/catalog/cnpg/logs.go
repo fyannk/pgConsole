@@ -14,7 +14,11 @@
 
 package cnpg
 
-import "github.com/fyannk/pgConsole/internal/diagnose"
+import (
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/diagnose"
+)
 
 // logRules are the instance manager's own log messages: the process
 // that runs inside every instance pod, whose stream the console
@@ -39,7 +43,7 @@ func logRules() []diagnose.Rule {
 			Summary:       "The WAL archive command is failing, so WAL is accumulating on the instance.",
 			Detail:        streamCaveat,
 			When:          diagnose.LogContains{Substrings: []string{"failed to run wal-archive command"}},
-			ConsequenceOf: []string{"cnpg-wal-archiving-failing"},
+			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-wal-archiving-failing"}},
 		},
 		{
 			ID:        "cnpg-wal-archive-plugin-missing",
@@ -160,7 +164,7 @@ func logRules() []diagnose.Rule {
 			When: diagnose.LogContains{Substrings: []string{"no free disk space for WALs"}},
 			NextSteps: "Grow the WAL volume (the storage class must allow expansion), or fix " +
 				"the archiving failure that filled it — archived WAL is recycled on its own.",
-			ConsequenceOf: []string{"cnpg-wal-archiving-failing"},
+			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-wal-archiving-failing"}},
 		},
 		{
 			ID:        "cnpg-postgres-start-failed",
@@ -181,8 +185,16 @@ func logRules() []diagnose.Rule {
 			Summary:   "PostgreSQL exited with errors — this is what a crash-looping instance looks like from inside.",
 			Detail: "The instance manager terminates with it, so the kubelet restarts the " +
 				"pod and the restart count climbs. " + streamCaveat,
-			When:          diagnose.LogContains{Substrings: []string{"PostgreSQL process exited with errors"}},
-			ConsequenceOf: []string{"postgres-panic", "cnpg-wal-disk-full"},
+			When: diagnose.LogContains{Substrings: []string{"PostgreSQL process exited with errors"}},
+			// Both causes are read from the same instance's log, so the
+			// relation is pinned to the pod: a panic on one instance does not
+			// explain an exit on another. The panic is placed within the hour
+			// because both lines carry a time; the disk-full line is renewed
+			// on every retry and needs no window.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "postgres-panic", Scope: diagnose.ScopePod, Within: time.Hour},
+				{Cause: "cnpg-wal-disk-full", Scope: diagnose.ScopePod},
+			},
 		},
 		// ----------------------------------------------- primary lease
 		{

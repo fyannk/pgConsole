@@ -41,8 +41,9 @@ type DiagnosticsView struct {
 	// it in" answered first.
 	State ClusterStateView
 	// Findings are most severe first. A finding whose declared cause
-	// also matched is nested inside that cause's card rather than
-	// listed here, so one incident reads as one incident.
+	// also matched, on a finding that satisfies the relation's scope and
+	// window, is nested inside that cause's card rather than listed
+	// here, so one incident reads as one incident.
 	Findings []FindingView
 	// Groups bucket every check by outcome, in reading order: matched
 	// first, then could-not-run, then does-not-apply, then clear. The
@@ -108,8 +109,27 @@ type FindingView struct {
 	// incident. The relation is catalog-pinned knowledge; each nested
 	// finding keeps its own evidence.
 	Consequences []FindingView
-	Link         string
-	LinkLabel    string
+	// Via states the terms of the relation that placed a nested finding
+	// under its cause — strength, scope, window — so the reader sees
+	// what the nesting rests on. Empty on a root card.
+	Via string
+	// Related are findings the catalog names as causes of this one that
+	// also matched, but on an object or at a time the relation does not
+	// cover. They stay their own cards; this list says why, so the
+	// reader is told about the near miss instead of left to wonder.
+	Related   []RelatedView
+	Link      string
+	LinkLabel string
+}
+
+// RelatedView is one matched cause the relation did not admit.
+type RelatedView struct {
+	ID      string
+	Summary string
+	// Object is the other finding's subject, when it names one.
+	Object string
+	// Because is the relation's own account of why it did not hold.
+	Because string
 }
 
 // EvidenceView is one quoted claim beneath a finding.
@@ -313,52 +333,77 @@ func clusterStateView(in diagnose.Input) ClusterStateView {
 
 // groupIncidents nests findings under their declared causes, so one
 // incident renders as one card. The relation lives on the finding: a
-// finding names the checks it is a consequence of, and when one of
-// those also matched in the same run, this finding belongs inside it.
+// finding names the checks it is a consequence of, each with a scope
+// and a window, and when one of those checks also matched in the same
+// run on a finding the relation admits — same pod where it says so,
+// within the window where both carry a time — this finding belongs
+// inside it.
 //
-// The grouping walks each finding's cause chain to its topmost matched
-// cause and attaches the finding to that root's first finding, ordered
-// by chain depth so the immediate cause reads before the knock-on
-// effects. A relation that would loop is ignored — the finding stays a
-// root — because a cycle means the catalog's claim is malformed and
-// flat honesty beats clever nesting.
+// A cause that matched but is not admitted is not dropped and not
+// nested: the finding stays a root and the near miss is listed beside
+// it with the relation's own reason, because "the catalog relates
+// these, but not on that pod" is something the reader should be told.
+//
+// The grouping walks each finding's chain to its topmost cause and
+// attaches the finding there, ordered by chain depth so the immediate
+// cause reads before the knock-on effects. A relation that would loop
+// is ignored — the finding stays a root — because a cycle means the
+// catalog's claim is malformed and flat honesty beats clever nesting.
 func groupIncidents(findings []diagnose.Finding, rendered []FindingView) []FindingView {
-	// The first finding index per check: the attachment point.
-	firstOf := map[string]int{}
+	byCheck := map[string][]int{}
 	for i, finding := range findings {
-		if _, seen := firstOf[finding.Check]; !seen {
-			firstOf[finding.Check] = i
-		}
+		byCheck[finding.Check] = append(byCheck[finding.Check], i)
 	}
-	// parentOf resolves one check's first matched cause.
-	parentOf := func(check string, of []string) (string, bool) {
-		for _, cause := range of {
-			if cause == check {
+
+	// parentOf is the admitted cause of each finding, in the catalog's
+	// preference order, or -1 for a root.
+	parentOf := make([]int, len(findings))
+	via := make([]diagnose.Relation, len(findings))
+	for i, finding := range findings {
+		parentOf[i] = -1
+		var misses []RelatedView
+		for _, relation := range finding.ConsequenceOf {
+			if relation.Cause == finding.Check {
 				continue
 			}
-			if _, matched := firstOf[cause]; matched {
-				return cause, true
+			for _, j := range byCheck[relation.Cause] {
+				if j == i {
+					continue
+				}
+				if ok, because := relation.Holds(finding, findings[j]); ok {
+					parentOf[i], via[i] = j, relation
+					break
+				} else {
+					misses = append(misses, RelatedView{
+						ID:      findings[j].ID,
+						Summary: boundMessage(findings[j].Summary),
+						Object:  findings[j].Subject.String(),
+						Because: boundMessage(because),
+					})
+				}
 			}
-		}
-		return "", false
-	}
-	// rootOf climbs the chain, bounded by the finding count so a
-	// malformed cycle terminates as "stay a root".
-	rootOf := func(i int) (int, int) {
-		check, depth := findings[i].Check, 0
-		seen := map[string]bool{check: true}
-		for range findings {
-			parent, ok := parentOf(check, findings[firstOf[check]].ConsequenceOf)
-			if !ok {
+			if parentOf[i] >= 0 {
+				misses = nil
 				break
 			}
-			if seen[parent] {
-				return firstOf[findings[i].Check], 0
-			}
-			seen[parent] = true
-			check, depth = parent, depth+1
 		}
-		return firstOf[check], depth
+		rendered[i].Related = misses
+	}
+
+	// rootOf climbs the chain, refusing a cycle by leaving the finding
+	// a root of its own.
+	rootOf := func(i int) (int, int) {
+		seen := map[int]bool{i: true}
+		current, depth := i, 0
+		for parentOf[current] >= 0 {
+			next := parentOf[current]
+			if seen[next] {
+				return i, 0
+			}
+			seen[next] = true
+			current, depth = next, depth+1
+		}
+		return current, depth
 	}
 
 	type nested struct {
@@ -385,7 +430,11 @@ func groupIncidents(findings []diagnose.Finding, rendered []FindingView) []Findi
 		chain := children[root]
 		sort.SliceStable(chain, func(a, b int) bool { return chain[a].depth < chain[b].depth })
 		for _, consequence := range chain {
-			one.card.Consequences = append(one.card.Consequences, rendered[consequence.index])
+			card := rendered[consequence.index]
+			card.Via = via[consequence.index].Terms(
+				findings[consequence.index], findings[parentOf[consequence.index]])
+			card.Related = nil
+			one.card.Consequences = append(one.card.Consequences, card)
 			if s := findings[consequence.index].Severity; s > one.worst {
 				one.worst = s
 			}

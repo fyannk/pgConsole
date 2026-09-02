@@ -45,9 +45,14 @@ func conditionRules() []diagnose.Rule {
 				"folder, and a missing plugin sidecar needs a pod rollout. Archiving " +
 				"must succeed before the WAL volume fills; once it does, the " +
 				"operator archives the backlog on its own.",
-			ConsequenceOf: []string{"wal-archive-not-empty", "object-store-denied",
-				"object-store-forbidden", "object-store-unreachable",
-				"backup-destination-conflict", "cnpg-wal-archive-plugin-missing"},
+			// The condition is the cluster's; its causes are read from one
+			// instance's log, so the relation is cluster-wide: whichever
+			// instance archived, the refusal it logged is the reason.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "wal-archive-not-empty"}, {Cause: "object-store-denied"},
+				{Cause: "object-store-forbidden"}, {Cause: "object-store-unreachable"},
+				{Cause: "backup-destination-conflict"}, {Cause: "cnpg-wal-archive-plugin-missing"},
+			},
 			Link:      "/backups",
 			LinkLabel: "Backups",
 		},

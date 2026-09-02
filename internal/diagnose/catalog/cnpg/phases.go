@@ -170,7 +170,7 @@ func phaseRules() []diagnose.Rule {
 			NextSteps: "Grow the affected volume (the storage class must allow expansion), " +
 				"or fix the archiving failure that filled it. The operator restarts " +
 				"PostgreSQL on its own once space exists.",
-			ConsequenceOf: []string{"cnpg-wal-disk-full", "cnpg-wal-archiving-failing"},
+			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-wal-disk-full"}, {Cause: "cnpg-wal-archiving-failing"}},
 			Link:          "/cluster/overview",
 			LinkLabel:     "Cluster overview",
 		},
@@ -192,6 +192,7 @@ func phaseRules() []diagnose.Rule {
 				"restart is also blocked. The promotion-stall log checks usually say " +
 				"which side is wedged.",
 			When:      diagnose.PrimaryMismatch{MinAge: 10 * time.Minute},
+			Pinned:    []string{`json:"targetPrimaryTimestamp,omitempty"`},
 			Link:      "/cluster/overview",
 			LinkLabel: "Cluster overview",
 		},

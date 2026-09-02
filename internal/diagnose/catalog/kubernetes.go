@@ -77,9 +77,15 @@ func kubernetesRules() []diagnose.Rule {
 			When: diagnose.ContainerState{Reasons: []string{"CrashLoopBackOff"}},
 			NextSteps: "Read that container's log tail: the last lines before each exit " +
 				"name the reason the kubelet cannot.",
-			ConsequenceOf: []string{"cnpg-wal-disk-full", "cnpg-postgres-exited", "k8s-container-oom"},
-			Link:          "/cluster/pods",
-			LinkLabel:     "Pods",
+			// Every cause here is a fact about one pod — its log, its own
+			// container states — so the relation holds only on that pod.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-wal-disk-full", Scope: diagnose.ScopePod},
+				{Cause: "cnpg-postgres-exited", Scope: diagnose.ScopePod},
+				{Cause: "k8s-container-oom", Scope: diagnose.ScopePod},
+			},
+			Link:      "/cluster/pods",
+			LinkLabel: "Pods",
 		},
 		{
 			ID:        "k8s-container-oom",

@@ -88,7 +88,14 @@ audit:
 	./hack/check-npm-audit.sh web $(NPM_AUDIT_LEVEL)
 	./hack/check-npm-audit.sh hack/uitest $(NPM_AUDIT_LEVEL)
 
-check: lint test test-fuzz test-race vuln audit
+# The catalog's version pins are claims about specific operator releases.
+# This fetches each verified release's source through the Go module proxy
+# and greps every pinned rule's strings in it, so a reworded upstream
+# message fails here instead of silently never matching.
+verify-pins:
+	$(GO) test -tags catalogpins -count=1 -run TestPinnedStringsExistInVerifiedReleases ./internal/diagnose/catalog/
+
+check: lint test test-fuzz test-race vuln audit verify-pins
 
 docs:
 	cd web && npm ci && npm run typecheck && npm run build

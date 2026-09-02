@@ -44,10 +44,40 @@ func TestCatalogDeclarationsAreComplete(t *testing.T) {
 		if rule.When == nil && len(rule.Requires) == 0 {
 			t.Errorf("rule %q has neither a condition nor a pin, so it would always fire", rule.ID)
 		}
-		if condition, ok := rule.When.(diagnose.LogContains); ok && len(condition.Substrings) == 0 {
+		if condition, ok := diagnose.LogCondition(rule.When); ok && len(condition.Substrings) == 0 {
 			t.Errorf("log rule %q has no substrings, so it could never match", rule.ID)
 		}
+		if all, ok := rule.When.(diagnose.AllOf); ok && countLogConditions(all) > 1 {
+			t.Errorf("rule %q carries more than one log condition; the matcher keys by rule ID", rule.ID)
+		}
 	}
+	// Every declared cause must be a check that exists, in the catalog or
+	// among the detectors: a relation to a check nobody produces would
+	// never nest and never be noticed.
+	for _, rule := range Rules() {
+		for _, relation := range rule.ConsequenceOf {
+			if !seen[relation.Cause] {
+				t.Errorf("rule %q is declared a consequence of %q, which no check produces", rule.ID, relation.Cause)
+			}
+			if relation.Cause == rule.ID {
+				t.Errorf("rule %q is declared a consequence of itself", rule.ID)
+			}
+		}
+	}
+}
+
+// countLogConditions counts the log branches of a composite condition.
+func countLogConditions(all diagnose.AllOf) int {
+	count := 0
+	for _, branch := range all.Of {
+		switch condition := branch.(type) {
+		case diagnose.LogContains:
+			count++
+		case diagnose.AllOf:
+			count += countLogConditions(condition)
+		}
+	}
+	return count
 }
 
 // TestLogRulesMirrorTheCatalog proves the matcher is fed from the same
@@ -60,7 +90,7 @@ func TestLogRulesMirrorTheCatalog(t *testing.T) {
 		derived[rule.ID] = len(rule.Contains)
 	}
 	for _, rule := range Rules() {
-		condition, ok := rule.When.(diagnose.LogContains)
+		condition, ok := diagnose.LogCondition(rule.When)
 		if !ok {
 			continue
 		}

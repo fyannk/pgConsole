@@ -9,6 +9,33 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **Diagnostics relate findings on evidence, not on names.** Every
+  finding now names its subject (the pod, backup, claim or quota it is
+  about) and the time of the observation where its source reports one.
+  The catalog's causal relations state a scope (same cluster or same
+  pod), an optional window, and a qualitative strength (established
+  mechanism or plausible), and a finding nests under its cause only when
+  the relation admits the pair — a full WAL volume on one instance no
+  longer swallows a crash loop on another. A cause that matched but on
+  another object or at another time stays its own card, with the near
+  miss listed beneath and the relation's own reason for keeping them
+  apart. Nested cards show the terms they were admitted on.
+- **`cnpg-primary-disagreement`**, the first check that compares two
+  sources: the operator's `currentPrimary` against each instance's own
+  `pg_is_in_recovery()` from the exporter. The contradiction is the
+  finding; both sides are quoted and neither is presumed right. A
+  primary move in flight keeps the check clear. Behind it, a rule can
+  now state a condition as an `AllOf` of several, with a branch that
+  could not run making the whole check one that could not run.
+- **Catalog pins are verified against the operator's source.**
+  `make verify-pins`, run in CI, fetches each verified CloudNativePG
+  release through the Go module proxy and greps every pinned rule's
+  strings in it. Rules whose literals are assembled at runtime name the
+  source strings they rest on explicitly. A reworded upstream message
+  now fails the build instead of silently never matching.
+
 ### Fixed
 
 - **The Cluster and FailoverQuorum watches no longer resume from the
