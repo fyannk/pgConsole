@@ -155,3 +155,44 @@ func TestTailLogsRefusesAContainerThePodDoesNotDeclare(t *testing.T) {
 		t.Error("refusal was not logged with its reason")
 	}
 }
+
+// TestFollowLogOptionsAskForNoBacklog holds the follower to a live
+// stream. With TailLines unset the API server serves the log from the
+// container's creation before it follows, so every reconnect would
+// re-read the whole thing: the matcher would count those lines again and
+// refresh their last-seen instant, keeping an observation current because
+// the connection blinked rather than because the fault recurred, and the
+// buffer would re-retain lines it already holds.
+//
+// The zero has to be a set pointer, not an absent field — those two mean
+// opposite things to the API server, which is the trap this test exists
+// to hold shut.
+func TestFollowLogOptionsAskForNoBacklog(t *testing.T) {
+	t.Parallel()
+	opts := followLogOptions("postgres")
+	if opts.TailLines == nil {
+		t.Fatal("TailLines is unset, so the API server serves the log from the container's creation")
+	}
+	if *opts.TailLines != 0 {
+		t.Errorf("TailLines = %d, want 0 so the stream carries only what is written after it opens", *opts.TailLines)
+	}
+	if !opts.Follow {
+		t.Error("Follow is false, so the stream would end at once instead of following")
+	}
+	if opts.Container != "postgres" {
+		t.Errorf("Container = %q, want the verified container name", opts.Container)
+	}
+}
+
+// TestTheOnDemandTailStillAsksForHistory is the contrast that keeps the
+// two apart. The follower watches what happens next; the tail screen
+// exists to show what already happened, so it asks for a tail length and
+// must go on doing so.
+func TestTheOnDemandTailStillAsksForHistory(t *testing.T) {
+	t.Parallel()
+	client, _ := newLogsTestClient(t, ownedPod("orders-1", "u1", "primary"))
+	if client.opts.LogTailLines <= 0 {
+		t.Fatalf("LogTailLines = %d, want the tail screen to ask for history",
+			client.opts.LogTailLines)
+	}
+}
