@@ -224,6 +224,68 @@ func TestAFrozenInstanceDoesNotSilenceALiveOne(t *testing.T) {
 	}
 }
 
+// TestTheReasonClaimsOnlyWhatWasRefused is the mixed run: one instance
+// frozen, another answering and simply reporting nothing. The check
+// still withdraws — an instance that went unjudged is why it cannot
+// clear — but the reason must not say the feed is dead, because an
+// operator reading that would go looking for a scraper that is mostly
+// working.
+func TestTheReasonClaimsOnlyWhatWasRefused(t *testing.T) {
+	t.Parallel()
+	window := pacedWindow{
+		interval: metrics.DefaultInterval,
+		instants: map[string]map[string]metrics.Instant{
+			"orders-1": {"fencing-on": {At: now.Add(-time.Hour).Unix(), Value: 1}},
+			// Current, and nothing to report: the reading the reason
+			// must not talk over.
+			"orders-2": {"fencing-on": {At: now.Add(-20 * time.Second).Unix(), Value: 0}},
+		},
+	}
+	check, findings := evaluateRule(
+		Rule{ID: "mixed", Summary: "Mixed.", When: InstantNonZero{Key: "fencing-on"}},
+		Input{Now: now, Metrics: window})
+	if check.Outcome != CheckUnavailable || len(findings) != 0 {
+		t.Fatalf("outcome = %v with %d findings, want could-not-run: an unjudged instance cannot be cleared over",
+			check.Outcome, len(findings))
+	}
+	if !strings.Contains(check.Because, "1h0m0s old") {
+		t.Errorf("reason = %q, want the refused reading's age", check.Because)
+	}
+	// The wording may change; what may not is claiming the whole window
+	// is behind when one of its instances is current.
+	for _, overstated := range []string{"the newest reading", "nothing here is a claim about now"} {
+		if strings.Contains(check.Because, overstated) {
+			t.Errorf("reason = %q, which claims %q of a window still holding a current reading",
+				check.Because, overstated)
+		}
+	}
+}
+
+// TestTheReasonCountsEveryRefusedReading pins the plural: a run that
+// withheld several says how many, so the reader can tell one frozen
+// exporter from a scraper that has stopped altogether.
+func TestTheReasonCountsEveryRefusedReading(t *testing.T) {
+	t.Parallel()
+	stale := metrics.Instant{At: now.Add(-time.Hour).Unix(), Value: 1}
+	window := pacedWindow{
+		interval: metrics.DefaultInterval,
+		instants: map[string]map[string]metrics.Instant{
+			"orders-1": {"fencing-on": stale},
+			"orders-2": {"fencing-on": stale},
+			"orders-3": {"fencing-on": stale},
+		},
+	}
+	check, _ := evaluateRule(
+		Rule{ID: "counted", Summary: "Counted.", When: InstantNonZero{Key: "fencing-on"}},
+		Input{Now: now, Metrics: window})
+	if check.Outcome != CheckUnavailable {
+		t.Fatalf("outcome = %v, want could-not-run", check.Outcome)
+	}
+	if !strings.Contains(check.Because, "3 readings") {
+		t.Errorf("reason = %q, want the count of what was refused", check.Because)
+	}
+}
+
 // TestAnUnpacedWindowIsJudgedAtTheDefaultCadence covers the window that
 // states no cadence: the bound falls back to the package default rather
 // than to zero, which would refuse every reading ever taken and turn

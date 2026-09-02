@@ -672,8 +672,11 @@ func (c InstantShortfall) evaluate(_ string, in Input) ([]conditionMatch, string
 		}
 		// Both sides must be current: comparing a fresh count against a
 		// frozen expectation, or the reverse, invents a shortfall out of
-		// the gap between two sweeps.
-		if !fresh.current(observed.At) || !fresh.current(expected.At) {
+		// the gap between two sweeps. Both are judged rather than
+		// short-circuited, so the count the reason carries is a true
+		// count of what this check refused.
+		currentObserved, currentExpected := fresh.current(observed.At), fresh.current(expected.At)
+		if !currentObserved || !currentExpected {
 			continue
 		}
 		if expected.Value <= 0 || observed.Value >= expected.Value {

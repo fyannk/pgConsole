@@ -234,9 +234,10 @@ type freshness struct {
 	now     time.Time
 	source  string
 	// refused counts readings withheld for age; newest is the smallest
-	// of their ages. The reason quotes the best case among what was
-	// refused, because "even the newest is this old" is the strongest
-	// true thing to say.
+	// of their ages. Both speak for the refused readings only — a run
+	// that withheld one instance may have read another perfectly well —
+	// so the reason quotes the best case among what it refused and says
+	// nothing about what it accepted.
 	refused int
 	newest  time.Duration
 }
@@ -275,11 +276,25 @@ func (f *freshness) current(at int64) bool {
 
 // unavailable is the reason a check withdrew for want of a current
 // reading, empty when it refused none.
+//
+// It is worded to claim only what was refused. A check reaches here
+// having matched nothing, which does not mean it read nothing current:
+// one instance's exporter may have frozen while another answered and
+// simply had nothing to report. Saying "the newest reading is an hour
+// old" would then be false, and would send an operator after a scraper
+// that is mostly working. What is true either way is that some
+// instances went unjudged, which is why the check cannot clear.
 func (f *freshness) unavailable() string {
-	if f.refused == 0 {
+	switch {
+	case f.refused == 0:
 		return ""
+	case f.refused == 1:
+		return fmt.Sprintf(
+			"a reading %s is %s old, past the %s a sweep should leave, so the instance it came from went unjudged",
+			f.source, f.newest.Round(time.Second), f.horizon)
 	}
 	return fmt.Sprintf(
-		"the newest reading %s is %s old, past the %s a sweep should leave, so nothing here is a claim about now",
-		f.source, f.newest.Round(time.Second), f.horizon)
+		"%d readings %s are past the %s a sweep should leave, the newest of them %s old, "+
+			"so the instances they came from went unjudged",
+		f.refused, f.source, f.horizon, f.newest.Round(time.Second))
 }
