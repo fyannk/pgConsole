@@ -187,6 +187,13 @@ func kubernetesRules() []diagnose.Rule {
 			Component: diagnose.ComponentKubernetes,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentKubernetes, Constraint: "<1.34"}},
+			// Kubernetes ships a minor roughly every four months and
+			// patches each for about fourteen, so this boundary moves
+			// several times a year — faster than any other dated claim
+			// the console makes. The date is when to go and read the
+			// project's own support window again, not a date the console
+			// claims 1.34 leaves it.
+			ReviewBy:  "2026-10-31",
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a Kubernetes version past upstream end of life",
 			Summary:   "The Kubernetes server version no longer receives upstream patches.",

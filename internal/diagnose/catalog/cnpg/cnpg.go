@@ -55,6 +55,16 @@ func Rules() []diagnose.Rule {
 // letting that check pass, not trusting that nothing moved.
 var VerifiedReleases = []string{"1.28.4", "1.29.2", "1.30.0"}
 
+// VerifiedReviewBy is the date by which this list stops being safe to
+// leave alone. Pin verification proves the strings still say what the
+// catalog claims in the releases named above; nothing proves the list
+// is still the current set, because a release the console has never
+// heard of looks exactly like no release at all. On this date the
+// catalog's tests fail until someone checks what CloudNativePG has
+// shipped since — and either verifies it and widens the spans, or moves
+// the date on having looked.
+const VerifiedReviewBy = "2026-11-30"
+
 // The verified spans. A span is widened only by verifying the strings
 // in another release's tree.
 const (

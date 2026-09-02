@@ -16,8 +16,10 @@ package catalog
 
 import (
 	"testing"
+	"time"
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/diagnose/catalog/cnpg"
 )
 
 // TestCatalogDeclarationsAreComplete is the sanity gate on the data:
@@ -115,5 +117,63 @@ func TestLogRulesMirrorTheCatalog(t *testing.T) {
 	}
 	for id := range derived {
 		t.Errorf("matcher rule %q has no catalog declaration", id)
+	}
+}
+
+// TestDatedKnowledgeIsStillInReview is the console's own discipline
+// turned on itself. Pin verification proves the operator's strings still
+// say what the catalog claims; nothing proves a support boundary is
+// still where it was, because that moves on a calendar and no
+// observation changes to announce it. A rule stating one carries the
+// date its claim stops being safe to assert unreviewed, and this fails
+// once that date passes.
+//
+// Failing the build is the point. The alternative is a console that
+// keeps telling operators a supported version is unsupported, or says
+// nothing about one that no longer is — and either is worse than a red
+// test with a name that says exactly what to go and read.
+func TestDatedKnowledgeIsStillInReview(t *testing.T) {
+	t.Parallel()
+	today := time.Now().UTC()
+	overdue := func(t *testing.T, what, date, whatToDo string) {
+		t.Helper()
+		by, err := time.Parse(time.DateOnly, date)
+		if err != nil {
+			t.Errorf("%s carries %q, which is not a YYYY-MM-DD date: %v", what, date, err)
+			return
+		}
+		if today.After(by) {
+			t.Errorf("%s was to be reviewed by %s, %d days ago: %s",
+				what, date, int(today.Sub(by).Hours()/24), whatToDo)
+		}
+	}
+
+	for _, rule := range Rules() {
+		if rule.ReviewBy == "" {
+			continue
+		}
+		overdue(t, "rule "+rule.ID, rule.ReviewBy,
+			"re-read the component's own support policy, move the rule's version constraint "+
+				"and its wording to the boundary that holds now, and set the next review date")
+	}
+	overdue(t, "the CloudNativePG verified-release list", cnpg.VerifiedReviewBy,
+		"check what CloudNativePG has released since "+
+			cnpg.VerifiedReleases[len(cnpg.VerifiedReleases)-1]+
+			", verify the catalog's strings against any new tree, widen the spans it covers, "+
+			"and set the next review date")
+}
+
+// TestDatedKnowledgeIsDeclaredWhereItExpires proves the field is on the
+// rules that need it. A rule whose applicability is a version boundary
+// rather than an observation states a fact about a calendar, and one
+// that states it without a review date would go stale silently.
+func TestDatedKnowledgeIsDeclaredWhereItExpires(t *testing.T) {
+	t.Parallel()
+	for _, rule := range Rules() {
+		if rule.When != nil || rule.ReviewBy != "" {
+			continue
+		}
+		t.Errorf("rule %q fires on its version pins alone, so its claim is a support boundary "+
+			"and boundaries move: it needs a ReviewBy date", rule.ID)
 	}
 }

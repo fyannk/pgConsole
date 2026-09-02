@@ -162,6 +162,11 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentPostgreSQL, Constraint: "<14"}},
+			// PostgreSQL 14 was released on 2021-09-30 and leaves the
+			// project's five-year window on 2026-11-12, which is the day
+			// this boundary becomes wrong: from then on a 14 is
+			// unsupported and the constraint has to say so.
+			ReviewBy:  "2026-11-12",
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a PostgreSQL major version past upstream end of life",
 			Summary:   "The PostgreSQL major version no longer receives upstream releases.",

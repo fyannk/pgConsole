@@ -11,6 +11,18 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **The console's dated knowledge expires on purpose.** A support
+  boundary moves when upstream retires the next version, and nothing
+  observable changes to announce it, so the PostgreSQL and Kubernetes
+  end-of-life rules and the CloudNativePG verified-release list now each
+  carry the date their claim stops being safe to assert unreviewed. The
+  catalog's tests fail once that date passes, naming what to re-read and
+  what to change. It is the discipline `make verify-pins` applies to the
+  operator's strings, turned on the console's own claims: a stale
+  boundary stops the build rather than quietly telling operators that a
+  supported version is unsupported. A rule that fires on its version
+  pins alone must declare one, which a second test holds.
+
 - **Log checks can match a named field instead of the whole line.**
   CloudNativePG writes JSON, so a check that knows which field carries
   the string it looks for now says so: `postgres-fatal` and
