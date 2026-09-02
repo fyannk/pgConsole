@@ -15,6 +15,7 @@
 package logstream
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -337,5 +338,129 @@ func TestMatcherWithdrawsExceptedLines(t *testing.T) {
 		`{"error_severity":"FATAL","message":"could not access file \"pg_wal/0000\""}`, time.Second))
 	if got := m.Observations(); len(got) != 1 {
 		t.Fatalf("a real FATAL was withdrawn along with the benign ones: %+v", got)
+	}
+}
+
+// TestFieldTestsReadTheNamedFieldOnly is the precision the structured
+// rules exist for: a string in the field a rule names matches, the same
+// string anywhere else in the line does not, and a line that is not the
+// component's structured format matches no field rule at all.
+func TestFieldTestsReadTheNamedFieldOnly(t *testing.T) {
+	t.Parallel()
+	rules := []Rule{
+		{ID: "panic", Summary: "Panic.",
+			Fields: []FieldTest{{Path: "record.error_severity", Equals: "PANIC"}}},
+		{ID: "archive", Summary: "Archive.",
+			Fields: []FieldTest{{Path: "msg", Equals: "failed to run wal-archive command"}}},
+		{ID: "lagging", Summary: "Lagging.",
+			Fields: []FieldTest{{Path: "msg", Contains: "streaming replica lagging"}}},
+	}
+	fired := func(text string) []string {
+		matcher := NewMatcher(rules, 0, nil)
+		matcher.Observe(Line{Pod: "orders-1", Container: "postgres", Text: text, At: time.Now()})
+		var ids []string
+		for _, observation := range matcher.Observations() {
+			ids = append(ids, observation.RuleID)
+		}
+		sort.Strings(ids)
+		return ids
+	}
+
+	if got := fired(`{"level":"info","msg":"record","record":{"error_severity":"PANIC","message":"could not write"}}`); len(got) != 1 || got[0] != "panic" {
+		t.Errorf("fired = %v on a real panic record, want the panic rule", got)
+	}
+	// The same word, but in the message the server wrote rather than in
+	// the severity the pipe assigned: not the server reporting a panic.
+	if got := fired(`{"level":"info","msg":"record","record":{"error_severity":"LOG","message":"recovered from PANIC earlier"}}`); len(got) != 0 {
+		t.Errorf("fired = %v on a mention of the word, want nothing", got)
+	}
+	// An operator message quoting the archive failure inside its own
+	// error field is not the archive command's own message.
+	if got := fired(`{"msg":"reconciliation failed","error":"failed to run wal-archive command"}`); len(got) != 0 {
+		t.Errorf("fired = %v on a quoted message, want nothing", got)
+	}
+	if got := fired(`{"msg":"failed to run wal-archive command","error":"exit status 1"}`); len(got) != 1 || got[0] != "archive" {
+		t.Errorf("fired = %v on the archive message itself, want the archive rule", got)
+	}
+	// Contains matches the fixed part of a message formatted around a
+	// value, where equality never could.
+	if got := fired(`{"msg":"streaming replica lagging; detectedLag=42s configuredLag=30s"}`); len(got) != 1 || got[0] != "lagging" {
+		t.Errorf("fired = %v on a formatted message, want the lagging rule", got)
+	}
+	// A line that is not JSON, and a JSON line missing the field.
+	if got := fired(`2026-09-02 FATAL: something PANIC`); len(got) != 0 {
+		t.Errorf("fired = %v on a plain-text line, want nothing", got)
+	}
+	if got := fired(`{"level":"info","msg":"starting"}`); len(got) != 0 {
+		t.Errorf("fired = %v on a line without the fields, want nothing", got)
+	}
+}
+
+// TestFieldTestsAndSubstringsCoexist proves a rule set mixing the two
+// still matches each rule on its own terms, and that Except withdraws a
+// field match exactly as it withdraws a substring one.
+func TestFieldTestsAndSubstringsCoexist(t *testing.T) {
+	t.Parallel()
+	rules := []Rule{
+		{ID: "substring", Summary: "Substring.", Contains: []string{"no free disk space for WALs"}},
+		{ID: "field", Summary: "Field.",
+			Fields: []FieldTest{{Path: "record.error_severity", Equals: "FATAL"}},
+			Except: []string{"the database system is starting up"}},
+	}
+	matcher := NewMatcher(rules, 0, nil)
+	at := time.Now()
+	matcher.Observe(Line{Pod: "p", Container: "c", At: at,
+		Text: `{"msg":"exiting","error":"no free disk space for WALs"}`})
+	matcher.Observe(Line{Pod: "p", Container: "c", At: at,
+		Text: `{"record":{"error_severity":"FATAL","message":"the database system is starting up"}}`})
+	matcher.Observe(Line{Pod: "p", Container: "c", At: at,
+		Text: `{"record":{"error_severity":"FATAL","message":"password authentication failed"}}`})
+
+	counts := map[string]int{}
+	for _, observation := range matcher.Observations() {
+		counts[observation.RuleID] = observation.Count
+	}
+	if counts["substring"] != 1 {
+		t.Errorf("substring rule fired %d times, want once", counts["substring"])
+	}
+	if counts["field"] != 1 {
+		t.Errorf("field rule fired %d times, want once — the benign record is excluded", counts["field"])
+	}
+}
+
+// TestMalformedFieldTestMatchesNothing proves a field test that states
+// no question, or two, fails closed. Guessing which half was meant is
+// how a rule ends up matching something nobody declared.
+func TestMalformedFieldTestMatchesNothing(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]FieldTest{
+		"neither":     {Path: "msg"},
+		"both":        {Path: "msg", Equals: "starting", Contains: "start"},
+		"no path":     {Equals: "starting"},
+		"empty":       {},
+		"path only":   {Path: "record.error_severity"},
+		"both, empty": {Path: "msg", Equals: "", Contains: ""},
+	} {
+		if test.Valid() {
+			t.Errorf("%s: reported valid", name)
+		}
+		matcher := NewMatcher([]Rule{{ID: "malformed", Summary: "Malformed.",
+			Fields: []FieldTest{test}}}, 0, nil)
+		matcher.Observe(Line{Pod: "p", Container: "c", At: time.Now(),
+			Text: `{"msg":"starting","record":{"error_severity":"FATAL"}}`})
+		if got := matcher.Observations(); len(got) != 0 {
+			t.Errorf("%s: matched %+v, want nothing", name, got)
+		}
+	}
+	// One malformed test withdraws the whole rule, even beside a sound
+	// one that would have matched on its own.
+	matcher := NewMatcher([]Rule{{ID: "mixed", Summary: "Mixed.", Fields: []FieldTest{
+		{Path: "msg", Equals: "starting"},
+		{Path: "record.error_severity"},
+	}}}, 0, nil)
+	matcher.Observe(Line{Pod: "p", Container: "c", At: time.Now(),
+		Text: `{"msg":"starting","record":{"error_severity":"FATAL"}}`})
+	if got := matcher.Observations(); len(got) != 0 {
+		t.Errorf("a rule with one malformed test matched %+v, want nothing", got)
 	}
 }

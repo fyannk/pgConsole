@@ -11,6 +11,23 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **Log checks can match a named field instead of the whole line.**
+  CloudNativePG writes JSON, so a check that knows which field carries
+  the string it looks for now says so: `postgres-fatal` and
+  `postgres-panic` read `record.error_severity`, the field the
+  operator's log pipe puts a server record's severity in, and the four
+  operator-message checks read `msg`. Searching a whole line for
+  `failed to run wal-archive command` also matched an operator message
+  quoting that failure back inside its own `error` field; reading the
+  field does not, and the match no longer depends on how the envelope's
+  keys happen to be ordered. Each line is decoded once for the whole
+  rule set and only when a rule asks for a field; a line that is not
+  JSON matches no field check. The checks whose strings come from the
+  barman-cloud command-line tooling stay on substrings, because the
+  field carrying them cannot be read out of any source this console
+  verifies against. Paths are verified segment by segment against the
+  operator's own JSON tags by `make verify-pins`, alongside the values.
+
 - **Diagnostics that count over time.** Every other source the engine
   reads is a snapshot of now, so a fault visible only in repetition was
   invisible. Two checks read the object timeline instead:

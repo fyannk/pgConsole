@@ -81,6 +81,27 @@ finding nests under the operator's archiving condition when both are
 current, which is the console placing the repository's observation
 beside the operator's claim without merging the two.
 
+## How log checks match
+
+CloudNativePG writes JSON, so a log check matches one of two ways.
+
+| Match | When it is used |
+|---|---|
+| **field** | The field carrying the string has been read out of the emitting component's source. `postgres-fatal` reads `record.error_severity`, the field the operator's log pipe puts a server record's severity in; the four operator-message checks read `msg`. Paths are literal and dotted — no wildcards, no indexing. |
+| **substring** | Everything else: the message is known but the field carrying it is not, as with the barman-cloud checks, whose strings the command-line tooling writes rather than any Go source this console can read. |
+
+Field matching is the more precise of the two and the less widely
+usable. Searching a whole line for `failed to run wal-archive command`
+also matches an operator message quoting that failure back inside its
+own `error` field; reading the `msg` field does not. Neither form is a
+regular expression, deliberately: a rule that cannot express something
+clever is a rule that cannot quietly match the wrong thing.
+
+A line that is not valid JSON matches no field check, which is correct
+— a line the component did not write in its structured format is not
+one whose fields can be read. Each line is decoded once for the whole
+rule set, and only when some rule asks for a field.
+
 ## Checks that count over time
 
 Every other source is a snapshot of now, so a fault visible only in

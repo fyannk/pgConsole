@@ -37,6 +37,7 @@
 package logstream
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -86,13 +87,85 @@ func (s Sinks) Gap(pod, container string, at time.Time, reason string) {
 	}
 }
 
+// FieldTest is one test against a named field of a structured log line.
+// The operator writes JSON, so a rule that knows which field carries the
+// string it looks for can say so instead of searching the whole line:
+// matching "no free disk space" anywhere in a line also matches a line
+// quoting that phrase back inside some other field, while matching it in
+// the field that carries it does not.
+//
+// Exactly one of Equals and Contains is set. Equals is for a message the
+// component writes whole; Contains is for one it formats around a value,
+// where only the fixed part can be matched.
+type FieldTest struct {
+	// Path is the field, dotted from the root: "msg", or
+	// "record.error_severity". No wildcards and no indexing — the same
+	// reasoning that keeps matching to substrings keeps paths literal.
+	Path string
+	// Equals matches the field's exact value.
+	Equals string
+	// Contains matches a substring of the field's value.
+	Contains string
+}
+
+// Valid reports whether the test states exactly one question about one
+// named field. A test that states none, or two, is malformed rather
+// than lenient: guessing which of them was meant is how a rule ends up
+// matching something nobody declared.
+func (t FieldTest) Valid() bool {
+	if t.Path == "" {
+		return false
+	}
+	return (t.Equals == "") != (t.Contains == "")
+}
+
+// holds reports whether the test passes against a decoded line. A
+// malformed test never holds, so a mis-specified rule fires on nothing
+// rather than on the half of itself that happens to be set. A field
+// that is absent, or whose value is not a string, does not match
+// either: this asks about text the component wrote, and anything else
+// is a different question that would need a different test.
+func (t FieldTest) holds(doc map[string]any) bool {
+	if !t.Valid() {
+		return false
+	}
+	value, ok := fieldValue(doc, t.Path)
+	if !ok {
+		return false
+	}
+	if t.Equals != "" {
+		return value == t.Equals
+	}
+	return strings.Contains(value, t.Contains)
+}
+
+// fieldValue walks a dotted path to a string leaf.
+func fieldValue(doc map[string]any, path string) (string, bool) {
+	if doc == nil || path == "" {
+		return "", false
+	}
+	var current any = doc
+	for _, segment := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		current, ok = object[segment]
+		if !ok {
+			return "", false
+		}
+	}
+	text, ok := current.(string)
+	return text, ok
+}
+
 // Rule is one thing worth noticing in a log line.
 //
-// Matching is by substring, deliberately, not by regular expression. The
-// lines this looks for are fixed strings the operator emits, a substring
-// test cannot be made pathological by a hostile log line, and a rule
-// that cannot express something clever is a rule that cannot quietly
-// match the wrong thing.
+// Matching is by substring or by the value of a named field,
+// deliberately, and never by regular expression. The lines this looks
+// for are fixed strings the operator emits, neither test can be made
+// pathological by a hostile log line, and a rule that cannot express
+// something clever is a rule that cannot quietly match the wrong thing.
 type Rule struct {
 	// ID is the stable identifier a finding is reported under.
 	ID string
@@ -107,17 +180,30 @@ type Rule struct {
 	// pathological by a hostile line, and cannot quietly match more than
 	// it says.
 	Except []string
+	// Fields are tests against named fields, all of which must hold. A
+	// rule declaring any needs the line to decode as a JSON object; one
+	// that does not decode matches no field rule, which is correct — a
+	// line the component did not write in its structured format is not
+	// a line whose fields can be read.
+	Fields []FieldTest
 	// Summary states what the match means, in plain language.
 	Summary string
 }
 
-// matches reports whether the line satisfies every substring.
-func (r Rule) matches(text string) bool {
-	if len(r.Contains) == 0 {
+// matches reports whether the line satisfies every substring and every
+// field test. The decoded line is passed in because one line is decoded
+// once for the whole rule set, not once per rule.
+func (r Rule) matches(text string, doc map[string]any) bool {
+	if len(r.Contains) == 0 && len(r.Fields) == 0 {
 		return false
 	}
 	for _, needle := range r.Contains {
 		if !strings.Contains(text, needle) {
+			return false
+		}
+	}
+	for _, test := range r.Fields {
+		if !test.holds(doc) {
 			return false
 		}
 	}
@@ -127,6 +213,17 @@ func (r Rule) matches(text string) bool {
 		}
 	}
 	return true
+}
+
+// structured reports whether any rule reads fields, so a line is
+// decoded only for a rule set that asks for it.
+func structured(rules []Rule) bool {
+	for _, rule := range rules {
+		if len(rule.Fields) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Observation is one rule's account of what it has seen on one
@@ -165,6 +262,7 @@ const maxObservedLine = 2048
 // safe to run continuously.
 type Matcher struct {
 	rules  []Rule
+	decode bool
 	maxAge time.Duration
 	now    func() time.Time
 
@@ -180,14 +278,23 @@ type observationKey struct{ rule, pod, container string }
 // yesterday stops being that. A maxAge of zero, or a nil clock, retains
 // observations until the container is forgotten.
 func NewMatcher(rules []Rule, maxAge time.Duration, now func() time.Time) *Matcher {
-	return &Matcher{rules: rules, maxAge: maxAge, now: now,
+	return &Matcher{rules: rules, decode: structured(rules), maxAge: maxAge, now: now,
 		observed: map[observationKey]*Observation{}}
 }
 
 // Observe analyses one line and keeps only a match.
 func (m *Matcher) Observe(line Line) {
+	// One decode for the whole rule set, and only when some rule reads
+	// fields. A line that is not a JSON object decodes to nothing,
+	// which every field test then declines.
+	var doc map[string]any
+	if m.decode {
+		if err := json.Unmarshal([]byte(line.Text), &doc); err != nil {
+			doc = nil
+		}
+	}
 	for _, rule := range m.rules {
-		if !rule.matches(line.Text) {
+		if !rule.matches(line.Text, doc) {
 			continue
 		}
 		key := observationKey{rule.ID, line.Pod, line.Container}
