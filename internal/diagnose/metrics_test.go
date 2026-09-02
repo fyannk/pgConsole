@@ -240,3 +240,30 @@ func TestAllOfRequiresOneSubject(t *testing.T) {
 			check.Outcome, len(findings))
 	}
 }
+
+// TestLogFieldsDescribesAMalformedTestAsMalformed proves the check row
+// names a mis-specified field rather than rendering one of its halves,
+// which would describe a test the rule never made.
+func TestLogFieldsDescribesAMalformedTestAsMalformed(t *testing.T) {
+	t.Parallel()
+	sound := LogFields{Fields: []LogField{{Path: "msg", Equals: "starting"}}}
+	if got := sound.describe(); !strings.Contains(got, `msg is "starting"`) {
+		t.Errorf("describe = %q, want the field and its value", got)
+	}
+	partial := LogFields{Fields: []LogField{{Path: "msg", Contains: "start"}}}
+	if got := partial.describe(); !strings.Contains(got, `msg contains "start"`) {
+		t.Errorf("describe = %q, want the substring form", got)
+	}
+	for name, field := range map[string]LogField{
+		"neither":  {Path: "msg"},
+		"both":     {Path: "msg", Equals: "starting", Contains: "start"},
+		"no path":  {Equals: "starting"},
+		"nothing":  {},
+		"contains": {Contains: "start"},
+	} {
+		got := LogFields{Fields: []LogField{field}}.describe()
+		if !strings.Contains(got, "malformed") || strings.Contains(got, `contains ""`) {
+			t.Errorf("%s: describe = %q, want it named as malformed", name, got)
+		}
+	}
+}

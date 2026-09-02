@@ -202,18 +202,35 @@ type LogFields struct {
 
 // LogField is one test against a named field: its exact value, or a
 // substring of it where the component formats a value into the message.
+// Exactly one of Equals and Contains is set; a field stating neither or
+// both is malformed, matches nothing, and says so where it is
+// described. The catalog's tests refuse one before it can ship.
 type LogField struct {
 	Path     string
 	Equals   string
 	Contains string
 }
 
+// Valid reports whether the field states exactly one question about one
+// named field.
+func (f LogField) Valid() bool {
+	return logstream.FieldTest{
+		Path: f.Path, Equals: f.Equals, Contains: f.Contains}.Valid()
+}
+
 func (c LogFields) describe() string {
 	parts := make([]string, len(c.Fields))
 	for i, field := range c.Fields {
-		if field.Equals != "" {
+		switch {
+		case !field.Valid():
+			// Named rather than rendered as one of the two halves: a
+			// check row that read "contains" of an empty string would
+			// describe a test the rule never made.
+			parts[i] = fmt.Sprintf("%s is tested by a malformed field, which matches nothing",
+				orUnnamedField(field.Path))
+		case field.Equals != "":
 			parts[i] = fmt.Sprintf("%s is %q", field.Path, field.Equals)
-		} else {
+		default:
 			parts[i] = fmt.Sprintf("%s contains %q", field.Path, field.Contains)
 		}
 	}
@@ -226,6 +243,14 @@ func (c LogFields) describe() string {
 
 func (c LogFields) evaluate(ruleID string, in Input) ([]conditionMatch, string) {
 	return logMatches(ruleID, in)
+}
+
+// orUnnamedField names a field whose path is empty.
+func orUnnamedField(path string) string {
+	if path == "" {
+		return "an unnamed field"
+	}
+	return path
 }
 
 // logMatches is what both log conditions do with a run: read what the

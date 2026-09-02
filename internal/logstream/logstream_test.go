@@ -427,3 +427,40 @@ func TestFieldTestsAndSubstringsCoexist(t *testing.T) {
 		t.Errorf("field rule fired %d times, want once — the benign record is excluded", counts["field"])
 	}
 }
+
+// TestMalformedFieldTestMatchesNothing proves a field test that states
+// no question, or two, fails closed. Guessing which half was meant is
+// how a rule ends up matching something nobody declared.
+func TestMalformedFieldTestMatchesNothing(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]FieldTest{
+		"neither":     {Path: "msg"},
+		"both":        {Path: "msg", Equals: "starting", Contains: "start"},
+		"no path":     {Equals: "starting"},
+		"empty":       {},
+		"path only":   {Path: "record.error_severity"},
+		"both, empty": {Path: "msg", Equals: "", Contains: ""},
+	} {
+		if test.Valid() {
+			t.Errorf("%s: reported valid", name)
+		}
+		matcher := NewMatcher([]Rule{{ID: "malformed", Summary: "Malformed.",
+			Fields: []FieldTest{test}}}, 0, nil)
+		matcher.Observe(Line{Pod: "p", Container: "c", At: time.Now(),
+			Text: `{"msg":"starting","record":{"error_severity":"FATAL"}}`})
+		if got := matcher.Observations(); len(got) != 0 {
+			t.Errorf("%s: matched %+v, want nothing", name, got)
+		}
+	}
+	// One malformed test withdraws the whole rule, even beside a sound
+	// one that would have matched on its own.
+	matcher := NewMatcher([]Rule{{ID: "mixed", Summary: "Mixed.", Fields: []FieldTest{
+		{Path: "msg", Equals: "starting"},
+		{Path: "record.error_severity"},
+	}}}, 0, nil)
+	matcher.Observe(Line{Pod: "p", Container: "c", At: time.Now(),
+		Text: `{"msg":"starting","record":{"error_severity":"FATAL"}}`})
+	if got := matcher.Observations(); len(got) != 0 {
+		t.Errorf("a rule with one malformed test matched %+v, want nothing", got)
+	}
+}

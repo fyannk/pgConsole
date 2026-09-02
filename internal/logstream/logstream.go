@@ -108,11 +108,27 @@ type FieldTest struct {
 	Contains string
 }
 
-// holds reports whether the test passes against a decoded line. A field
-// that is absent, or whose value is not a string, does not match: this
-// asks about text the component wrote, and anything else is a different
-// question that would need a different test.
+// Valid reports whether the test states exactly one question about one
+// named field. A test that states none, or two, is malformed rather
+// than lenient: guessing which of them was meant is how a rule ends up
+// matching something nobody declared.
+func (t FieldTest) Valid() bool {
+	if t.Path == "" {
+		return false
+	}
+	return (t.Equals == "") != (t.Contains == "")
+}
+
+// holds reports whether the test passes against a decoded line. A
+// malformed test never holds, so a mis-specified rule fires on nothing
+// rather than on the half of itself that happens to be set. A field
+// that is absent, or whose value is not a string, does not match
+// either: this asks about text the component wrote, and anything else
+// is a different question that would need a different test.
 func (t FieldTest) holds(doc map[string]any) bool {
+	if !t.Valid() {
+		return false
+	}
 	value, ok := fieldValue(doc, t.Path)
 	if !ok {
 		return false
@@ -120,10 +136,7 @@ func (t FieldTest) holds(doc map[string]any) bool {
 	if t.Equals != "" {
 		return value == t.Equals
 	}
-	if t.Contains != "" {
-		return strings.Contains(value, t.Contains)
-	}
-	return false
+	return strings.Contains(value, t.Contains)
 }
 
 // fieldValue walks a dotted path to a string leaf.

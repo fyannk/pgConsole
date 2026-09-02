@@ -48,6 +48,14 @@ func TestCatalogDeclarationsAreComplete(t *testing.T) {
 			len(matcher.Contains) == 0 && len(matcher.Fields) == 0 {
 			t.Errorf("log rule %q states nothing to match, so it could never fire", rule.ID)
 		}
+		if fields, ok := rule.When.(diagnose.LogFields); ok {
+			for _, field := range fields.Fields {
+				if !field.Valid() {
+					t.Errorf("rule %q declares a malformed field test (%+v): a field test names one path "+
+						"and sets exactly one of Equals and Contains", rule.ID, field)
+				}
+			}
+		}
 		if all, ok := rule.When.(diagnose.AllOf); ok && countLogConditions(all) > 1 {
 			t.Errorf("rule %q carries more than one log condition; the matcher keys by rule ID", rule.ID)
 		}
