@@ -44,8 +44,33 @@ particular thing. Each check answers one of four ways:
 |---|---|
 | matched | The check found what it looks for; its findings are above. |
 | clear | Its inputs were readable and nothing matched. |
-| could not run | An input was never observed — log following off, metrics not scraped, a version not observed — or its collector has lost contact and the snapshot is stale. A check that could not run rules nothing out: a stale snapshot can neither clear a check nor match one. |
+| could not run | An input was never observed — log following off, metrics not scraped, a version not observed — or its collector has lost contact and what it holds is stale. A check that could not run rules nothing out: stale data can neither clear a check nor match one. |
 | does not apply | The rule's version pins exclude the versions actually observed. Distinct from clear on purpose: the rule ruled itself out, not the failure. |
+
+### Stale readings, and why the metrics window is judged differently
+
+Most sources say when they have gone stale: the collector lost contact,
+the snapshot is marked, and every check reading it withdraws. The
+scraped metrics window cannot do that, for two reasons. The scraper
+sweeps each instance separately, so losing one exporter freezes that
+instance's readings while the rest stay current — a flag on the window
+as a whole would be wrong in both directions. And a frozen exporter
+does not look frozen: it answers every read with a perfectly plausible
+number.
+
+So a scraped reading is judged one at a time, against the age of the
+sweep that produced it. A reading older than three scrape intervals —
+never less than a minute, however fast the console sweeps — is refused,
+and the check reports "could not run" naming how far behind the newest
+refused reading is. This applies before the reading's value is looked
+at, which is the point: a replication lag from an hour ago reported as
+a match would be a claim about the past dressed as the present, and the
+same reading sitting below its threshold would clear the check while
+ruling out nothing at all. The second is the more dangerous, because
+nothing on the screen would look wrong.
+
+An instance still being swept is unaffected: a finding on it stands
+whether or not another instance's exporter has gone quiet.
 
 ## How findings relate
 

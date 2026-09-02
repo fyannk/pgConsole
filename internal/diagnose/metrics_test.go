@@ -30,6 +30,8 @@ type bothWindow struct {
 	times    []int64
 }
 
+func (w bothWindow) Interval() time.Duration { return metrics.DefaultInterval }
+
 func (w bothWindow) Instances() []string { return nil }
 
 func (w bothWindow) Range(key string, tier metrics.Tier) ([]int64, map[string][]*float64) {

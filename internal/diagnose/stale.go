@@ -14,6 +14,13 @@
 
 package diagnose
 
+import (
+	"fmt"
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/metrics"
+)
+
 // Every snapshot a check reads carries its own staleness: the collector
 // lost contact, and what it holds is the retained last-good observation.
 // Stale data is fine to display with its age beside it. It is not fine
@@ -168,4 +175,111 @@ func infrastructureUnavailable(in Input) string {
 		return "the cluster's volumes are stale, so current phases are unknown"
 	}
 	return ""
+}
+
+// metricsUnavailable is the reason the instance metrics window cannot be
+// read, empty when it can.
+func metricsUnavailable(in Input) string {
+	if in.Metrics == nil {
+		return "instance metrics are not scraped"
+	}
+	return ""
+}
+
+// poolerMetricsUnavailable is the reason the pooler metrics window
+// cannot be read, empty when it can.
+func poolerMetricsUnavailable(in Input) string {
+	if in.PoolerMetrics == nil {
+		return "pooler metrics are not scraped"
+	}
+	return ""
+}
+
+// A scraped window is the one source whose staleness is per reading
+// rather than per snapshot. The scraper sweeps every instance on a
+// cadence, so losing one exporter leaves that instance's readings
+// frozen while the rest stay current, and a flag on the window as a
+// whole would be wrong in both directions. Each reading carries the
+// sweep time that produced it, and freshness judges them one at a time.
+//
+// The judgement matters more here than anywhere else, because a
+// reading has no way to look stale. An unobserved snapshot is absent
+// and a stale one says so, but a frozen exporter answers every read
+// with a plausible number — and a check that takes it withdraws the
+// present tense from the reader without saying it has: a lag reading
+// from an hour ago reported as a match is a claim about the past, and
+// the same reading below its threshold is the false clear the package
+// exists to refuse.
+
+// missedSweeps is how many scrapes may pass unanswered before a reading
+// stops being a claim about now: two consecutive misses tolerated, the
+// third refused. The graphs break their line after one and a half
+// (metrics.Store's own gap break), which is right for a drawing of the
+// past and too eager for a statement about the present.
+const missedSweeps = 3
+
+// freshnessFloor is the shortest horizon regardless of cadence. How
+// long a reading stays a fair statement of now is a property of what is
+// being claimed, not of how often the console asks: at the default
+// ten-second sweep, three of them is half a minute, and withdrawing a
+// check over half a minute of jitter would cost the reader more than it
+// tells them.
+const freshnessFloor = time.Minute
+
+// freshness bounds how old a scraped reading may be before a check
+// refuses to read the present tense into it, and remembers what it
+// refused so the check can say so instead of falling silent.
+type freshness struct {
+	horizon time.Duration
+	now     time.Time
+	source  string
+	// refused counts readings withheld for age; newest is the smallest
+	// of their ages. The reason quotes the best case among what was
+	// refused, because "even the newest is this old" is the strongest
+	// true thing to say.
+	refused int
+	newest  time.Duration
+}
+
+// freshnessOf is the bound for one window, taken from its own scrape
+// cadence so the console calibrates against how often it actually asks.
+func freshnessOf(window MetricsWindow, now time.Time, source string) *freshness {
+	interval := window.Interval()
+	if interval <= 0 {
+		// A window that does not state its cadence is judged at the
+		// package's own default rather than at zero, which would refuse
+		// every reading ever taken.
+		interval = metrics.DefaultInterval
+	}
+	horizon := time.Duration(missedSweeps) * interval
+	if horizon < freshnessFloor {
+		horizon = freshnessFloor
+	}
+	return &freshness{horizon: horizon, now: now, source: source}
+}
+
+// current reports whether a reading swept at the given Unix second is
+// recent enough to state in the present tense, recording it as refused
+// when it is not.
+func (f *freshness) current(at int64) bool {
+	age := f.now.Sub(time.Unix(at, 0))
+	if age <= f.horizon {
+		return true
+	}
+	if f.refused == 0 || age < f.newest {
+		f.newest = age
+	}
+	f.refused++
+	return false
+}
+
+// unavailable is the reason a check withdrew for want of a current
+// reading, empty when it refused none.
+func (f *freshness) unavailable() string {
+	if f.refused == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"the newest reading %s is %s old, past the %s a sweep should leave, so nothing here is a claim about now",
+		f.source, f.newest.Round(time.Second), f.horizon)
 }

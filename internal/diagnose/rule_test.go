@@ -344,6 +344,8 @@ func TestClusterPhaseQuotesPhaseAndReason(t *testing.T) {
 // staticWindow is a MetricsWindow serving fixed instant readings.
 type staticWindow map[string]map[string]metrics.Instant
 
+func (w staticWindow) Interval() time.Duration { return metrics.DefaultInterval }
+
 func (w staticWindow) Instances() []string { return nil }
 func (w staticWindow) Range(string, metrics.Tier) ([]int64, map[string][]*float64) {
 	return nil, nil
@@ -538,6 +540,8 @@ type seriesWindow struct {
 	raw, rollup map[string][]*float64
 	times       []int64
 }
+
+func (w seriesWindow) Interval() time.Duration { return metrics.DefaultInterval }
 
 func (w seriesWindow) Instances() []string { return nil }
 func (w seriesWindow) Range(_ string, tier metrics.Tier) ([]int64, map[string][]*float64) {
