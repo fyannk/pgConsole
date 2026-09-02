@@ -285,10 +285,10 @@ func (f *freshness) current(at int64) bool {
 // that is mostly working. What is true either way is that some
 // instances went unjudged, which is why the check cannot clear.
 func (f *freshness) unavailable() string {
-	switch {
-	case f.refused == 0:
+	switch f.refused {
+	case 0:
 		return ""
-	case f.refused == 1:
+	case 1:
 		return fmt.Sprintf(
 			"a reading %s is %s old, past the %s a sweep should leave, so the instance it came from went unjudged",
 			f.source, f.newest.Round(time.Second), f.horizon)
