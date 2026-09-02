@@ -32,8 +32,9 @@ import (
 var now = time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 
 // fixtureWindow is a MetricsWindow serving instant flags and a short
-// run of series samples per instance. The run is three samples an hour
-// apart, so a rule asking for a value held across a window sees one.
+// run of series samples per instance. The run is three samples ten
+// minutes apart, so a rule asking for a value held across a window
+// sees more than one of them inside it.
 type fixtureWindow struct {
 	instants map[string]map[string]metrics.Instant
 	series   map[string]map[string]float64

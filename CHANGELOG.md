@@ -33,9 +33,6 @@ period. Pin an exact image tag and read the notes before upgrading.
   so two branches matching on different pods are two facts rather than
   one invented finding. A branch about no single object, such as a
   cluster-wide condition, corroborates any instance.
-
-### Added
-
 - **Diagnostics read every source the console publishes.** Five
   snapshots reached the engine and no check consumed them; each now
   has one. `cnpg-pooler-short` reports a Pooler with fewer ready
