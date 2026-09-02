@@ -87,14 +87,18 @@ type ClusterFacts struct {
 	Conditions []Condition
 }
 
-// ClusterState is one observation delivered by a Source: the facts plus
-// the resource version to resume watching from. An absent cluster has
-// Facts.Present false and an empty ResourceVersion.
+// ClusterState is one complete observation delivered by a Source. An
+// absent cluster has Facts.Present false.
+//
+// It carries no resource version on purpose. The seed is a pinned get of
+// one object, and a single object's resource version is its last
+// modification, not the collection's current position: on a cluster idle
+// longer than the server's watch window it is expired before the watch
+// even starts, and every watch resumed from it dies instantly with 410
+// Expired — permanently, because the next get returns the same version.
 type ClusterState struct {
 	// Facts is the converted operator-reported state.
 	Facts ClusterFacts
-	// ResourceVersion resumes the watch after this observation.
-	ResourceVersion string
 }
 
 // Watch is a running watch on the target cluster. Results is closed
@@ -115,8 +119,10 @@ type Source interface {
 	// Fetch returns the current state through the pinned get. An absent
 	// cluster is a successful observation, not an error.
 	Fetch(ctx context.Context) (ClusterState, error)
-	// Watch streams changes from the given resource version.
-	Watch(ctx context.Context, fromResourceVersion string) (Watch, error)
+	// Watch streams observations from the server's current state: the
+	// present object is re-delivered as the first result, then changes
+	// follow. There is no cursor to resume from — see ClusterState.
+	Watch(ctx context.Context) (Watch, error)
 }
 
 // Snapshot is what the console renders. It is immutable: the store

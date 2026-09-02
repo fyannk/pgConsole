@@ -51,13 +51,12 @@ type FailoverQuorumFacts struct {
 	StandbysTruncated bool
 }
 
-// FailoverQuorumState is one complete observation and the resource
-// version from which the watch resumes.
+// FailoverQuorumState is one complete observation. It carries no
+// resource version for the same reason ClusterState does not: a
+// singleton get yields no watch-safe cursor.
 type FailoverQuorumState struct {
 	// Facts is the observed quorum, or an absence.
 	Facts FailoverQuorumFacts
-	// ResourceVersion starts the name-scoped watch.
-	ResourceVersion string
 }
 
 // FailoverQuorumWatch is a running watch on the cluster's quorum object.
@@ -74,8 +73,10 @@ type FailoverQuorumSource interface {
 	// FetchFailoverQuorum returns the current state through a pinned
 	// get. An absent object is a successful observation, not an error.
 	FetchFailoverQuorum(ctx context.Context) (FailoverQuorumState, error)
-	// WatchFailoverQuorum streams changes from the given version.
-	WatchFailoverQuorum(ctx context.Context, fromResourceVersion string) (FailoverQuorumWatch, error)
+	// WatchFailoverQuorum streams observations from the server's
+	// current state: the present object is re-delivered as the first
+	// result, then changes follow.
+	WatchFailoverQuorum(ctx context.Context) (FailoverQuorumWatch, error)
 }
 
 // FailoverQuorumSnapshot is the rendered quorum, immutable and carrying
@@ -151,7 +152,7 @@ func NewFailoverQuorumCollector(source FailoverQuorumSource, store *FailoverQuor
 
 // Run blocks until ctx is done, maintaining the store.
 func (c *FailoverQuorumCollector) Run(ctx context.Context) error {
-	return newLoop[string, FailoverQuorumState](c, c.clock, c.logger).Run(ctx)
+	return newLoop[struct{}, FailoverQuorumState](c, c.clock, c.logger).Run(ctx)
 }
 
 // op names this resource in contact-loss logs.
@@ -159,19 +160,20 @@ func (c *FailoverQuorumCollector) op() string { return "failover quorum" }
 
 // seed takes the pinned get. An absent object seeds like any other, so
 // the name-scoped watch that follows delivers an addition if the cluster
-// later starts running a quorum.
-func (c *FailoverQuorumCollector) seed(ctx context.Context) (string, error) {
+// later starts running a quorum. It hands the watch nothing: a singleton
+// get yields no watch-safe cursor — see ClusterState.
+func (c *FailoverQuorumCollector) seed(ctx context.Context) (struct{}, error) {
 	state, err := c.source.FetchFailoverQuorum(ctx)
 	if err != nil {
-		return "", err
+		return struct{}{}, err
 	}
 	c.facts = state.Facts
-	return state.ResourceVersion, nil
+	return struct{}{}, nil
 }
 
-// follow starts the name-scoped watch from the seed's version.
-func (c *FailoverQuorumCollector) follow(ctx context.Context, from string) (<-chan FailoverQuorumState, func(), error) {
-	w, err := c.source.WatchFailoverQuorum(ctx, from)
+// follow starts the name-scoped watch from the server's current state.
+func (c *FailoverQuorumCollector) follow(ctx context.Context, _ struct{}) (<-chan FailoverQuorumState, func(), error) {
+	w, err := c.source.WatchFailoverQuorum(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

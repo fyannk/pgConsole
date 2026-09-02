@@ -123,7 +123,7 @@ func (s *scriptedSource) Fetch(_ context.Context) (ClusterState, error) {
 }
 
 // Watch replays the scripted watch outcome of the current step.
-func (s *scriptedSource) Watch(_ context.Context, _ string) (Watch, error) {
+func (s *scriptedSource) Watch(_ context.Context) (Watch, error) {
 	st, ok := s.current()
 	if !ok {
 		return nil, context.Canceled
@@ -162,18 +162,15 @@ func run(t *testing.T, steps []step) (*Store, *fakeClock, *bytes.Buffer) {
 	return store, clock, logs
 }
 
-func present(phase, rv string) ClusterState {
-	return ClusterState{
-		Facts:           ClusterFacts{Present: true, Phase: phase},
-		ResourceVersion: rv,
-	}
+func present(phase string) ClusterState {
+	return ClusterState{Facts: ClusterFacts{Present: true, Phase: phase}}
 }
 
 func TestCollectorPublishesFetchAndWatchObservations(t *testing.T) {
 	t.Parallel()
 	store, _, _ := run(t, []step{{
-		fetchState:  present("Cluster in healthy state", "10"),
-		watchStates: []ClusterState{present("Switchover in progress", "11")},
+		fetchState:  present("Cluster in healthy state"),
+		watchStates: []ClusterState{present("Switchover in progress")},
 	}})
 	snap, ok := store.Current()
 	if !ok {
@@ -200,7 +197,7 @@ func TestCollectorWatchBreakRetainsLastGoodAsStale(t *testing.T) {
 	t.Parallel()
 	store, _, logs := run(t, []step{
 		{
-			fetchState:  present("Cluster in healthy state", "10"),
+			fetchState:  present("Cluster in healthy state"),
 			watchStates: nil, // watch closes immediately: broken
 		},
 		{
@@ -225,9 +222,9 @@ func TestCollectorWatchBreakRetainsLastGoodAsStale(t *testing.T) {
 func TestCollectorRecoveryClearsStaleness(t *testing.T) {
 	t.Parallel()
 	store, _, _ := run(t, []step{
-		{fetchState: present("Cluster in healthy state", "10")}, // watch closes: stale
-		{fetchState: present("Cluster in healthy state", "12"),
-			watchStates: []ClusterState{present("Cluster in healthy state", "13")}},
+		{fetchState: present("Cluster in healthy state")}, // watch closes: stale
+		{fetchState: present("Cluster in healthy state"),
+			watchStates: []ClusterState{present("Cluster in healthy state")}},
 		{fetchErr: redact.NewError("cluster get", redact.CategoryTimeout, nil)},
 	})
 	snap, _ := store.Current()
@@ -286,7 +283,7 @@ func TestCollectorStopsOnCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	src := &scriptedSource{steps: []step{{fetchState: present("x", "1")}}, cancel: func() {}}
+	src := &scriptedSource{steps: []step{{fetchState: present("x")}}, cancel: func() {}}
 	c := NewCollector(src, NewStore(), newFakeClock(), slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
 	if err := c.Run(ctx); err != nil {
 		t.Fatalf("Run after cancellation: %v", err)
