@@ -78,6 +78,12 @@ type Runner struct {
 
 	mu      sync.Mutex
 	running map[Member]context.CancelFunc
+	// followers counts the goroutines still winding down. Cancelling a
+	// follower's context only asks it to stop; it still has a last
+	// coverage transition to report on its way out, and a Run that
+	// returned before that landed would leave a sink being written to
+	// after its owner believed the follower had stopped.
+	followers sync.WaitGroup
 }
 
 // NewRunner wires a runner onto a source and its sinks.
@@ -127,17 +133,26 @@ func (r *Runner) reconcile(ctx context.Context) {
 		//nolint:gosec // cancel is retained in r.running and invoked by reconcile and stopAll.
 		followCtx, cancel := context.WithCancel(ctx)
 		r.running[member] = cancel
-		go r.follow(followCtx, member)
+		r.followers.Add(1)
+		go func() {
+			defer r.followers.Done()
+			r.follow(followCtx, member)
+		}()
 	}
 }
 
+// stopAll cancels every follower and waits for them to finish. The wait
+// is what makes Run's return mean something: each follower drops its
+// coverage as it exits, and a caller that took Run returning as "the
+// followers are done" would otherwise be racing that last write.
 func (r *Runner) stopAll() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	for member, cancel := range r.running {
 		cancel()
 		delete(r.running, member)
 	}
+	r.mu.Unlock()
+	r.followers.Wait()
 }
 
 // follow keeps one container's stream open, reconnecting with backoff.

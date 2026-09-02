@@ -126,6 +126,30 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Fixed
 
+- **A reconnecting log follower no longer re-reads the whole log.**
+  `FollowLogs` said it did not — *"the stream starts from now, with no
+  backfill"* — but asked the API server for neither `TailLines` nor
+  `SinceTime`, and with both unset the log is served from the
+  container's creation before the stream follows. So every break that
+  was not a container restart — a connection fault, an API server
+  rollout, the streaming timeout — replayed the entire log.
+
+  The matcher counted those lines again, inflating "at least *n*
+  matching lines" into a count of re-reads, and refreshed their
+  last-seen instant: an observation stayed current because the
+  connection blinked rather than because the fault recurred, and could
+  not expire while the breaks continued. The buffer re-retained lines it
+  already held. The follower now asks for a tail length of zero, which
+  is what the comment always claimed. It is the root of the never-expiring
+  finding that not following terminated containers only partly addressed.
+
+- **The log follower waits for its followers before it reports stopped.**
+  `stopAll` cancelled each goroutine's context but did not join them, so
+  `Run` could return while a follower was still reporting its last
+  coverage transition — a sink being written to after its owner believed
+  the follower had stopped. Found because it made a new test flaky under
+  `-race`, which is the mild version of the same hazard.
+
 - **A broken log stream no longer clears a check.** The log record is the
   one source where absence is the whole signal: a log-backed rule fires
   on a line appearing, so its clear result is the claim the line was not

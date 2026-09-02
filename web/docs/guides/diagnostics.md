@@ -298,3 +298,17 @@ claim about what the logs say now — a line nothing has repeated since
 yesterday stops being that, and a stale finding that can never clear
 teaches an operator to ignore the screen. A recurring failure renews
 its window on every match and keeps its original first-seen time.
+
+For that window to mean anything, each stream carries only what is
+written after it opens. A reconnecting follower does not re-read the
+log it has already seen: doing so would count those lines again,
+turning "at least *n* matching lines" into a count of re-reads, and
+would renew the observation's window on every reconnect — so a finding
+would stay current because the connection blinked rather than because
+the fault recurred, and would never expire while the breaks continued.
+
+The cost is that lines written while no stream was open are not
+recovered, which is the honest trade: the console records that window
+as a gap and reports the container as unread rather than pretending to
+have read it. Looking at what was actually written in the meantime is
+the **log tail** screen's job, and it asks for history of its own.
