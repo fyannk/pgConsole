@@ -11,6 +11,31 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **Diagnostics for the replication incidents nothing reported.** Five
+  checks over metrics the console already scrapes:
+  `cnpg-replica-not-receiving` (a replica in recovery, with no WAL
+  receiver, whose lag is not closing), `cnpg-replication-lag-high`,
+  `cnpg-sync-replicas-short` (commits waiting on standbys that are not
+  there), `cnpg-slot-retaining-wal` (a replication slot pinning WAL that
+  fills the volume), and `postgres-long-transaction` (an open
+  transaction holding the vacuum horizon). The last two are declared
+  causes of findings that already existed: a full WAL volume and
+  transaction-id wraparound now nest under the thing that caused them.
+- **Thresholds are held, not spiked.** A metric check can require its
+  threshold to be met across every retained sample of a trailing window,
+  so a lag spike during a write burst is not a finding while the same
+  lag held for a quarter of an hour is. An instance whose window is too
+  short to show either way is reported as one the check could not judge.
+  Every threshold is declared in one place per component and rendered in
+  the check's own row.
+- **Corroborating checks report on one subject.** A check built from
+  several observations now requires them to be about the same instance,
+  so two branches matching on different pods are two facts rather than
+  one invented finding. A branch about no single object, such as a
+  cluster-wide condition, corroborates any instance.
+
+### Added
+
 - **Diagnostics read every source the console publishes.** Five
   snapshots reached the engine and no check consumed them; each now
   has one. `cnpg-pooler-short` reports a Pooler with fewer ready

@@ -81,6 +81,38 @@ finding nests under the operator's archiving condition when both are
 current, which is the console placing the repository's observation
 beside the operator's claim without merging the two.
 
+## Thresholds and holding windows
+
+A metric check states the number it applies in its own check row, so
+the threshold is never hidden in the code. Every one is console-pinned
+knowledge, declared in one place per component rather than inline.
+
+Several also require the reading to be **held**: every sample the
+console retains from a trailing window must be past the threshold, and
+the window must hold at least two of them. Replication lag, slot
+retention and transaction age all spike in normal operation — a write
+burst, a backup, a long report — and a check that reported the spike
+would teach its reader to scroll past the screen. An instance whose
+retained window is too short to show either way is reported as one the
+check could not judge, never as a match.
+
+## Corroborating checks
+
+A check can require several observations at once, and then it reports
+only when they are about **the same instance**. `cnpg-replica-not-receiving`
+is the example: a replica in recovery is every replica, a replica with
+no WAL receiver is also a replica replaying the archive on its way up,
+and lag is a number that spikes. One instance showing all three is a
+replica that stopped streaming and is not catching up either. Branches
+matching on different instances are two facts, not one finding, and are
+not joined. A branch about no single object — a cluster-wide condition
+or phase — corroborates any instance, because it is a fact about all of
+them.
+
+The honesty rules compose the obvious way: a branch that could not run
+makes the whole check one that could not run, never one that came back
+clear.
+
 One check compares two sources instead of reading one:
 `cnpg-primary-disagreement` sets the operator's `currentPrimary`
 against each instance's own `pg_is_in_recovery()`, read from the

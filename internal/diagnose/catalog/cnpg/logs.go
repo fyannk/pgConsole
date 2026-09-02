@@ -164,7 +164,12 @@ func logRules() []diagnose.Rule {
 			When: diagnose.LogContains{Substrings: []string{"no free disk space for WALs"}},
 			NextSteps: "Grow the WAL volume (the storage class must allow expansion), or fix " +
 				"the archiving failure that filled it — archived WAL is recycled on its own.",
-			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-wal-archiving-failing"}},
+			// Two ways the volume fills: WAL that cannot leave because
+			// archiving is broken, and WAL that cannot be removed
+			// because a slot still pins it. Both are facts about the
+			// cluster's storage, whichever instance logged the refusal.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-wal-archiving-failing"}, {Cause: "cnpg-slot-retaining-wal"}},
 		},
 		{
 			ID:        "cnpg-postgres-start-failed",

@@ -31,11 +31,20 @@ import (
 
 var now = time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 
-// fixtureWindow is a MetricsWindow serving one instant flag and one
-// series sample per instance.
+// fixtureWindow is a MetricsWindow serving instant flags and a short
+// run of series samples per instance. The run is three samples an hour
+// apart, so a rule asking for a value held across a window sees one.
 type fixtureWindow struct {
 	instants map[string]map[string]metrics.Instant
 	series   map[string]map[string]float64
+}
+
+// fixtureSampleTimes are the sample instants, oldest first. They sit
+// inside the tightest window any rule asks a value to hold for, so a
+// sustained-threshold rule sees a run rather than a lone sample it
+// cannot judge.
+var fixtureSampleTimes = []int64{
+	now.Add(-20 * time.Minute).Unix(), now.Add(-10 * time.Minute).Unix(), now.Unix(),
 }
 
 func (w fixtureWindow) Instances() []string { return nil }
@@ -46,12 +55,18 @@ func (w fixtureWindow) Range(key string, tier metrics.Tier) ([]int64, map[string
 	}
 	out := map[string][]*float64{}
 	for instance, byKey := range w.series {
-		if value, ok := byKey[key]; ok {
-			v := value
-			out[instance] = []*float64{&v}
+		value, ok := byKey[key]
+		if !ok {
+			continue
 		}
+		column := make([]*float64, len(fixtureSampleTimes))
+		for i := range column {
+			held := value
+			column[i] = &held
+		}
+		out[instance] = column
 	}
-	return []int64{now.Unix()}, out
+	return fixtureSampleTimes, out
 }
 
 func (w fixtureWindow) InstantReadings() map[string]map[string]metrics.Instant { return w.instants }
@@ -121,8 +136,29 @@ func everythingObserved() diagnose.Input {
 			Completeness: "complete", ScopeName: "orders", EvidenceGeneration: 3,
 			Barman: &evidence.BarmanFacts{WAL: evidence.StateFact{State: "unhealthy", Code: "wal-gap-confirmed"}},
 		}}},
-		Metrics: fixtureWindow{instants: map[string]map[string]metrics.Instant{
-			"orders-1": {"fencing-on": {At: now.Unix(), Value: 1}, "in-recovery": {At: now.Unix(), Value: 0}}}},
+		Metrics: fixtureWindow{
+			instants: map[string]map[string]metrics.Instant{
+				"orders-1": {
+					"fencing-on":             {At: now.Unix(), Value: 1},
+					"in-recovery":            {At: now.Unix(), Value: 0},
+					"wal-receiver-up":        {At: now.Unix(), Value: 1},
+					"sync-replicas-expected": {At: now.Unix(), Value: 2},
+					"sync-replicas-observed": {At: now.Unix(), Value: 1},
+				},
+				// The replica that stopped streaming: in recovery, no
+				// receiver, and a lag that holds. All three readings are
+				// on this instance, which is what the corroborating rule
+				// requires.
+				"orders-2": {
+					"in-recovery":     {At: now.Unix(), Value: 1},
+					"wal-receiver-up": {At: now.Unix(), Value: 0},
+				},
+			},
+			series: map[string]map[string]float64{
+				"orders-1": {"slot-retained-bytes": 40 << 30, "max-tx-duration": 7200},
+				"orders-2": {"replication-lag": 900},
+			},
+		},
 		PoolerMetrics: fixtureWindow{series: map[string]map[string]float64{"orders-rw-1": {"maxwait": 12}}},
 		Logs: fixtureLogs{{RuleID: "cnpg-wal-disk-full", Pod: "orders-1", Container: "postgres",
 			Line: "no free disk space for WALs", FirstSeen: now.Add(-time.Minute), LastSeen: now, Count: 4}},

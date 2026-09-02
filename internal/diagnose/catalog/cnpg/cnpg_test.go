@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
@@ -162,5 +163,88 @@ func TestStuckPhaseProducesTheFinding(t *testing.T) {
 	finding := findingByID(t, diagnose.Run(in, Rules()...), "cnpg-unrecoverable")
 	if !strings.Contains(finding.Evidence[0].Detail, "orders-2-join") {
 		t.Errorf("the phase reason is not quoted: %+v", finding.Evidence[0])
+	}
+}
+
+// replicaWindow is a MetricsWindow with per-instance instant readings
+// and a held run of series samples.
+type replicaWindow struct {
+	instants map[string]map[string]metrics.Instant
+	series   map[string]map[string]float64
+}
+
+func (w replicaWindow) Instances() []string { return nil }
+
+func (w replicaWindow) Range(key string, tier metrics.Tier) ([]int64, map[string][]*float64) {
+	if tier != metrics.TierRaw {
+		return nil, nil
+	}
+	times := []int64{now.Add(-10 * time.Minute).Unix(), now.Add(-5 * time.Minute).Unix(), now.Unix()}
+	out := map[string][]*float64{}
+	for instance, byKey := range w.series {
+		value, ok := byKey[key]
+		if !ok {
+			continue
+		}
+		column := make([]*float64, len(times))
+		for i := range column {
+			held := value
+			column[i] = &held
+		}
+		out[instance] = column
+	}
+	return times, out
+}
+
+func (w replicaWindow) InstantReadings() map[string]map[string]metrics.Instant { return w.instants }
+
+// TestReplicaNotReceivingNeedsAllThreeReadings walks the catalog's
+// corroborating rule: a replica in recovery is not a finding, a replica
+// without a WAL receiver is not a finding, and a lag past the threshold
+// is its own lesser finding — but one instance showing all three is the
+// replica that stopped streaming, and the lesser finding then nests
+// inside it rather than standing beside it.
+func TestReplicaNotReceivingNeedsAllThreeReadings(t *testing.T) {
+	t.Parallel()
+	const rule = "cnpg-replica-not-receiving"
+	run := func(instants map[string]map[string]metrics.Instant, series map[string]map[string]float64) diagnose.Result {
+		in := inputOn("1.30.0")
+		in.Metrics = replicaWindow{instants: instants, series: series}
+		return diagnose.Run(in, Rules()...)
+	}
+	reading := func(value float64) metrics.Instant { return metrics.Instant{At: now.Unix(), Value: value} }
+
+	// A healthy replica: in recovery, receiver up, no lag reported.
+	healthy := run(map[string]map[string]metrics.Instant{
+		"orders-2": {"in-recovery": reading(1), "wal-receiver-up": reading(1)}}, nil)
+	if got := outcomeOf(t, healthy, rule).Outcome; got != diagnose.CheckClear {
+		t.Errorf("outcome = %v on a streaming replica, want clear", got)
+	}
+
+	// Receiver down but the lag is not past the threshold: a replica
+	// replaying the archive on its way up looks exactly like this.
+	catchingUp := run(map[string]map[string]metrics.Instant{
+		"orders-2": {"in-recovery": reading(1), "wal-receiver-up": reading(0)}},
+		map[string]map[string]float64{"orders-2": {"replication-lag": 5}})
+	if got := outcomeOf(t, catchingUp, rule).Outcome; got != diagnose.CheckClear {
+		t.Errorf("outcome = %v on a replica catching up, want clear", got)
+	}
+
+	// All three: in recovery, no receiver, and the lag holding.
+	stalled := run(map[string]map[string]metrics.Instant{
+		"orders-2": {"in-recovery": reading(1), "wal-receiver-up": reading(0)}},
+		map[string]map[string]float64{"orders-2": {"replication-lag": 900}})
+	if got := outcomeOf(t, stalled, rule).Outcome; got != diagnose.CheckMatched {
+		t.Fatalf("outcome = %v on a stalled replica, want matched", got)
+	}
+	finding := findingByID(t, stalled, rule+"/orders-2")
+	if len(finding.Evidence) < 4 {
+		t.Errorf("finding quotes %d claims, want all three readings and the version pin: %+v",
+			len(finding.Evidence), finding.Evidence)
+	}
+	lag := findingByID(t, stalled, "cnpg-replication-lag-high/orders-2")
+	if len(lag.ConsequenceOf) != 1 || lag.ConsequenceOf[0].Cause != rule ||
+		lag.ConsequenceOf[0].Scope != diagnose.ScopePod {
+		t.Errorf("the lag finding is not related to the stalled replica on the same pod: %+v", lag.ConsequenceOf)
 	}
 }
