@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
@@ -402,6 +403,13 @@ type Input struct {
 	// viewer's word, carried through.
 	Evidence    evidence.Status
 	HasEvidence bool
+
+	// History is the object timeline, the one input that carries the
+	// past: every other source is a snapshot of now, so a fault visible
+	// only in repetition is invisible without it. Absent when the
+	// history store is disabled.
+	History    history.Snapshot
+	HasHistory bool
 	// Metrics and PoolerMetrics are the scraped windows. They are query
 	// interfaces rather than plain snapshots because the window is a
 	// rollup ring, but reading them is still an in-memory operation: no

@@ -11,6 +11,20 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **Diagnostics that count over time.** Every other source the engine
+  reads is a snapshot of now, so a fault visible only in repetition was
+  invisible. Two checks read the object timeline instead:
+  `k8s-pod-replaced-repeatedly` counts distinct identities under one pod
+  name, which separates a replacement from an edit, and
+  `k8s-definition-rewritten-repeatedly` counts writes to a definition
+  and names the field managers the API server attributed them to, so two
+  controllers undoing each other are visible as such. The timeline
+  coalesces rapid repeats and evicts old revisions, so both findings
+  state their count as a floor and an absence rules nothing out, and a
+  record discovered only after a contact gap is counted but flagged. The
+  history snapshot, removed from the engine's input when nothing read
+  it, is wired back now that these do.
+
 - **Diagnostics for the replication incidents nothing reported.** Five
   checks over metrics the console already scrapes:
   `cnpg-replica-not-receiving` (a replica in recovery, with no WAL

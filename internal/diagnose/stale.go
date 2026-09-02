@@ -147,6 +147,17 @@ func evidenceUnavailable(in Input) string {
 	return ""
 }
 
+// historyUnavailable is the reason the object timeline cannot be read,
+// empty when it can. The timeline has no staleness of its own: it is a
+// record of what was observed, not a claim about now, and its bounds
+// are stated on every finding counted from it instead.
+func historyUnavailable(in Input) string {
+	if !in.HasHistory {
+		return "the object timeline is not recorded, so nothing can be counted over time"
+	}
+	return ""
+}
+
 // infrastructureUnavailable is the reason the cluster's volumes and
 // children cannot be read, empty when they can.
 func infrastructureUnavailable(in Input) string {

@@ -24,6 +24,7 @@ import (
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -132,6 +133,12 @@ func everythingObserved() diagnose.Input {
 		HasDatabaseObjects: true,
 		DatabaseObjects: observe.DatabaseObjectsSnapshot{Databases: []observe.DatabaseFacts{{
 			Name: "app", Declared: observe.Declared{Applied: &applied}}}},
+		HasHistory: true,
+		// A pod destroyed and remade three times, and a definition five
+		// writers deep — the two shapes the timeline checks count.
+		History: history.Snapshot{Entries: append(
+			replacements("orders-3", 3),
+			rewrites("orders", 5)...)},
 		HasEvidence: true,
 		Evidence: evidence.Status{HasReport: true, Snapshot: evidence.Snapshot{Report: evidence.Report{
 			Completeness: "complete", ScopeName: "orders", EvidenceGeneration: 3,
@@ -164,6 +171,35 @@ func everythingObserved() diagnose.Input {
 		Logs: fixtureLogs{{RuleID: "cnpg-wal-disk-full", Pod: "orders-1", Container: "postgres",
 			Line: "no free disk space for WALs", FirstSeen: now.Add(-time.Minute), LastSeen: now, Count: 4}},
 	}
+}
+
+// replacements is one pod name observed under several identities.
+func replacements(name string, times int) []history.Entry {
+	entries := make([]history.Entry, 0, times)
+	for i := range times {
+		entries = append(entries, history.Entry{
+			Kind: "Pod", Name: name, UID: fmt.Sprintf("uid-%d", i),
+			Change:     history.ChangeCreated,
+			ObservedAt: now.Add(-time.Duration(times-i) * 10 * time.Minute),
+		})
+	}
+	return entries
+}
+
+// rewrites is one object's definition written repeatedly, by two
+// managers in turn.
+func rewrites(name string, times int) []history.Entry {
+	managers := [...]string{"argocd-controller", "mutating-webhook"}
+	entries := make([]history.Entry, 0, times)
+	for i := range times {
+		entries = append(entries, history.Entry{
+			Kind: "Cluster", Name: name, UID: "cluster-uid",
+			Change:     history.ChangeSpec,
+			Actor:      history.Actor{Manager: managers[i%len(managers)]},
+			ObservedAt: now.Add(-time.Duration(times-i) * 5 * time.Minute),
+		})
+	}
+	return entries
 }
 
 // TestEveryInputSourceIsConsumed is the guard against a source that is
