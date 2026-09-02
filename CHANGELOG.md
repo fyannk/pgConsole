@@ -34,9 +34,6 @@ period. Pin an exact image tag and read the notes before upgrading.
   and crash loop on one instance render as one card with every link
   stating its terms, while a crash loop on another instance stays its
   own card and names the near misses.
-
-### Added
-
 - **Diagnostics relate findings on evidence, not on names.** Every
   finding now names its subject (the pod, backup, claim or quota it is
   about) and the time of the observation where its source reports one.
