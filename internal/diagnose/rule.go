@@ -714,23 +714,51 @@ func (c ScheduledBackupOverdue) evaluate(_ string, in Input) ([]conditionMatch, 
 // metric series is at or above the threshold. Raw samples are preferred;
 // the rollup tier answers when the raw window holds nothing.
 type SeriesAbove struct {
-	// Key is the series key in the instance metric catalog.
+	// Key is the series key in the instance metric catalog, or in the
+	// pooler catalog when Pooler is set.
 	Key string
 	// Threshold is the inclusive lower bound that matches.
 	Threshold float64
+	// Pooler reads the PgBouncer exporter's window and catalog instead
+	// of the instance's.
+	Pooler bool
+}
+
+// window is the metrics window and catalog the condition reads, or the
+// reason neither is scraped.
+func (c SeriesAbove) window(in Input) (MetricsWindow, metrics.Catalog, string) {
+	if c.Pooler {
+		if in.PoolerMetrics == nil {
+			return nil, metrics.Pooler, "pooler metrics are not scraped"
+		}
+		return in.PoolerMetrics, metrics.Pooler, ""
+	}
+	if in.Metrics == nil {
+		return nil, metrics.Instance, "instance metrics are not scraped"
+	}
+	return in.Metrics, metrics.Instance, ""
 }
 
 func (c SeriesAbove) describe() string {
-	return fmt.Sprintf("an instance whose %s reading is at least %g", seriesMetricName(c.Key), c.Threshold)
+	subject, catalog := "an instance", metrics.Instance
+	if c.Pooler {
+		subject, catalog = "a pooler instance", metrics.Pooler
+	}
+	return fmt.Sprintf("%s whose %s reading is at least %g", subject, seriesMetricName(catalog, c.Key), c.Threshold)
 }
 
 func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
-	if in.Metrics == nil {
-		return nil, "instance metrics are not scraped"
+	window, catalog, unavailable := c.window(in)
+	if unavailable != "" {
+		return nil, unavailable
+	}
+	origin, object, link, label := "console-scraped from the instance exporter", "instance ", "/cluster/metrics", "Metrics"
+	if c.Pooler {
+		origin, object, link, label = "console-scraped from the pooler exporter", "pooler instance ", "/poolers/metrics", "Pooler metrics"
 	}
 	latest := map[string]seriesReading{}
 	for _, tier := range [...]metrics.Tier{metrics.TierRaw, metrics.TierRollup} {
-		times, byInstance := in.Metrics.Range(c.Key, tier)
+		times, byInstance := window.Range(c.Key, tier)
 		for instance, column := range byInstance {
 			if _, done := latest[instance]; done {
 				continue
@@ -759,13 +787,13 @@ func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
 			subject:  EntityRef{Kind: "Pod", Name: instance},
 			at:       time.Unix(reading.at, 0),
 			evidence: []Evidence{{
-				Origin: "console-scraped from the instance exporter",
-				Object: "instance " + instance,
-				Detail: fmt.Sprintf("%s = %.0f, read %s", seriesMetricName(c.Key), reading.value,
+				Origin: origin,
+				Object: object + instance,
+				Detail: fmt.Sprintf("%s = %.0f, read %s", seriesMetricName(catalog, c.Key), reading.value,
 					time.Unix(reading.at, 0).UTC().Format("15:04:05Z")),
 			}},
-			link:      "/cluster/metrics",
-			linkLabel: "Metrics",
+			link:      link,
+			linkLabel: label,
 		})
 	}
 	return matches, ""
@@ -780,8 +808,8 @@ type seriesReading struct {
 // seriesMetricName resolves a series key to the exporter's metric name,
 // so evidence quotes the exporter's vocabulary rather than the
 // console's.
-func seriesMetricName(key string) string {
-	if def, ok := metrics.Instance.SeriesByKey(key); ok && len(def.Names) > 0 {
+func seriesMetricName(catalog metrics.Catalog, key string) string {
+	if def, ok := catalog.SeriesByKey(key); ok && len(def.Names) > 0 {
 		return def.Names[0]
 	}
 	return key

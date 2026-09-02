@@ -38,6 +38,7 @@ func Rules() []diagnose.Rule {
 	rules = append(rules, cnpg.Rules()...)
 	rules = append(rules, postgresRules()...)
 	rules = append(rules, barmanRules()...)
+	rules = append(rules, repositoryRules()...)
 	rules = append(rules, kubernetesRules()...)
 	return rules
 }

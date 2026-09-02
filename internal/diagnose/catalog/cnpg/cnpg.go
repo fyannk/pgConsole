@@ -43,6 +43,7 @@ func Rules() []diagnose.Rule {
 	rules = append(rules, backupRules()...)
 	rules = append(rules, databaseRules()...)
 	rules = append(rules, logRules()...)
+	rules = append(rules, resourceRules()...)
 	return rules
 }
 

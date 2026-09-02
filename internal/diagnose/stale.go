@@ -78,6 +78,75 @@ func clusterUnavailable(in Input) string {
 	return ""
 }
 
+// poolersUnavailable is the reason the Pooler set cannot be read, empty
+// when it can. An empty set is readable: a cluster with no poolers has
+// nothing to be short of.
+func poolersUnavailable(in Input) string {
+	switch {
+	case !in.HasPoolers:
+		return "poolers have not been observed yet"
+	case in.Poolers.Stale:
+		return "the poolers are stale, so current instance counts are unknown"
+	}
+	return ""
+}
+
+// quorumUnavailable is the reason the failover quorum cannot be read,
+// empty when it can. Absence of the resource is readable — it is the
+// operator's way of saying the cluster runs no quorum.
+func quorumUnavailable(in Input) string {
+	switch {
+	case !in.HasFailoverQuorum:
+		return "the failover quorum has not been observed yet"
+	case in.FailoverQuorum.Stale:
+		return "the failover quorum is stale, so the current standby set is unknown"
+	}
+	return ""
+}
+
+// imageCatalogsUnavailable is the reason the image catalogs cannot be
+// read, empty when they can.
+func imageCatalogsUnavailable(in Input) string {
+	switch {
+	case !in.HasImageCatalogs:
+		return "image catalogs have not been observed yet"
+	case in.ImageCatalogs.Stale:
+		return "the image catalogs are stale, so their current content is unknown"
+	}
+	return ""
+}
+
+// evidenceUnavailable is the reason the repository-evidence report cannot
+// be read, empty when it can. The channel has more ways to be silent
+// than a watch does — not configured, never answered, contact lost, no
+// scan completed yet, the sidecar's own staleness against the
+// repository, a details variant this consumer does not know — and each
+// is named, because "could not run" is only honest with its reason.
+func evidenceUnavailable(in Input) string {
+	if !in.HasEvidence {
+		return "the repository-evidence consumer is not configured"
+	}
+	status := in.Evidence
+	if !status.HasReport {
+		reason := "the repository-evidence sidecar has not answered yet"
+		if status.Failure != "" {
+			reason += " (latest poll: " + string(status.Failure) + ")"
+		}
+		return reason
+	}
+	switch {
+	case status.Snapshot.Stale:
+		return "contact with the repository-evidence sidecar is lost, so the retained report is not current"
+	case status.Snapshot.Report.Completeness == "no-completed-scan":
+		return "the repository-evidence sidecar has not completed a scan"
+	case status.Snapshot.Report.SourceStale:
+		return "the repository-evidence sidecar reports its own evidence as stale against the repository"
+	case status.Snapshot.Report.Barman == nil:
+		return "the repository report's details are of a variant this console does not recognise"
+	}
+	return ""
+}
+
 // infrastructureUnavailable is the reason the cluster's volumes and
 // children cannot be read, empty when they can.
 func infrastructureUnavailable(in Input) string {

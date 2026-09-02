@@ -73,6 +73,14 @@ pod; this one is on Pod/orders-1* — so a reader is told about the
 possible connection rather than handed a nesting the evidence does not
 support.
 
+The repository checks restate the sidecar's typed state and stable
+reason code for WAL continuity, recovery coverage, and retention, and
+nothing else: the sidecar's diagnostic text stays in the sidecar, and no
+finding says what the repository would or would not restore. A WAL
+finding nests under the operator's archiving condition when both are
+current, which is the console placing the repository's observation
+beside the operator's claim without merging the two.
+
 One check compares two sources instead of reading one:
 `cnpg-primary-disagreement` sets the operator's `currentPrimary`
 against each instance's own `pg_is_in_recovery()`, read from the
@@ -127,6 +135,11 @@ adding the release to the verified list and letting that check pass.
 | Container states | The pod collectors (always on). |
 | Log messages | `LOG_STREAM_ENABLED=true` (which requires `ALLOW_LOGS=true`). With following off, every log-backed check reports "could not run". |
 | Metric flags and thresholds | Metrics scraping enabled. |
+| Pooler instance counts and pooler pod states | The pooler collectors (always on). |
+| Pooler queue depth | Metrics scraping enabled; the PgBouncer exporter's window. |
+| Failover quorum | The failover-quorum collector (always on). Absence of the resource is a clear result: the cluster runs no quorum. |
+| Image catalogs | The image-catalog collector (always on) for namespaced catalogs; a cluster-scoped catalog needs the optional lookup enabled, and reads "could not run" otherwise. |
+| Repository evidence | The repository-evidence consumer configured, the sidecar answering, and a completed scan. Every way the channel can be silent — not configured, never answered, contact lost, no scan yet, the sidecar's own staleness, an unrecognised report variant — is named as the reason a repository check could not run. |
 
 ## Log-backed findings and their window
 
