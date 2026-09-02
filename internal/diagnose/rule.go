@@ -496,6 +496,111 @@ func (c InstantNonZero) evaluate(_ string, in Input) ([]conditionMatch, string) 
 	return matches, ""
 }
 
+// InstantZero matches an instance whose latest reading of one
+// point-in-time flag is zero — the exact inverse of InstantNonZero, for
+// the flags where the fault is an absence rather than a presence. An
+// instance whose exporter does not report the flag is skipped, never
+// counted as zero: unreported is not off.
+type InstantZero struct {
+	Key string
+}
+
+func (c InstantZero) describe() string {
+	return fmt.Sprintf("an instance whose exporter reports %s as zero", instantMetricName(c.Key))
+}
+
+func (c InstantZero) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if in.Metrics == nil {
+		return nil, "instance metrics are not scraped"
+	}
+	readings := in.Metrics.InstantReadings()
+	var matches []conditionMatch
+	for _, instance := range readingInstances(readings) {
+		reading, reported := readings[instance][c.Key]
+		if !reported || reading.Value != 0 {
+			continue
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + instance,
+			subject:  EntityRef{Kind: "Pod", Name: instance},
+			at:       time.Unix(reading.At, 0),
+			evidence: []Evidence{{
+				Origin: "console-scraped from the instance exporter",
+				Object: "instance " + instance,
+				Detail: fmt.Sprintf("%s = 0, read %s", instantMetricName(c.Key),
+					time.Unix(reading.At, 0).UTC().Format("15:04:05Z")),
+			}},
+			link:      "/cluster/metrics",
+			linkLabel: "Metrics",
+		})
+	}
+	return matches, ""
+}
+
+// InstantShortfall matches an instance reporting fewer of something
+// than it reports expecting: two readings the exporter publishes under
+// one metric name and different labels, compared against each other.
+// Both must be reported for an instance to be judged — one without the
+// other is a number with nothing to compare it to — and an instance
+// reporting neither is one where the feature is not configured, which
+// is a clear result rather than a silent skip.
+type InstantShortfall struct {
+	// Expected and Observed are the instant keys of the two readings.
+	Expected, Observed string
+	// Noun names what is counted, for the finding's own summary.
+	Noun string
+}
+
+func (c InstantShortfall) describe() string {
+	return fmt.Sprintf("an instance reporting fewer %s than it expects", c.Noun)
+}
+
+func (c InstantShortfall) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if in.Metrics == nil {
+		return nil, "instance metrics are not scraped"
+	}
+	readings := in.Metrics.InstantReadings()
+	var matches []conditionMatch
+	for _, instance := range readingInstances(readings) {
+		expected, hasExpected := readings[instance][c.Expected]
+		observed, hasObserved := readings[instance][c.Observed]
+		if !hasExpected || !hasObserved {
+			continue
+		}
+		if expected.Value <= 0 || observed.Value >= expected.Value {
+			continue
+		}
+		matches = append(matches, conditionMatch{
+			idSuffix: "/" + instance,
+			subject:  EntityRef{Kind: "Pod", Name: instance},
+			at:       time.Unix(observed.At, 0),
+			summary: fmt.Sprintf("Instance %s reports %g of the %g %s it expects.",
+				instance, observed.Value, expected.Value, c.Noun),
+			evidence: []Evidence{{
+				Origin: "console-scraped from the instance exporter",
+				Object: "instance " + instance,
+				Detail: fmt.Sprintf("%s: expected %g, observed %g, read %s",
+					instantMetricName(c.Expected), expected.Value, observed.Value,
+					time.Unix(observed.At, 0).UTC().Format("15:04:05Z")),
+			}},
+			link:      "/cluster/metrics",
+			linkLabel: "Metrics",
+		})
+	}
+	return matches, ""
+}
+
+// readingInstances is the instances a window holds instant readings
+// for, in a stable order.
+func readingInstances(readings map[string]map[string]metrics.Instant) []string {
+	instances := make([]string, 0, len(readings))
+	for instance := range readings {
+		instances = append(instances, instance)
+	}
+	sort.Strings(instances)
+	return instances
+}
+
 // instantMetricName resolves an instant key to the exporter's metric
 // name, so evidence quotes the exporter's vocabulary rather than the
 // console's.
@@ -719,6 +824,15 @@ type SeriesAbove struct {
 	Key string
 	// Threshold is the inclusive lower bound that matches.
 	Threshold float64
+	// For requires the breach to be sustained: every sample the console
+	// retains from the trailing window is at or above the threshold, and
+	// the window holds at least two of them. Zero matches on the latest
+	// sample alone. It is what separates a threshold worth reporting
+	// from a spike — a lag of five minutes for one scrape is traffic,
+	// the same lag held for a quarter of an hour is a replica falling
+	// behind — and an instance whose window is too short to show either
+	// is reported as one the check could not judge, never as a match.
+	For time.Duration
 	// Pooler reads the PgBouncer exporter's window and catalog instead
 	// of the instance's.
 	Pooler bool
@@ -744,7 +858,11 @@ func (c SeriesAbove) describe() string {
 	if c.Pooler {
 		subject, catalog = "a pooler instance", metrics.Pooler
 	}
-	return fmt.Sprintf("%s whose %s reading is at least %g", subject, seriesMetricName(catalog, c.Key), c.Threshold)
+	described := fmt.Sprintf("%s whose %s reading is at least %g", subject, seriesMetricName(catalog, c.Key), c.Threshold)
+	if c.For > 0 {
+		described += ", held for " + c.For.String()
+	}
+	return described
 }
 
 func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
@@ -756,31 +874,58 @@ func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	if c.Pooler {
 		origin, object, link, label = "console-scraped from the pooler exporter", "pooler instance ", "/poolers/metrics", "Pooler metrics"
 	}
-	latest := map[string]seriesReading{}
+	readings := map[string][]seriesReading{}
 	for _, tier := range [...]metrics.Tier{metrics.TierRaw, metrics.TierRollup} {
 		times, byInstance := window.Range(c.Key, tier)
 		for instance, column := range byInstance {
-			if _, done := latest[instance]; done {
+			if _, done := readings[instance]; done {
 				continue
 			}
-			for i := len(column) - 1; i >= 0; i-- {
-				if column[i] != nil {
-					latest[instance] = seriesReading{value: *column[i], at: times[i]}
-					break
+			var samples []seriesReading
+			for i, value := range column {
+				if value != nil && i < len(times) {
+					samples = append(samples, seriesReading{value: *value, at: times[i]})
 				}
+			}
+			if len(samples) > 0 {
+				readings[instance] = samples
 			}
 		}
 	}
-	instances := make([]string, 0, len(latest))
-	for instance := range latest {
+	instances := make([]string, 0, len(readings))
+	for instance := range readings {
 		instances = append(instances, instance)
 	}
 	sort.Strings(instances)
 	var matches []conditionMatch
+	unjudged := 0
 	for _, instance := range instances {
-		reading := latest[instance]
+		samples := readings[instance]
+		reading := samples[len(samples)-1]
 		if reading.value < c.Threshold {
 			continue
+		}
+		held := ""
+		if c.For > 0 {
+			trailing := sustained(samples, in.Now, c.For)
+			if len(trailing) < 2 {
+				// One sample cannot show that anything was held, and
+				// matching on it would make this a spike detector.
+				unjudged++
+				continue
+			}
+			breached := true
+			for _, sample := range trailing {
+				if sample.value < c.Threshold {
+					breached = false
+					break
+				}
+			}
+			if !breached {
+				continue
+			}
+			held = fmt.Sprintf(", and every one of the %d samples since %s", len(trailing),
+				time.Unix(trailing[0].at, 0).UTC().Format("15:04:05Z"))
 		}
 		matches = append(matches, conditionMatch{
 			idSuffix: "/" + instance,
@@ -789,17 +934,34 @@ func (c SeriesAbove) evaluate(_ string, in Input) ([]conditionMatch, string) {
 			evidence: []Evidence{{
 				Origin: origin,
 				Object: object + instance,
-				Detail: fmt.Sprintf("%s = %.0f, read %s", seriesMetricName(catalog, c.Key), reading.value,
-					time.Unix(reading.at, 0).UTC().Format("15:04:05Z")),
+				Detail: fmt.Sprintf("%s = %.0f, read %s%s", seriesMetricName(catalog, c.Key), reading.value,
+					time.Unix(reading.at, 0).UTC().Format("15:04:05Z"), held),
 			}},
 			link:      link,
 			linkLabel: label,
 		})
 	}
+	if len(matches) == 0 && unjudged > 0 {
+		return nil, fmt.Sprintf(
+			"the retained window holds fewer than two samples of %s, so nothing can be shown to have held for %s",
+			seriesMetricName(catalog, c.Key), c.For)
+	}
 	return matches, ""
 }
 
-// seriesReading is one instance's latest sample of a series.
+// sustained is the samples inside the trailing window, oldest first.
+func sustained(samples []seriesReading, now time.Time, span time.Duration) []seriesReading {
+	cutoff := now.Add(-span).Unix()
+	var trailing []seriesReading
+	for _, sample := range samples {
+		if sample.at >= cutoff {
+			trailing = append(trailing, sample)
+		}
+	}
+	return trailing
+}
+
+// seriesReading is one sample of one instance's series.
 type seriesReading struct {
 	value float64
 	at    int64
@@ -1023,9 +1185,18 @@ func (c AllOf) describe() string {
 }
 
 func (c AllOf) evaluate(ruleID string, in Input) ([]conditionMatch, string) {
-	var lead conditionMatch
-	var corroboration []Evidence
-	for i, branch := range c.Of {
+	if len(c.Of) == 0 {
+		return nil, ""
+	}
+	lead, unavailable := c.Of[0].evaluate(ruleID, in)
+	if unavailable != "" {
+		return nil, unavailable
+	}
+	if len(lead) == 0 {
+		return nil, ""
+	}
+	rest := make([][]conditionMatch, 0, len(c.Of)-1)
+	for _, branch := range c.Of[1:] {
 		matches, unavailable := branch.evaluate(ruleID, in)
 		if unavailable != "" {
 			return nil, unavailable
@@ -1033,19 +1204,50 @@ func (c AllOf) evaluate(ruleID string, in Input) ([]conditionMatch, string) {
 		if len(matches) == 0 {
 			return nil, ""
 		}
-		if i == 0 {
-			lead = matches[0]
-			for _, extra := range matches[1:] {
-				corroboration = append(corroboration, extra.evidence...)
+		rest = append(rest, matches)
+	}
+	var out []conditionMatch
+	for _, candidate := range lead {
+		corroboration, agreed := make([]Evidence, 0), true
+		for _, matches := range rest {
+			agreeing, found := agreeingMatch(candidate, matches)
+			if !found {
+				agreed = false
+				break
 			}
+			corroboration = append(corroboration, agreeing.evidence...)
+		}
+		if !agreed {
 			continue
 		}
-		for _, match := range matches {
-			corroboration = append(corroboration, match.evidence...)
+		one := candidate
+		one.evidence = append(append([]Evidence{}, candidate.evidence...), corroboration...)
+		out = append(out, one)
+	}
+	return out, ""
+}
+
+// agreeingMatch is the first match about the same thing as the
+// candidate. Corroboration has to be about one subject: two branches
+// matching on different instances are two facts, not one finding, and
+// joining them would state a correlation neither source reported.
+func agreeingMatch(candidate conditionMatch, matches []conditionMatch) (conditionMatch, bool) {
+	for _, match := range matches {
+		if subjectsAgree(candidate.subject, match.subject) {
+			return match, true
 		}
 	}
-	lead.evidence = append(append([]Evidence{}, lead.evidence...), corroboration...)
-	return []conditionMatch{lead}, ""
+	return conditionMatch{}, false
+}
+
+// subjectsAgree reports whether two subjects can belong to one finding.
+// A subject that names no object — a cluster-wide condition, a phase —
+// corroborates any instance, because it is a fact about all of them.
+func subjectsAgree(a, b EntityRef) bool {
+	if a.Name == "" || b.Name == "" {
+		return true
+	}
+	return a == b
 }
 
 // PrimaryDisagreement matches an instance whose own account of its

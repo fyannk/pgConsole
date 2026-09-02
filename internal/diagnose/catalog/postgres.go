@@ -20,6 +20,24 @@ import (
 	"github.com/fyannk/pgConsole/internal/diagnose"
 )
 
+// The PostgreSQL thresholds, console-pinned knowledge stated in one
+// place. Each rule's check row renders the number it applies, so a
+// reader never has to trust this declaration to know what was compared.
+const (
+	// xidWraparoundAge is the transaction-id age that counts as
+	// approaching wraparound. Ids wrap at two billion usable values and
+	// PostgreSQL refuses writes with three million left; 1.6 billion
+	// leaves under a quarter of the headroom.
+	xidWraparoundAge = 1_600_000_000
+	// longTransactionSeconds is how long one transaction must have been
+	// open. An hour is far past any interactive statement and is where
+	// a held horizon starts costing vacuum real work.
+	longTransactionSeconds = 3600
+	// longTransactionHeld is how long that age must hold. A report that
+	// finishes inside the window was work, not a leak.
+	longTransactionHeld = 30 * time.Minute
+)
+
 // postgresRules are the claims about PostgreSQL itself.
 func postgresRules() []diagnose.Rule {
 	return []diagnose.Rule{
@@ -107,7 +125,12 @@ func postgresRules() []diagnose.Rule {
 				"reaches the hard limit, PostgreSQL stops accepting writes " +
 				"cluster-wide until a vacuum completes. The boundary is " +
 				"console-pinned knowledge; the reading is the exporter's.",
-			When: diagnose.SeriesAbove{Key: "xid-age", Threshold: 1_600_000_000},
+			When: diagnose.SeriesAbove{Key: "xid-age", Threshold: xidWraparoundAge},
+			// The horizon is held by something, and a transaction left
+			// open is the most common something. The two readings can
+			// come from different instances, so the relation is
+			// cluster-wide.
+			ConsequenceOf: []diagnose.Relation{{Cause: "postgres-long-transaction"}},
 		},
 		{
 			ID:        "postgres-mxid-wraparound",
@@ -122,7 +145,8 @@ func postgresRules() []diagnose.Rule {
 				"and is exhausted by the same causes, plus heavy row-level sharing. " +
 				"The same consequence applies: past the hard limit, writes stop " +
 				"until vacuum catches up.",
-			When: diagnose.SeriesAbove{Key: "mxid-age", Threshold: 1_600_000_000},
+			When:          diagnose.SeriesAbove{Key: "mxid-age", Threshold: xidWraparoundAge},
+			ConsequenceOf: []diagnose.Relation{{Cause: "postgres-long-transaction"}},
 		},
 		{
 			// The one rule where the version pin is the whole diagnostic:
@@ -147,6 +171,32 @@ func postgresRules() []diagnose.Rule {
 				"is quoted below.",
 			Link:      "/",
 			LinkLabel: "Overview",
+		},
+		{
+			// The cause the two wraparound rules point back to. On its
+			// own it is a warning: a transaction open for an hour is
+			// often a long report, and the console cannot tell that from
+			// a forgotten session. What it no longer is, is invisible.
+			ID:        "postgres-long-transaction",
+			Component: diagnose.ComponentPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Pinned:    []string{"max_tx_duration_seconds"},
+			Severity:  diagnose.SeverityWarning,
+			Describes: "an instance with a transaction open past the threshold",
+			Summary:   "A transaction has been open past the threshold across the retained window.",
+			Detail: "An open transaction holds the oldest transaction horizon, and vacuum " +
+				"cannot clean any row version newer than what that horizon protects. " +
+				"Dead rows accumulate and transaction-id age climbs for as long as it " +
+				"is held. A long analytics query looks exactly like a forgotten " +
+				"session here; which of the two this is, the console cannot tell.",
+			When: diagnose.SeriesAbove{
+				Key: "max-tx-duration", Threshold: longTransactionSeconds, For: longTransactionHeld},
+			NextSteps: "Find the backend on the instance and decide whether it is work or a " +
+				"leak. An idle-in-transaction session is the usual leak, and it holds " +
+				"the horizon just as firmly as a running query does.",
+			Link:      "/cluster/metrics",
+			LinkLabel: "Metrics",
 		},
 	}
 }
