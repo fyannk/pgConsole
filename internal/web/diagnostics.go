@@ -431,7 +431,8 @@ func groupIncidents(findings []diagnose.Finding, rendered []FindingView) []Findi
 		sort.SliceStable(chain, func(a, b int) bool { return chain[a].depth < chain[b].depth })
 		for _, consequence := range chain {
 			card := rendered[consequence.index]
-			card.Via = via[consequence.index].String()
+			card.Via = via[consequence.index].Terms(
+				findings[consequence.index], findings[parentOf[consequence.index]])
 			card.Related = nil
 			one.card.Consequences = append(one.card.Consequences, card)
 			if s := findings[consequence.index].Severity; s > one.worst {

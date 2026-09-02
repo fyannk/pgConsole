@@ -67,6 +67,33 @@ func TestRelationHoldsOnScopeAndWindow(t *testing.T) {
 	}
 }
 
+// TestRelationTermsStateOnlyWhatWasEnforced proves the label beneath a
+// nested finding describes the admission, not the declaration: a window
+// appears only when both findings carried a time and it was applied,
+// and otherwise the label says the window was not enforced and why.
+func TestRelationTermsStateOnlyWhatWasEnforced(t *testing.T) {
+	t.Parallel()
+	timed := Relation{Cause: "x", Scope: ScopePod, Within: time.Hour}
+	for name, tc := range map[string]struct {
+		relation      Relation
+		effect, cause Finding
+		want          string
+	}{
+		"no window declared": {Relation{Cause: "x"}, Finding{}, Finding{},
+			"established mechanism · same cluster"},
+		"both timed": {timed, Finding{At: now}, Finding{At: now.Add(-time.Minute)},
+			"established mechanism · same pod · within 1h0m0s"},
+		"one untimed": {timed, Finding{At: now}, Finding{},
+			"established mechanism · same pod · window not enforced: one finding carries no time"},
+		"neither timed": {timed, Finding{}, Finding{},
+			"established mechanism · same pod · window not enforced: neither finding carries a time"},
+	} {
+		if got := tc.relation.Terms(tc.effect, tc.cause); got != tc.want {
+			t.Errorf("%s: terms = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 // TestConditionsNameTheirSubjectAndTime proves each condition hands the
 // finding the object it is about and the time its source reported, so
 // a relation can ask "same pod, and when" instead of assuming.

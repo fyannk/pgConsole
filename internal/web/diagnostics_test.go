@@ -363,6 +363,8 @@ func TestGroupIncidentsHonoursScopeAndWindow(t *testing.T) {
 			ConsequenceOf: []diagnose.Relation{{Cause: "disk", Scope: diagnose.ScopePod}}},
 		{ID: "panic/orders-1", Check: "panic", Summary: "Panic on 1.", Subject: pod("orders-1"), At: at.Add(-3 * time.Hour),
 			ConsequenceOf: []diagnose.Relation{{Cause: "disk", Scope: diagnose.ScopePod, Within: time.Hour}}},
+		{ID: "exit/orders-2", Check: "exit", Summary: "Exit on 2.", Subject: pod("orders-2"),
+			ConsequenceOf: []diagnose.Relation{{Cause: "disk", Scope: diagnose.ScopePod, Within: time.Hour}}},
 	}})
 	cards := map[string]FindingView{}
 	for _, card := range view.Findings {
@@ -371,10 +373,18 @@ func TestGroupIncidentsHonoursScopeAndWindow(t *testing.T) {
 	if len(cards) != 4 {
 		t.Fatalf("cards = %v, want disk×2, the crash on 3, and the distant panic as roots", cardIDs(view.Findings))
 	}
-	if two := cards["disk/orders-2"]; len(two.Consequences) != 1 || two.Consequences[0].ID != "crash/orders-2" {
-		t.Errorf("the crash on 2 did not nest under the disk on 2: %+v", two.Consequences)
-	} else if two.Consequences[0].Via != "established mechanism · same pod" {
-		t.Errorf("nested card states %q as its terms", two.Consequences[0].Via)
+	if two := cards["disk/orders-2"]; len(two.Consequences) != 2 || two.Consequences[0].ID != "crash/orders-2" ||
+		two.Consequences[1].ID != "exit/orders-2" {
+		t.Errorf("the crash and the exit on 2 did not nest under the disk on 2: %+v", two.Consequences)
+	} else {
+		if two.Consequences[0].Via != "established mechanism · same pod" {
+			t.Errorf("nested card states %q as its terms", two.Consequences[0].Via)
+		}
+		// The exit carries no time, so its window was not enforced and
+		// the label must not claim it was.
+		if via := two.Consequences[1].Via; !strings.Contains(via, "window not enforced") || strings.Contains(via, "within") {
+			t.Errorf("nested card claims a window that was not applied: %q", via)
+		}
 	}
 	if one := cards["disk/orders-1"]; len(one.Consequences) != 0 {
 		t.Errorf("the disk on 1 gained a consequence it does not explain: %+v", one.Consequences)

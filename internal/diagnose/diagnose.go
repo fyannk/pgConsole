@@ -261,11 +261,32 @@ func (r Relation) Holds(effect, cause Finding) (bool, string) {
 	return true, ""
 }
 
-// String is the relation's terms as the screen states them beneath a
-// nested finding: strength, scope, and the window when there is one.
+// String is the relation's declared terms: strength, scope, and the
+// window when there is one. It describes the claim as written; what
+// was actually enforced on one pair of findings is Terms.
 func (r Relation) String() string {
 	terms := r.Strength.String() + " · " + r.Scope.String()
 	if r.Within > 0 {
+		terms += " · within " + r.Within.String()
+	}
+	return terms
+}
+
+// Terms is what the relation actually rested on when it admitted this
+// pair, as the screen states it beneath the nested finding. A window
+// counts only when both findings carried a time and it was enforced;
+// when one side has no time the label says so, because a card that
+// claimed "within 1h" for a pair nothing placed in time would be
+// asserting more than the evidence did.
+func (r Relation) Terms(effect, cause Finding) string {
+	terms := r.Strength.String() + " · " + r.Scope.String()
+	switch {
+	case r.Within == 0:
+	case effect.At.IsZero() && cause.At.IsZero():
+		terms += " · window not enforced: neither finding carries a time"
+	case effect.At.IsZero() || cause.At.IsZero():
+		terms += " · window not enforced: one finding carries no time"
+	default:
 		terms += " · within " + r.Within.String()
 	}
 	return terms
