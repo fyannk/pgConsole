@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/identity"
 	"github.com/fyannk/pgConsole/internal/kube"
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -1595,5 +1596,60 @@ func TestPgAdminLinkIsTheDBALevels(t *testing.T) {
 		if !strings.Contains(body, "grafana.example.com") {
 			t.Errorf("level %q lost the monitoring link-out", tc.level)
 		}
+	}
+}
+
+// TestTheSidebarCarriesTheFindingCount is the point of the badge: the
+// console's own answer reaches a reader who is looking at some other
+// screen, instead of waiting behind a navigation they have to know to
+// make.
+func TestTheSidebarCarriesTheFindingCount(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		findings []diagnose.Finding
+		want     *FindingsBadge
+	}{
+		"nothing matched": {nil, nil},
+		"one warning": {
+			[]diagnose.Finding{{Severity: diagnose.SeverityWarning}},
+			&FindingsBadge{Count: 1, State: "warning", Label: "1 finding"},
+		},
+		"worst of several decides the colour": {
+			// Run orders most severe first, so the head is the worst.
+			[]diagnose.Finding{
+				{Severity: diagnose.SeverityCritical},
+				{Severity: diagnose.SeverityWarning},
+				{Severity: diagnose.SeverityNote},
+			},
+			&FindingsBadge{Count: 3, State: "critical", Label: "3 findings"},
+		},
+	} {
+		got := findingsBadge(tc.findings)
+		switch {
+		case tc.want == nil && got != nil:
+			t.Errorf("%s: badge = %+v, want none", name, got)
+		case tc.want != nil && got == nil:
+			t.Errorf("%s: no badge, want %+v", name, tc.want)
+		case tc.want != nil && *got != *tc.want:
+			t.Errorf("%s: badge = %+v, want %+v", name, *got, *tc.want)
+		}
+	}
+}
+
+// TestTheSidebarNeverSaysAllClear is the honesty rule the rest of the
+// diagnostics work is built on, applied to one glyph. No finding matched
+// is not the same claim as nothing is wrong: the checks that could not
+// run rule nothing out, and a green zero in the sidebar would assert in
+// the corner of every screen exactly what every check refuses to say.
+//
+// So the badge points at something or is absent. It has no reassuring
+// state to render.
+func TestTheSidebarNeverSaysAllClear(t *testing.T) {
+	t.Parallel()
+	if badge := findingsBadge(nil); badge != nil {
+		t.Fatalf("an empty run produced a badge: %+v", badge)
+	}
+	if badge := findingsBadge([]diagnose.Finding{}); badge != nil {
+		t.Fatalf("a run with no findings produced a badge: %+v", badge)
 	}
 }

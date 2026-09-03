@@ -229,7 +229,7 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 // buildDiagnosticsView renders one run into the screen's view model.
 func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, result diagnose.Result) DiagnosticsView {
 	view := DiagnosticsView{
-		Shell:       h.shell(r, "diagnostics"),
+		Shell:       h.shellFrom(r, "diagnostics", &result),
 		ClusterName: h.cfg.ClusterName,
 		State:       clusterStateView(in),
 	}

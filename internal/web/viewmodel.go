@@ -710,6 +710,25 @@ func buildSummary(p *Page) *SummaryView {
 	return s
 }
 
+// FindingsBadge is the diagnostics screen reduced to what fits beside a
+// nav entry: how many findings there are and how bad the worst one is.
+//
+// It has no zero state on purpose. No finding matched is not the same
+// claim as nothing is wrong — the whole screen exists to keep those
+// apart, and a green "0" in the sidebar would make in one glyph the
+// assertion every check is written to refuse. So the badge appears when
+// there is something to point at and is absent otherwise, which says
+// "look here" without ever saying "all clear".
+type FindingsBadge struct {
+	// Count is how many findings the run reported.
+	Count int
+	// State is the worst severity among them, in the console's shared
+	// vocabulary: "critical", "warning" or "note".
+	State string
+	// Label is the badge's own words, already counted and pluralised.
+	Label string
+}
+
 // ShellView is the chrome every page shares: the fixed top bar's target
 // identity and the section map in the sidebar. It introduces no fact of
 // its own — every value on it is one the page already carries — and the
@@ -747,6 +766,11 @@ type ShellView struct {
 	// DiagnosticsAvailable reports that this deployment serves the
 	// diagnostics route.
 	DiagnosticsAvailable bool
+	// Findings is what a diagnostic run reports right now, carried on
+	// every screen so the console's own answer is not one navigation and
+	// one piece of prior knowledge away from the reader who needs it.
+	// Nil when there is nothing to point at — see FindingsBadge.
+	Findings *FindingsBadge
 	// AccessReviewAvailable reports that this deployment serves the access
 	// review route.
 	AccessReviewAvailable bool

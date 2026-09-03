@@ -839,6 +839,29 @@ dialog.raw .panel-body { padding: var(--space-4); }
 .sidebar-sub .sidebar-link { color: var(--text); }
 .sidebar-sub .sidebar-link:hover { color: var(--accent); }
 
+/* The badge is the diagnostics screen's answer carried into the sidebar,
+   in the same status colours a finding's own card uses. It survives the
+   collapsed rail on purpose: a narrow sidebar is when the reader is
+   looking at something else, which is exactly when the count has to
+   still reach them. There is no zero state — see FindingsBadge — so this
+   never renders as reassurance. */
+.sidebar-badge {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  margin-left: auto;
+  padding: 0 var(--space-1);
+}
+.sidebar-badge[data-severity="critical"] { background: var(--bad-weak); color: var(--bad); }
+.sidebar-badge[data-severity="warning"] { background: var(--warn-weak); color: var(--warn); }
+.sidebar[data-collapsed="true"] .sidebar-badge { margin-left: 0; }
+/* The count alone is not a sentence. The words it stands for are in the
+   markup for a reader who is not looking at the colour. */
+.badge-said { clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+
 /* A destination this snapshot does not carry is shown, not hidden, so
    the map of the console stays complete — but it is never a link. */
 .sidebar-link[aria-disabled="true"] { color: var(--text-faint); cursor: default; }
