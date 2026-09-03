@@ -9,6 +9,31 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Changed
+
+- **Log following now defaults to on wherever it is read.** Twenty-seven
+  catalog checks — twenty of them critical — are the ones that quote the
+  failure in the server's own words rather than inferring it from a
+  phase, and `LOG_STREAM_ENABLED=false` left every one of them dark. A
+  deployment that asked for diagnostics and left this alone was getting a
+  screen with its sharpest checks switched off.
+
+  The default is derived — `ALLOW_DIAGNOSTICS && ALLOW_LOGS` — rather
+  than fixed at `true`, because a fixed default would be wrong in two
+  ways. Following needs the tail's permission, so `true` would turn a
+  working `ALLOW_LOGS=false` deployment into one that refuses to start on
+  upgrade; and with diagnostics off nothing reads the matcher, so
+  following would be cost with no reader. Setting the variable
+  explicitly still wins either way.
+
+  It is worth knowing what following retains: a line that matches a rule
+  is kept verbatim as that finding's evidence, and a PostgreSQL error
+  record can carry statement text with literal values. That is a
+  different exposure from `LOG_BUFFER_BYTES`, which stays at `0` and
+  gates the log **tail**, not matched-line evidence. Deployments that
+  would rather not hold matched lines should set
+  `LOG_STREAM_ENABLED=false`.
+
 ### Added
 
 - **A check that was never switched on no longer sits among the faults.**

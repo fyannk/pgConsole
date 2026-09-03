@@ -459,7 +459,27 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.AllowClusterCatalogs = boolVar(lookup, EnvAllowClusterCatalogs, false, fail)
 	cfg.AllowAccessReview = boolVar(lookup, EnvAllowAccessReview, false, fail)
 	cfg.AllowDiagnostics = boolVar(lookup, EnvAllowDiagnostics, false, fail)
-	cfg.LogStreamEnabled = boolVar(lookup, EnvLogStreamEnabled, false, fail)
+	cfg.AllowLogs = boolVar(lookup, EnvAllowLogs, true, fail)
+	// Following defaults to on wherever it would be read: the continuous
+	// matcher exists to feed the diagnostics screen, and the log-backed
+	// checks are the ones that quote the failure in the server's own
+	// words rather than inferring it from a phase — the largest group in
+	// the catalog, and mostly critical. A deployment that asked for
+	// diagnostics and left this alone was getting a screen with those
+	// checks dark.
+	//
+	// No count is named here on purpose: the catalog grows, and a number
+	// written into a comment goes quietly wrong with nothing to catch
+	// it. What holds is the property, not the arithmetic.
+	//
+	// It is derived rather than fixed at true so the two ways that would
+	// be wrong cannot happen. With the tail switched off there is no
+	// permission to follow anything, and a fixed default would turn a
+	// working ALLOW_LOGS=false deployment into one that refuses to
+	// start. With diagnostics off nothing reads the matcher, so
+	// following would be cost with no reader. Setting it explicitly
+	// still wins either way, including the explicit conflict below.
+	cfg.LogStreamEnabled = boolVar(lookup, EnvLogStreamEnabled, cfg.AllowLogs && cfg.AllowDiagnostics, fail)
 	cfg.LogBufferBytes = intVar(lookup, EnvLogBufferBytes, 0, 0, MaxLogBufferBytes, fail)
 	cfg.LogBufferTotalBytes = intVar(lookup, EnvLogBufferTotalBytes,
 		DefaultLogBufferTotalBytes, 0, MaxLogBufferTotalBytes, fail)
@@ -468,7 +488,6 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.LogMatchMaxAge = durationVar(lookup, EnvLogMatchMaxAge,
 		DefaultLogMatchMaxAge, MinLogMatchMaxAge, MaxLogMatchMaxAge, fail)
 	cfg.AllowInsecureLinks = boolVar(lookup, EnvAllowInsecureLinks, false, fail)
-	cfg.AllowLogs = boolVar(lookup, EnvAllowLogs, true, fail)
 
 	cfg.LogTailLines = intVar(lookup, EnvLogTailLines, DefaultLogTailLines, MinLogTailLines, MaxLogTailLines, fail)
 	cfg.LogTailMaxBytes = int64(intVar(lookup, EnvLogTailMaxBytes, DefaultLogTailMaxBytes, MinLogTailMaxBytes, MaxLogTailMaxBytes, fail))

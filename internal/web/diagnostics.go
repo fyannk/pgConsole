@@ -268,10 +268,10 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 	// now, sometimes for as long as a Role has been missing a grant, but
 	// always a gap between what was asked for and what arrived.
 	//
-	// In one list the second reads as more of the first, and with log
-	// following off, which is the default, that list opens with
-	// twenty-seven rows of settled choice on every screen of every
-	// healthy cluster.
+	// In one list the second reads as more of the first: switch off log
+	// following, or the object timeline, or a scraper, and that list
+	// opens with a row of settled choice per affected check on every
+	// screen of every healthy cluster.
 	buckets := map[checkBucket][]CheckView{}
 	for _, check := range result.Checks {
 		view.Total++
