@@ -328,6 +328,13 @@ until kubectl apply -f deploy/kubernetes-example.yaml; do
   k=$((k + 1)); [ "$k" -le 12 ] || { log "RBAC never restored (API server discovery lag)"; exit 1; }
   sleep 5
 done
+# The manifest carries the deployment too, so this apply rolls the console and
+# leaves an old replica terminating behind the NodePort. The RoleBinding it
+# restores reaches that old replica immediately, so the freshness wait below
+# can be satisfied by a pod that is already going away, and the unretried
+# probes of the next section then meet a closed listener and kill the journey
+# with curl's own exit code. Settle first, for the reason at the helper.
+settle_console_rollout "after restoring RBAC"
 wait_page_contains "current — age" 180 restored.html
 log "recovered after RBAC restoration"
 
