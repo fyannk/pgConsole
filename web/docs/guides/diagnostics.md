@@ -49,13 +49,11 @@ particular thing. Each check answers one of four ways:
 | does not apply | The rule's version pins exclude the versions actually observed. Distinct from clear on purpose: the rule ruled itself out, not the failure. |
 
 Those last two are one outcome in the engine and two groups on the
-screen, and the split is worth explaining. With log following off —
-which can be switched off — every log-backed check reports that it
-cannot run, permanently, identically, on every refresh of every healthy
-cluster.
-Put a scraper that stopped answering five minutes ago in that same list
-and it is the twenty-eighth row of something a reader has already
-learned to skip.
+screen, and the split is worth explaining. Switch off log following and
+every log-backed check reports that it cannot run, permanently,
+identically, on every refresh of every healthy cluster. Put a scraper
+that stopped answering five minutes ago in that same list and it is one
+more row of something a reader has already learned to skip.
 
 The line between them is not how long each has been true — an input the
 console has never been permitted to read stays unreadable until someone
