@@ -523,11 +523,11 @@ func TestDiagnosticsRendersTheWALChainAsOneIncident(t *testing.T) {
 }
 
 // TestSwitchedOffChecksGroupApartFromFailingOnes is the reason this
-// split exists. With log following off — the default — twenty-seven
-// checks report that they could not run, permanently and identically on
-// every refresh. Listed beside a scraper that has just stopped
-// answering, they teach a reader that the group is settled and worth
-// skipping, which is where the one row that changed goes to die.
+// split exists. Switch off a source and the checks that read it report
+// that they could not run, permanently and identically on every
+// refresh. Listed beside a scraper that has just stopped answering,
+// they teach a reader that the group is settled and worth skipping,
+// which is where the one row that changed goes to die.
 //
 // So the settled ones collapse under their own line, and the group that
 // stays open holds only what a reader can act on.

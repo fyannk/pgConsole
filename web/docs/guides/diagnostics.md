@@ -50,8 +50,9 @@ particular thing. Each check answers one of four ways:
 
 Those last two are one outcome in the engine and two groups on the
 screen, and the split is worth explaining. With log following off —
-which is the default — twenty-seven checks report that they cannot run,
-permanently, identically, on every refresh of every healthy cluster.
+which can be switched off — every log-backed check reports that it
+cannot run, permanently, identically, on every refresh of every healthy
+cluster.
 Put a scraper that stopped answering five minutes ago in that same list
 and it is the twenty-eighth row of something a reader has already
 learned to skip.
@@ -291,7 +292,7 @@ adding the release to the verified list and letting that check pass.
 | Events | The event collector (always on). Only events on the `Cluster` object and member pods are observable. |
 | Resource quotas | The `resourcequotas` grant in the Role (in the shipped example). It is what lets a quota refusal name the quota — ceiling and usage — instead of only the refused object's symptom. |
 | Container states | The pod collectors (always on). |
-| Log messages | `LOG_STREAM_ENABLED`, which defaults to on wherever it is read — diagnostics enabled and `ALLOW_LOGS=true` — and can be switched off explicitly. With following off, the twenty-seven log-backed checks report that they need a source that is switched off. They are the checks that quote the server's own words rather than inferring a fault from a phase, and twenty of them are critical, so turning following off is a real reduction in what the screen can tell you. What it buys back: a line that matches a rule is retained verbatim as that finding's evidence, and a PostgreSQL error record can carry statement text with literal values. |
+| Log messages | `LOG_STREAM_ENABLED`, which defaults to on wherever it is read — diagnostics enabled and `ALLOW_LOGS=true` — and can be switched off explicitly. With following off, every log-backed check reports that it needs a source that is switched off. They are the largest group in the catalog and mostly critical — the checks that quote the server's own words rather than inferring a fault from a phase — so turning following off is a real reduction in what the screen can tell you. What it buys back: a line that matches a rule is retained verbatim as that finding's evidence, and a PostgreSQL error record can carry statement text with literal values. |
 | Metric flags and thresholds | Metrics scraping enabled. |
 | Pooler instance counts and pooler pod states | The pooler collectors (always on). |
 | Pooler queue depth | Metrics scraping enabled; the PgBouncer exporter's window. |

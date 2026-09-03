@@ -461,11 +461,16 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.AllowDiagnostics = boolVar(lookup, EnvAllowDiagnostics, false, fail)
 	cfg.AllowLogs = boolVar(lookup, EnvAllowLogs, true, fail)
 	// Following defaults to on wherever it would be read: the continuous
-	// matcher exists to feed the diagnostics screen, and twenty-seven of
-	// the catalog's checks — twenty of them critical — are the ones that
-	// quote the failure in the server's own words rather than inferring
-	// it from a phase. A deployment that asked for diagnostics and left
-	// this alone was getting a screen with those checks dark.
+	// matcher exists to feed the diagnostics screen, and the log-backed
+	// checks are the ones that quote the failure in the server's own
+	// words rather than inferring it from a phase — the largest group in
+	// the catalog, and mostly critical. A deployment that asked for
+	// diagnostics and left this alone was getting a screen with those
+	// checks dark.
+	//
+	// No count is named here on purpose: the catalog grows, and a number
+	// written into a comment goes quietly wrong with nothing to catch
+	// it. What holds is the property, not the arithmetic.
 	//
 	// It is derived rather than fixed at true so the two ways that would
 	// be wrong cannot happen. With the tail switched off there is no
