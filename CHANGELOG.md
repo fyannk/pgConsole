@@ -11,6 +11,21 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **Two catalog claims that could never work now fail the build.** A
+  relation chain that loops back on itself was caught only when a rule
+  named itself; a longer cycle rendered flat, because `groupIncidents`
+  ignores a relation that would loop — a defence that works and says
+  nothing, so a malformed claim stayed in the catalog looking correct. And
+  a pod-scoped relation whose cause never names a pod can never hold:
+  `Relation.Holds` admits the pair only when both findings name one, so
+  such a relation nests nothing and is reported as a near miss every
+  time, for a reason no operator can act on. `PodSubjectOf` classifies a
+  condition as always, sometimes, or never naming a pod — sometimes being
+  the honest answer for an event, which is about whatever object
+  Kubernetes recorded it on — and a condition it does not know reads as
+  never, so a new pod-naming condition trips the test the first time a
+  relation points at it rather than failing silently.
+
 - **The console's dated knowledge expires on purpose.** A support
   boundary moves when upstream retires the next version, and nothing
   observable changes to announce it, so the PostgreSQL and Kubernetes

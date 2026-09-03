@@ -15,6 +15,7 @@
 package catalog
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -232,5 +233,114 @@ func TestDatedKnowledgeIsDeclaredWhereItExpires(t *testing.T) {
 		}
 		t.Errorf("rule %q fires on its version pins alone, so its claim is a support boundary "+
 			"and boundaries move: it needs a ReviewBy date", rule.ID)
+	}
+}
+
+// TestNoRelationChainLoops refuses a catalog whose causal claims lead
+// back to where they started. A cycle means the catalog is asserting
+// that each of two findings follows from the other, which is not a
+// mechanism anyone could act on.
+//
+// The screen already defends itself — groupIncidents ignores a relation
+// that would loop and leaves the finding as a root — but that defence is
+// silent, so a malformed claim would render as flat and nobody would
+// learn it was wrong. Catalog defects belong to the build, the way a
+// reworded upstream string does.
+func TestNoRelationChainLoops(t *testing.T) {
+	t.Parallel()
+	causes := map[string][]string{}
+	ids := make([]string, 0, len(Rules()))
+	for _, rule := range Rules() {
+		ids = append(ids, rule.ID)
+		for _, relation := range rule.ConsequenceOf {
+			causes[rule.ID] = append(causes[rule.ID], relation.Cause)
+		}
+	}
+
+	// A depth-first walk over "is a consequence of". A node still on the
+	// current path is a back edge, and the path from it names the loop.
+	const (
+		unvisited = iota
+		onPath
+		done
+	)
+	state := map[string]int{}
+	var path []string
+	var walk func(id string) []string
+	walk = func(id string) []string {
+		state[id] = onPath
+		path = append(path, id)
+		for _, cause := range causes[id] {
+			switch state[cause] {
+			case onPath:
+				from := 0
+				for i, seen := range path {
+					if seen == cause {
+						from = i
+						break
+					}
+				}
+				return append(append([]string{}, path[from:]...), cause)
+			case unvisited:
+				if loop := walk(cause); loop != nil {
+					return loop
+				}
+			}
+		}
+		state[id] = done
+		path = path[:len(path)-1]
+		return nil
+	}
+
+	for _, id := range ids {
+		if state[id] != unvisited {
+			continue
+		}
+		if loop := walk(id); loop != nil {
+			t.Fatalf("the catalog's relations loop: %s — each of these is declared a consequence of "+
+				"the next, so the chain has no cause to lead back to", strings.Join(loop, " → "))
+		}
+		path = path[:0]
+	}
+}
+
+// TestPodScopedRelationsCanActuallyHold refuses a pod-scoped relation
+// that could never hold. Relation.Holds admits the pair only when both
+// findings name a pod, so a relation pinned to the same pod whose cause
+// — or whose own rule — never names one is a claim that does nothing:
+// it never nests, and it is reported as a near miss every time, for a
+// reason no operator can act on.
+//
+// A condition PodSubjectOf does not know reads as naming no pod, so a
+// new pod-naming condition trips this test the first time a relation
+// points at it. That is the intended pressure: classifying it is the
+// fix, and the alternative is a relation that quietly stops working.
+func TestPodScopedRelationsCanActuallyHold(t *testing.T) {
+	t.Parallel()
+	when := map[string]diagnose.Condition{}
+	for _, rule := range Rules() {
+		when[rule.ID] = rule.When
+	}
+	for _, rule := range Rules() {
+		for _, relation := range rule.ConsequenceOf {
+			if relation.Scope != diagnose.ScopePod {
+				continue
+			}
+			if diagnose.PodSubjectOf(rule.When) == diagnose.PodSubjectNever {
+				t.Errorf("rule %q declares a pod-scoped relation to %q, but its own findings never name "+
+					"a pod, so the relation can never hold", rule.ID, relation.Cause)
+			}
+			cause, known := when[relation.Cause]
+			if !known {
+				// A cause no rule produces is already reported by
+				// TestCatalogDeclarationsAreComplete; a detector's
+				// findings are not classified here.
+				continue
+			}
+			if diagnose.PodSubjectOf(cause) == diagnose.PodSubjectNever {
+				t.Errorf("rule %q is declared a consequence of %q on the same pod, but %q's findings "+
+					"never name a pod, so the relation can never hold", rule.ID, relation.Cause, relation.Cause)
+			}
+		}
 	}
 }

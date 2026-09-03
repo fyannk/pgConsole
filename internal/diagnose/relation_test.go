@@ -149,6 +149,24 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 		if findings[0].Subject != tc.subject {
 			t.Errorf("%s: subject = %+v, want %+v", name, findings[0].Subject, tc.subject)
 		}
+		// PodSubjectOf is a hand-written classification, and a
+		// hand-written classification drifts. Holding it against what
+		// the condition actually produced keeps it grounded in
+		// behaviour: a condition classified as always naming a pod that
+		// names something else is caught here rather than by a relation
+		// that quietly stops holding.
+		switch naming := PodSubjectOf(tc.when); naming {
+		case PodSubjectAlways:
+			if tc.subject.Kind != "Pod" {
+				t.Errorf("%s: classified as always naming a pod, but named %s", name, tc.subject)
+			}
+		case PodSubjectNever:
+			if tc.subject.Kind == "Pod" {
+				t.Errorf("%s: classified as never naming a pod, but named %s", name, tc.subject)
+			}
+		case PodSubjectSometimes:
+			// Nothing to hold: either kind is consistent with it.
+		}
 		if !findings[0].At.Equal(tc.at) {
 			t.Errorf("%s: at = %v, want %v", name, findings[0].At, tc.at)
 		}
