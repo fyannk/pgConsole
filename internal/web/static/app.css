@@ -858,8 +858,10 @@ dialog.raw .panel-body { padding: var(--space-4); }
 .sidebar-badge[data-severity="critical"] { background: var(--bad-weak); color: var(--bad); }
 .sidebar-badge[data-severity="warning"] { background: var(--warn-weak); color: var(--warn); }
 .sidebar[data-collapsed="true"] .sidebar-badge { margin-left: 0; }
-/* The count alone is not a sentence. The words it stands for are in the
-   markup for a reader who is not looking at the colour. */
+/* The count alone is not a sentence. The words it stands for sit beside
+   it for a reader who is not looking at the colour — and the digit is
+   hidden from that reader rather than repeated, so the badge is
+   announced once as a sentence instead of twice as "3, 3 findings". */
 .badge-said { clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
 
 /* A destination this snapshot does not carry is shown, not hidden, so

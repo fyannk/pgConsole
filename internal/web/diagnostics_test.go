@@ -649,3 +649,31 @@ func TestNoBadgeWithoutTheLevelThatOpensTheScreen(t *testing.T) {
 		}
 	}
 }
+
+// TestTheBadgeIsAnnouncedOnceAsASentence keeps the count from being read
+// twice. The digit is what a sighted reader sees; the words are what
+// everyone else hears, and a badge that offered both to a screen reader
+// would announce "3, 3 findings, most severe critical".
+func TestTheBadgeIsAnnouncedOnceAsASentence(t *testing.T) {
+	t.Parallel()
+	snapshots := staticSnapshots{backups: observe.BackupsSnapshot{
+		Generation: 1,
+		ObservedAt: testNow,
+		ScheduledBackups: []observe.ScheduledBackupFacts{
+			{Name: "orders-nightly", Schedule: "0 2 * * * *", Method: "barmanObjectStore"},
+		},
+	}, backupsOK: true}
+	h := newDiagnosticsHandler(t, true, snapshots)
+	body := getWithHeaders(t, h, "/cluster/overview", dba).Body.String()
+
+	badge := body[strings.Index(body, `class="sidebar-badge"`):]
+	badge = badge[:strings.Index(badge, "</a>")]
+	if !strings.Contains(badge, `aria-hidden="true"`) {
+		t.Error("the visible count is offered to assistive technology as well as the words it stands for")
+	}
+	// The words themselves must survive: hiding the digit is only right
+	// because the sentence is there to replace it.
+	if !strings.Contains(badge, "badge-said") || !strings.Contains(badge, "most severe") {
+		t.Errorf("the badge carries no sentence for a reader who cannot see the count: %s", badge)
+	}
+}
