@@ -677,3 +677,49 @@ func TestTheBadgeIsAnnouncedOnceAsASentence(t *testing.T) {
 		t.Errorf("the badge carries no sentence for a reader who cannot see the count: %s", badge)
 	}
 }
+
+// TestTheExhaustedQuotaFindingRendersWhatE2EAsserts pins the strings the
+// end-to-end journey greps for. That journey stands up a real cluster,
+// creates a ResourceQuota at its ceiling, and asserts the console names
+// it — the one place a rule meets state a real API server produced
+// rather than state a test author wrote.
+//
+// Its needles live here as well because a shell script greps silently:
+// reword the finding and the journey fails in CI against a kind cluster
+// six minutes in, with no hint that the wording moved. This fails in
+// seconds and says so.
+func TestTheExhaustedQuotaFindingRendersWhatE2EAsserts(t *testing.T) {
+	t.Parallel()
+	snapshots := staticSnapshots{
+		quotas: observe.QuotasSnapshot{
+			Generation: 1,
+			ObservedAt: testNow,
+			Quotas: []observe.QuotaFacts{{
+				Name: "tight",
+				Resources: []observe.QuotaResourceFacts{{
+					Resource: "requests.storage", Hard: "1Gi", Used: "1Gi", Exhausted: true,
+				}},
+			}},
+		},
+		quotasOK: true,
+	}
+	h := newDiagnosticsHandler(t, true, snapshots)
+	body := getWithHeaders(t, h, "/diagnostics", dba).Body.String()
+
+	// Each of these is grepped verbatim by hack/test-e2e.sh.
+	for _, needle := range []string{
+		"is exhausted for requests.storage",
+		"the ceiling is reached",
+		"Kubernetes-reported",
+		"What was checked",
+	} {
+		if !strings.Contains(body, needle) {
+			t.Errorf("the diagnostics page misses %q, which hack/test-e2e.sh greps for", needle)
+		}
+	}
+	// And the badge the journey looks for on a screen that is not this one.
+	overview := getWithHeaders(t, h, "/cluster/overview", dba).Body.String()
+	if !strings.Contains(overview, `class="sidebar-badge"`) {
+		t.Error(`the overview misses class="sidebar-badge", which hack/test-e2e.sh greps for`)
+	}
+}

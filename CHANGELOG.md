@@ -36,6 +36,21 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **The end-to-end journey now proves the catalog finds something.** Every
+  other test of the 86 rules runs against input a test author wrote:
+  `make verify-pins` proves the literals still exist in the operator's
+  releases, but nothing showed a rule meeting state a real API server
+  produced. The journey stands up its cluster, creates a `ResourceQuota`
+  whose ceiling is the storage the cluster already uses, and asserts the
+  console names it — with the quota's own numbers, its origin attributed,
+  the checks accounting still present, and the count reaching a screen
+  that is not the diagnostics screen. It also turns diagnostics on, so
+  the log follower meets real containers there for the first time.
+
+  The strings the shell script greps for are pinned in a Go test as well.
+  A grep fails silently: reword the finding and CI would fail six minutes
+  into a kind cluster with no hint that the wording moved.
+
 - **The finding count now reaches every screen.** `diagnose.Run` was
   called from exactly one place — the diagnostics handler — so an
   operator who opened the console during an incident landed somewhere
