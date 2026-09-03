@@ -291,7 +291,7 @@ adding the release to the verified list and letting that check pass.
 | Events | The event collector (always on). Only events on the `Cluster` object and member pods are observable. |
 | Resource quotas | The `resourcequotas` grant in the Role (in the shipped example). It is what lets a quota refusal name the quota — ceiling and usage — instead of only the refused object's symptom. |
 | Container states | The pod collectors (always on). |
-| Log messages | `LOG_STREAM_ENABLED=true` (which requires `ALLOW_LOGS=true`). With following off, every log-backed check reports "could not run". |
+| Log messages | `LOG_STREAM_ENABLED`, which defaults to on wherever it is read — diagnostics enabled and `ALLOW_LOGS=true` — and can be switched off explicitly. With following off, the twenty-seven log-backed checks report that they need a source that is switched off. They are the checks that quote the server's own words rather than inferring a fault from a phase, and twenty of them are critical, so turning following off is a real reduction in what the screen can tell you. What it buys back: a line that matches a rule is retained verbatim as that finding's evidence, and a PostgreSQL error record can carry statement text with literal values. |
 | Metric flags and thresholds | Metrics scraping enabled. |
 | Pooler instance counts and pooler pod states | The pooler collectors (always on). |
 | Pooler queue depth | Metrics scraping enabled; the PgBouncer exporter's window. |

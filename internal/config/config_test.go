@@ -777,3 +777,58 @@ func TestLogRetentionDefaultsToNothing(t *testing.T) {
 		t.Errorf("LogBufferBytes = %d by default, want 0", cfg.LogBufferBytes)
 	}
 }
+
+// TestLogFollowingFollowsTheScreenThatReadsIt pins the derived default.
+// The continuous matcher exists to feed the diagnostics screen, so it
+// comes on where that screen is on and the tail is permitted, and stays
+// off where either is missing — following logs nobody may read, or
+// matching them for a screen nobody can open, is cost without a reader.
+func TestLogFollowingFollowsTheScreenThatReadsIt(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want bool
+	}{
+		"diagnostics on, tail permitted": {
+			map[string]string{EnvAllowDiagnostics: "true"}, true},
+		"diagnostics off": {
+			map[string]string{}, false},
+		"tail switched off": {
+			map[string]string{EnvAllowDiagnostics: "true", EnvAllowLogs: "false"}, false},
+		"asked for explicitly against the default": {
+			map[string]string{EnvAllowDiagnostics: "true", EnvLogStreamEnabled: "false"}, false},
+	} {
+		env := map[string]string{EnvClusterName: "orders", EnvNamespace: "payments"}
+		for k, v := range tc.env {
+			env[k] = v
+		}
+		cfg, err := Load(func(key string) (string, bool) {
+			value, ok := env[key]
+			return value, ok
+		})
+		if err != nil {
+			t.Fatalf("%s: Load: %v", name, err)
+		}
+		if cfg.LogStreamEnabled != tc.want {
+			t.Errorf("%s: LogStreamEnabled = %v, want %v", name, cfg.LogStreamEnabled, tc.want)
+		}
+	}
+}
+
+// TestTheTailSwitchedOffStillStartsWithDiagnosticsOn is the reason the
+// default is derived rather than fixed at true. Following requires the
+// tail's permission, and a fixed default would have turned a working
+// ALLOW_LOGS=false deployment into one that refuses to start on upgrade.
+func TestTheTailSwitchedOffStillStartsWithDiagnosticsOn(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{
+		EnvClusterName: "orders", EnvNamespace: "payments",
+		EnvAllowDiagnostics: "true", EnvAllowLogs: "false",
+	}
+	if _, err := Load(func(key string) (string, bool) {
+		value, ok := env[key]
+		return value, ok
+	}); err != nil {
+		t.Fatalf("a deployment with the tail switched off no longer starts: %v", err)
+	}
+}
