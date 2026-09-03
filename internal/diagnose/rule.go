@@ -1204,6 +1204,7 @@ func evaluateRule(rule Rule, in Input) (Check, []Finding) {
 		matches, unavailable = rule.When.evaluate(rule.ID, in)
 		if unavailable != "" {
 			check.Outcome, check.Because = CheckUnavailable, unavailable
+			check.SourceOff = sourceOff(unavailable)
 			return check, nil
 		}
 		if len(matches) == 0 {

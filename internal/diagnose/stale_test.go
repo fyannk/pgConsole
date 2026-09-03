@@ -195,3 +195,62 @@ func becauseOf(t *testing.T, result Result, name string) string {
 	t.Fatalf("check %q did not account for itself: %+v", name, result.Checks)
 	return ""
 }
+
+// TestSwitchedOffSourcesAreNamedAsSuch pins the classification the
+// screen groups by. Producer and classifier share one constant, so this
+// holds the pair together: a helper that stops returning its constant,
+// or a constant sourceOff stops recognising, fails here.
+func TestSwitchedOffSourcesAreNamedAsSuch(t *testing.T) {
+	t.Parallel()
+	for name, reason := range map[string]string{
+		"logs":           logsUnavailable(Input{}),
+		"history":        historyUnavailable(Input{}),
+		"metrics":        metricsUnavailable(Input{}),
+		"pooler metrics": poolerMetricsUnavailable(Input{}),
+		"evidence":       evidenceUnavailable(Input{}),
+	} {
+		if reason == "" {
+			t.Fatalf("%s: an unconfigured source gave no reason at all", name)
+		}
+		if !sourceOff(reason) {
+			t.Errorf("%s: %q reads as a fault, but the source is only switched off", name, reason)
+		}
+	}
+}
+
+// TestAFailingSourceIsNotMistakenForASwitchedOffOne guards the direction
+// that matters. Classifying a fault as a settled choice would file it
+// under the group a reader is meant to stop looking at, which is how a
+// lost collector becomes invisible.
+func TestAFailingSourceIsNotMistakenForASwitchedOffOne(t *testing.T) {
+	t.Parallel()
+	stale := Input{
+		HasEvents: true, Events: observe.EventsSnapshot{Stale: true},
+		HasPods: true, Pods: observe.PodsSnapshot{Stale: true},
+		HasCluster: true, Cluster: observe.Snapshot{Stale: true},
+	}
+	for name, reason := range map[string]string{
+		"events unobserved": eventsUnavailable(Input{}),
+		"events stale":      eventsUnavailable(stale),
+		"pods stale":        podsUnavailable(stale),
+		"cluster stale":     clusterUnavailable(stale),
+	} {
+		if reason == "" {
+			t.Fatalf("%s: gave no reason at all", name)
+		}
+		if sourceOff(reason) {
+			t.Errorf("%s: %q reads as a settled choice, but the source is on and not answering", name, reason)
+		}
+	}
+}
+
+// TestAnUnknownReasonReadsAsAFault holds the safe direction of the
+// default. A reason nobody declared is a fault, not a choice: an unread
+// notice costs a reader a moment, a hidden failure costs them the
+// outage.
+func TestAnUnknownReasonReadsAsAFault(t *testing.T) {
+	t.Parallel()
+	if sourceOff("some reason nobody has classified") {
+		t.Error("an unclassified reason reads as a switched-off source, hiding whatever it was")
+	}
+}
