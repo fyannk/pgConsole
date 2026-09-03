@@ -536,7 +536,7 @@ func TestSwitchedOffChecksGroupApartFromFailingOnes(t *testing.T) {
 	h := newDiagnosticsHandler(t, true, staticSnapshots{})
 	view := h.buildDiagnosticsView(
 		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil),
-		diagnose.Input{Now: time.Now()},
+		diagnose.Input{Now: testNow},
 		diagnose.Result{Checks: []diagnose.Check{
 			{Name: "logs-off", Outcome: diagnose.CheckUnavailable,
 				Because: "log following is off, so nothing in the logs has been read", SourceOff: true},

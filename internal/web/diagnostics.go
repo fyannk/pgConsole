@@ -260,10 +260,15 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 	// na, and only a check that ran and found nothing is current.
 	//
 	// The one outcome that is split is "could not run", because it
-	// covers two things a reader must not confuse. A source switched off
-	// is a decision, permanent and identical on every refresh; a source
-	// that is on and not answering is a fault that started just now. In
-	// one list the second reads as more of the first — and with log
+	// covers two things a reader must not confuse: an input this
+	// deployment never asked for, and one it did ask for that the
+	// console cannot read. The first is a decision, identical on every
+	// refresh, with nothing to react to. The second is the console
+	// failing to see something it was meant to see — sometimes only just
+	// now, sometimes for as long as a Role has been missing a grant, but
+	// always a gap between what was asked for and what arrived.
+	//
+	// In one list the second reads as more of the first, and with log
 	// following off, which is the default, that list opens with
 	// twenty-seven rows of settled choice on every screen of every
 	// healthy cluster.
@@ -288,8 +293,8 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 		{checkBucket{outcome: diagnose.CheckMatched}, "matched",
 			"these found what they look for — each match is a finding above", "degraded", true},
 		{checkBucket{outcome: diagnose.CheckUnavailable}, "could not run",
-			"their input is configured but did not answer — never observed, forbidden, or contact lost; " +
-				"they rule nothing out, and each one is something that changed", "unknown", true},
+			"this deployment asked for their inputs and the console cannot read them — never observed, " +
+				"not permitted, or contact lost; they rule nothing out", "unknown", true},
 		{checkBucket{outcome: diagnose.CheckUnavailable, sourceOff: true}, "need a source that is switched off",
 			"nothing is wrong with these: each names an input this deployment has not turned on. " +
 				"They rule nothing out either, and turning one on is a decision rather than a repair",

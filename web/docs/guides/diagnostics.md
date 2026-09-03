@@ -44,7 +44,7 @@ particular thing. Each check answers one of four ways:
 |---|---|
 | matched | The check found what it looks for; its findings are above. |
 | clear | Its inputs were readable and nothing matched. |
-| could not run | An input the deployment **has** configured did not answer: never observed yet, forbidden, or contact lost and what it holds is stale. A check that could not run rules nothing out: stale data can neither clear a check nor match one. Every row here is something that changed. |
+| could not run | An input this deployment **asked for** that the console cannot read: never observed yet, not permitted, or contact lost and what it holds is stale. A check that could not run rules nothing out: stale data can neither clear a check nor match one. Some of these are new — contact lost a minute ago — and some have held since a Role was written without a grant; what they share is a gap between what was asked for and what arrived. |
 | needs a source that is switched off | An input this deployment has not turned on — log following, the object timeline, a scraper, the repository-evidence consumer. These rule nothing out either, but nothing is wrong with them: turning one on is a decision, not a repair, so they collapse under their own line instead of sitting among the faults. |
 | does not apply | The rule's version pins exclude the versions actually observed. Distinct from clear on purpose: the rule ruled itself out, not the failure. |
 
@@ -54,9 +54,13 @@ which is the default — twenty-seven checks report that they cannot run,
 permanently, identically, on every refresh of every healthy cluster.
 Put a scraper that stopped answering five minutes ago in that same list
 and it is the twenty-eighth row of something a reader has already
-learned to skip. Separating them keeps the group that stays open to
-things an operator can act on, and lets the settled decisions sit
-quietly under a line that counts them.
+learned to skip.
+
+The line between them is not how long each has been true — an input the
+console has never been permitted to read stays unreadable until someone
+edits a Role — but whether this deployment asked for it. A switched-off
+source is working exactly as configured. A configured source the console
+cannot read is not, however long that has been so.
 
 ### Stale readings, and why the metrics window is judged differently
 
