@@ -44,8 +44,19 @@ particular thing. Each check answers one of four ways:
 |---|---|
 | matched | The check found what it looks for; its findings are above. |
 | clear | Its inputs were readable and nothing matched. |
-| could not run | An input was never observed — log following off, metrics not scraped, a version not observed — or its collector has lost contact and what it holds is stale. A check that could not run rules nothing out: stale data can neither clear a check nor match one. |
+| could not run | An input the deployment **has** configured did not answer: never observed yet, forbidden, or contact lost and what it holds is stale. A check that could not run rules nothing out: stale data can neither clear a check nor match one. Every row here is something that changed. |
+| needs a source that is switched off | An input this deployment has not turned on — log following, the object timeline, a scraper, the repository-evidence consumer. These rule nothing out either, but nothing is wrong with them: turning one on is a decision, not a repair, so they collapse under their own line instead of sitting among the faults. |
 | does not apply | The rule's version pins exclude the versions actually observed. Distinct from clear on purpose: the rule ruled itself out, not the failure. |
+
+Those last two are one outcome in the engine and two groups on the
+screen, and the split is worth explaining. With log following off —
+which is the default — twenty-seven checks report that they cannot run,
+permanently, identically, on every refresh of every healthy cluster.
+Put a scraper that stopped answering five minutes ago in that same list
+and it is the twenty-eighth row of something a reader has already
+learned to skip. Separating them keeps the group that stays open to
+things an operator can act on, and lets the settled decisions sit
+quietly under a line that counts them.
 
 ### Stale readings, and why the metrics window is judged differently
 

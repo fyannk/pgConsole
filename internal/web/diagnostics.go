@@ -258,10 +258,20 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 	// group. The states are the console's shared vocabulary: a match is
 	// degraded, an unrunnable check is unknown, an inapplicable one is
 	// na, and only a check that ran and found nothing is current.
-	buckets := map[diagnose.CheckOutcome][]CheckView{}
+	//
+	// The one outcome that is split is "could not run", because it
+	// covers two things a reader must not confuse. A source switched off
+	// is a decision, permanent and identical on every refresh; a source
+	// that is on and not answering is a fault that started just now. In
+	// one list the second reads as more of the first — and with log
+	// following off, which is the default, that list opens with
+	// twenty-seven rows of settled choice on every screen of every
+	// healthy cluster.
+	buckets := map[checkBucket][]CheckView{}
 	for _, check := range result.Checks {
 		view.Total++
-		buckets[check.Outcome] = append(buckets[check.Outcome], CheckView{
+		bucket := checkBucket{outcome: check.Outcome, sourceOff: check.SourceOff}
+		buckets[bucket] = append(buckets[bucket], CheckView{
 			Name:      check.Name,
 			Describes: check.Describes,
 			Outcome:   check.Outcome.String(),
@@ -269,22 +279,27 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 		})
 	}
 	for _, group := range []struct {
-		outcome diagnose.CheckOutcome
+		bucket  checkBucket
 		label   string
 		explain string
 		state   string
 		open    bool
 	}{
-		{diagnose.CheckMatched, "matched",
+		{checkBucket{outcome: diagnose.CheckMatched}, "matched",
 			"these found what they look for — each match is a finding above", "degraded", true},
-		{diagnose.CheckUnavailable, "could not run",
-			"their input was absent, forbidden, or not yet observed; they rule nothing out", "unknown", true},
-		{diagnose.CheckNotApplicable, "do not apply",
+		{checkBucket{outcome: diagnose.CheckUnavailable}, "could not run",
+			"their input is configured but did not answer — never observed, forbidden, or contact lost; " +
+				"they rule nothing out, and each one is something that changed", "unknown", true},
+		{checkBucket{outcome: diagnose.CheckUnavailable, sourceOff: true}, "need a source that is switched off",
+			"nothing is wrong with these: each names an input this deployment has not turned on. " +
+				"They rule nothing out either, and turning one on is a decision rather than a repair",
+			"na", false},
+		{checkBucket{outcome: diagnose.CheckNotApplicable}, "do not apply",
 			"their version pins exclude the observed versions, so they make no claim here", "na", false},
-		{diagnose.CheckClear, "clear",
+		{checkBucket{outcome: diagnose.CheckClear}, "clear",
 			"ran against readable input and found nothing — which rules out exactly what each row describes, no more", "current", false},
 	} {
-		checks := buckets[group.outcome]
+		checks := buckets[group.bucket]
 		if len(checks) == 0 {
 			continue
 		}
@@ -300,6 +315,14 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 		})
 	}
 	return view
+}
+
+// checkBucket is how the screen groups one check: by outcome, and — for
+// a check that could not run — by whether its input is switched off or
+// on and silent.
+type checkBucket struct {
+	outcome   diagnose.CheckOutcome
+	sourceOff bool
 }
 
 // clusterStateView reduces the operator's snapshot to the header strip.

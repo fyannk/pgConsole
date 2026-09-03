@@ -35,6 +35,44 @@ import (
 // reason. A new condition over one of these sources starts with the
 // matching helper; a condition over a new source adds one.
 
+// A check that could not run has two quite different reasons for it, and
+// the screen has to tell them apart or neither gets read.
+//
+// A source can be switched off — log following, the object timeline, the
+// scrapers, the repository-evidence consumer are all deliberate choices,
+// and a deployment that has not made them is not faulty. Those reasons
+// are permanent, identical on every refresh, and there is nothing to
+// react to: they are a decision to make once.
+//
+// Or a source that is on can fail to answer: contact lost, nothing
+// observed yet, a sweep that stopped. That is a fault, it is new, and it
+// is the reason an operator needs to see now.
+//
+// Rendering both as one list of "could not run" buries the second in the
+// first, on every screen of every healthy cluster. So the reasons for
+// the first kind are named here as constants, returned by the helpers
+// below and recognised by sourceOff — producer and classifier sharing
+// one string, so they cannot drift apart. A reason nobody declared reads
+// as a fault, which is the safe direction to be wrong in: an unread
+// notice is better than a hidden failure.
+const (
+	reasonEvidenceOff      = "the repository-evidence consumer is not configured"
+	reasonHistoryOff       = "the object timeline is not recorded, so nothing can be counted over time"
+	reasonLogsOff          = "log following is off, so nothing in the logs has been read"
+	reasonMetricsOff       = "instance metrics are not scraped"
+	reasonPoolerMetricsOff = "pooler metrics are not scraped"
+)
+
+// sourceOff reports whether a reason names a source that is switched off
+// rather than one that is on and not answering.
+func sourceOff(reason string) bool {
+	switch reason {
+	case reasonEvidenceOff, reasonHistoryOff, reasonLogsOff, reasonMetricsOff, reasonPoolerMetricsOff:
+		return true
+	}
+	return false
+}
+
 // eventsUnavailable is the reason the event list cannot be read, empty
 // when it can.
 func eventsUnavailable(in Input) string {
@@ -131,7 +169,7 @@ func imageCatalogsUnavailable(in Input) string {
 // is named, because "could not run" is only honest with its reason.
 func evidenceUnavailable(in Input) string {
 	if !in.HasEvidence {
-		return "the repository-evidence consumer is not configured"
+		return reasonEvidenceOff
 	}
 	status := in.Evidence
 	if !status.HasReport {
@@ -160,7 +198,7 @@ func evidenceUnavailable(in Input) string {
 // are stated on every finding counted from it instead.
 func historyUnavailable(in Input) string {
 	if !in.HasHistory {
-		return "the object timeline is not recorded, so nothing can be counted over time"
+		return reasonHistoryOff
 	}
 	return ""
 }
@@ -182,7 +220,7 @@ func infrastructureUnavailable(in Input) string {
 // whether a check that read them may clear is logsIncomplete.
 func logsUnavailable(in Input) string {
 	if in.Logs == nil {
-		return "log following is off, so nothing in the logs has been read"
+		return reasonLogsOff
 	}
 	return ""
 }
@@ -235,7 +273,7 @@ func logsIncomplete(in Input) string {
 // read, empty when it can.
 func metricsUnavailable(in Input) string {
 	if in.Metrics == nil {
-		return "instance metrics are not scraped"
+		return reasonMetricsOff
 	}
 	return ""
 }
@@ -244,7 +282,7 @@ func metricsUnavailable(in Input) string {
 // cannot be read, empty when it can.
 func poolerMetricsUnavailable(in Input) string {
 	if in.PoolerMetrics == nil {
-		return "pooler metrics are not scraped"
+		return reasonPoolerMetricsOff
 	}
 	return ""
 }

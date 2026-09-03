@@ -337,6 +337,14 @@ type Check struct {
 	// Because states why an unavailable check could not run. Empty
 	// otherwise.
 	Because string
+	// SourceOff marks an unavailable check whose input is switched off
+	// rather than failing: log following, the object timeline, a
+	// scraper, the repository-evidence consumer. The distinction is not
+	// cosmetic. A source nobody turned on is permanent, identical on
+	// every refresh, and asks for a decision once; a source that is on
+	// and not answering is a fault, is new, and asks to be looked at
+	// now. Listed together, the second is read as more of the first.
+	SourceOff bool
 }
 
 // Input is everything the detectors may read: the published snapshots,
@@ -503,6 +511,7 @@ func Run(in Input, rules ...Rule) Result {
 		switch {
 		case unavailable != "":
 			check.Outcome, check.Because = CheckUnavailable, unavailable
+			check.SourceOff = sourceOff(unavailable)
 		case len(findings) > 0:
 			check.Outcome = CheckMatched
 			for i := range findings {

@@ -11,6 +11,19 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **A check that was never switched on no longer sits among the faults.**
+  "Could not run" covered two things a reader must not confuse: a source
+  this deployment has not turned on, which is permanent and identical on
+  every refresh, and a source that is on and stopped answering, which is
+  a fault that started just now. With log following off — the default —
+  the first kind puts twenty-seven rows in that group on every screen of
+  every healthy cluster, and the row that changed is read as more of the
+  same. The screen now groups them apart: settled decisions collapse
+  under a line that counts them, and the group that stays open holds only
+  what an operator can act on. Producer and classifier share one constant
+  per reason, so they cannot drift, and a reason nobody declared reads as
+  a fault — an unread notice being cheaper than a hidden failure.
+
 - **Two catalog claims that could never work now fail the build.** A
   relation chain that loops back on itself was caught only when a rule
   named itself; a longer cycle rendered flat, because `groupIncidents`

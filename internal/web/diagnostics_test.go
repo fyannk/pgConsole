@@ -521,3 +521,61 @@ func TestDiagnosticsRendersTheWALChainAsOneIncident(t *testing.T) {
 		t.Errorf("near misses do not name the disk-full finding on the other pod: %+v", decoy.Related)
 	}
 }
+
+// TestSwitchedOffChecksGroupApartFromFailingOnes is the reason this
+// split exists. With log following off — the default — twenty-seven
+// checks report that they could not run, permanently and identically on
+// every refresh. Listed beside a scraper that has just stopped
+// answering, they teach a reader that the group is settled and worth
+// skipping, which is where the one row that changed goes to die.
+//
+// So the settled ones collapse under their own line, and the group that
+// stays open holds only what a reader can act on.
+func TestSwitchedOffChecksGroupApartFromFailingOnes(t *testing.T) {
+	t.Parallel()
+	h := newDiagnosticsHandler(t, true, staticSnapshots{})
+	view := h.buildDiagnosticsView(
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/diagnostics", nil),
+		diagnose.Input{Now: time.Now()},
+		diagnose.Result{Checks: []diagnose.Check{
+			{Name: "logs-off", Outcome: diagnose.CheckUnavailable,
+				Because: "log following is off, so nothing in the logs has been read", SourceOff: true},
+			{Name: "history-off", Outcome: diagnose.CheckUnavailable,
+				Because: "the object timeline is not recorded, so nothing can be counted over time", SourceOff: true},
+			{Name: "scraper-stopped", Outcome: diagnose.CheckUnavailable,
+				Because: "a reading of cnpg_collector_fencing_on is 1h0m0s old"},
+		}},
+	)
+
+	var open, settled *CheckGroupView
+	for i := range view.Groups {
+		switch {
+		case strings.Contains(view.Groups[i].Label, "could not run"):
+			open = &view.Groups[i]
+		case strings.Contains(view.Groups[i].Label, "switched off"):
+			settled = &view.Groups[i]
+		}
+	}
+	if open == nil || settled == nil {
+		t.Fatalf("the two kinds of unavailable did not group apart: %+v", view.Groups)
+	}
+	if len(open.Checks) != 1 || open.Checks[0].Name != "scraper-stopped" {
+		t.Errorf("the open group holds %+v, want only the source that stopped answering", open.Checks)
+	}
+	if len(settled.Checks) != 2 {
+		t.Errorf("the settled group holds %d checks, want the two switched-off sources", len(settled.Checks))
+	}
+	// The one a reader must not miss stays open; the decision they have
+	// already made stays out of the way.
+	if !open.Open {
+		t.Error("the group holding a source that stopped answering is collapsed")
+	}
+	if settled.Open {
+		t.Error("the switched-off group is open, which is the noise this change removes")
+	}
+	// Every check is still on the page: grouping is presentation, never
+	// omission.
+	if view.Total != 3 {
+		t.Errorf("Total = %d, want every check counted", view.Total)
+	}
+}
