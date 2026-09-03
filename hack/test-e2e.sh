@@ -67,8 +67,14 @@ kind load docker-image "$IMAGE" --name "$CLUSTER_NAME" > /dev/null
 kubectl apply -f deploy/kubernetes-example.yaml > /dev/null
 # One link-out is configured the way the operator would, so the journey
 # demonstrates the evidence pointer against the pinned tuple.
+# Diagnostics is off by default, so the journey turns it on: the point of
+# the section below is that the catalog fires against a real operator and
+# a real API server, which cannot be shown with the screen switched off.
+# Turning it on also brings up log following, which derives from it, so
+# the continuous follower meets real containers here too.
 kubectl -n payments set env deployment/pgconsole-orders \
-  OBJECTSTOREVIEWER_URL=https://viewer.example.com/repo > /dev/null
+  OBJECTSTOREVIEWER_URL=https://viewer.example.com/repo \
+  ALLOW_DIAGNOSTICS=true > /dev/null
 kubectl -n payments rollout status deployment/pgconsole-orders --timeout=180s > /dev/null
 
 # The example ships the default-deny NetworkPolicy with the
@@ -213,6 +219,48 @@ grep -qF "manual-1" "$OUT/baseline-backups.html" || { log "backup objects screen
 grep -qF "source: operator-reported" "$OUT/baseline-backups.html" || { log "backup objects screen misses operator attribution"; exit 1; }
 grep -qF 'href="https://viewer.example.com/repo"' "$OUT/baseline.html" || { log "configured evidence link-out not rendered"; exit 1; }
 grep -qE 'verified|restorable' "$OUT/baseline.html" && { log "prohibited language rendered"; exit 1; }
+
+# The catalog has to be shown finding something. Every other test of it
+# runs against input a test author wrote; this is the one place a rule
+# meets state a real API server produced, which is the difference between
+# a console that would diagnose a fault and one that does.
+#
+# The cluster declares 1Gi and is healthy, so a quota whose ceiling is
+# that same 1Gi is exhausted the moment it exists -- no waiting for a
+# refusal, no breaking a running cluster, and the condition is genuinely
+# the one the check is written for.
+log "detection: a real ResourceQuota at its ceiling becomes a finding"
+cat <<'YAML' | kubectl apply -f - > /dev/null
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tight
+  namespace: payments
+spec:
+  hard:
+    requests.storage: 1Gi
+YAML
+wait_path_contains "/diagnostics" "is exhausted for requests.storage" 120 diagnostics.html || {
+  log "the console never reported the exhausted quota"
+  kubectl -n payments get resourcequota tight -o yaml | tee -a "$OUT/summary.log"
+  exit 1
+}
+# The finding must carry the quota's own numbers, attributed, rather than
+# a paraphrase: the ceiling is what an operator acts on.
+grep -qF "the ceiling is reached" "$OUT/diagnostics.html" || { log "finding misses the quota's own account of itself"; exit 1; }
+grep -qF "Kubernetes-reported" "$OUT/diagnostics.html" || { log "finding misses its origin attribution"; exit 1; }
+# And the screen must still say what it looked at, so an operator can see
+# what a finding does not rule out.
+grep -qF "What was checked" "$OUT/diagnostics.html" || { log "diagnostics screen misses the checks accounting"; exit 1; }
+# The count reaches a screen that is not diagnostics -- the whole point of
+# carrying it on the shell.
+wait_path_contains "/cluster/overview" 'class="sidebar-badge"' 60 overview-badge.html || {
+  log "the finding count never reached the overview"
+  exit 1
+}
+kubectl -n payments delete resourcequota tight > /dev/null
+# The quota is removed before the demonstrations below, so the staleness
+# and RBAC sections are read against the cluster they were written for.
 log "baseline ok (verdict, conditions, pods, backups, link-out all render)"
 
 log "log tail: poweruser-gated, bounded, live fetch for a verified member"
@@ -280,6 +328,13 @@ until kubectl apply -f deploy/kubernetes-example.yaml; do
   k=$((k + 1)); [ "$k" -le 12 ] || { log "RBAC never restored (API server discovery lag)"; exit 1; }
   sleep 5
 done
+# The manifest carries the deployment too, so this apply rolls the console and
+# leaves an old replica terminating behind the NodePort. The RoleBinding it
+# restores reaches that old replica immediately, so the freshness wait below
+# can be satisfied by a pod that is already going away, and the unretried
+# probes of the next section then meet a closed listener and kill the journey
+# with curl's own exit code. Settle first, for the reason at the helper.
+settle_console_rollout "after restoring RBAC"
 wait_page_contains "current — age" 180 restored.html
 log "recovered after RBAC restoration"
 
