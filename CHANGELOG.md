@@ -36,6 +36,23 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Added
 
+- **The finding count now reaches every screen.** `diagnose.Run` was
+  called from exactly one place — the diagnostics handler — so an
+  operator who opened the console during an incident landed somewhere
+  else and saw nothing, while the console already knew there were
+  findings. The answer waited behind a navigation the reader had to know
+  to make. The sidebar entry now carries the count, coloured by the most
+  severe finding, computed per render: a full catalog pass over the
+  published snapshots measures 495µs, cheap enough that a cache would
+  only have bought the console a second notion of staleness to disagree
+  with itself about.
+
+  There is no zero state. No finding matched is not the same claim as
+  nothing is wrong, so the badge points at something or is absent — it
+  has no reassuring state to render. The count follows the diagnostics
+  route's gate: a reader below `poweruser` is not told how many things
+  are wrong, and the run is not made for them.
+
 - **A check that was never switched on no longer sits among the faults.**
   "Could not run" covered two things a reader must not confuse: a source
   this deployment has not turned on, which is permanent and identical on

@@ -119,6 +119,24 @@ stops being re-read: its stream replays the whole log from the beginning
 on every reconnect, which would keep a finding's last-seen instant fresh
 forever and let a line from hours ago read as current.
 
+## The count in the sidebar
+
+The console runs the catalog on every page render and carries the result
+into the sidebar, so a reader who opened the console to look at something
+else still sees that there is something to look at. The badge shows how
+many findings there are, coloured by the most severe of them, and links
+to the screen that explains them.
+
+It has **no zero state**. No finding matched is not the same claim as
+nothing is wrong — the checks that could not run rule nothing out — so a
+green zero in the corner of every screen would assert in one glyph
+exactly what every check is written to refuse. The badge points at
+something or is absent.
+
+The count follows the diagnostics route's own gate: a reader below the
+`poweruser` level is not told how many things are wrong, and the run is
+not made on their behalf at all.
+
 ## How findings relate
 
 Every finding names its **subject** — the object it is about, such as

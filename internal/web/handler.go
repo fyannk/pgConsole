@@ -32,6 +32,7 @@ import (
 
 	"github.com/fyannk/pgConsole/internal/authz"
 	"github.com/fyannk/pgConsole/internal/diagnose"
+	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
@@ -646,8 +647,19 @@ func (h *Handler) handlePoolers(current string) http.HandlerFunc {
 // it after calling this, and pages that do not simply leave those fields
 // empty so the top bar renders no snapshot line rather than a false one.
 func (h *Handler) shell(r *http.Request, current string) ShellView {
+	return h.shellFrom(r, current, nil)
+}
+
+// shellFrom builds the shell, reusing a diagnostic run the caller already
+// has. Only the diagnostics screen does, and running the catalog twice to
+// render one page would be waste — half a millisecond of it, measured,
+// which is also why the badge is computed per render rather than cached.
+// A cache would need a key covering both the snapshots and the clock,
+// and would give the console a second notion of staleness to disagree
+// with itself about.
+func (h *Handler) shellFrom(r *http.Request, current string, result *diagnose.Result) ShellView {
 	access := h.requestAccess(r)
-	return ShellView{
+	shell := ShellView{
 		ClusterName:            h.cfg.ClusterName,
 		Namespace:              h.cfg.Namespace,
 		CurrentURL:             r.URL.RequestURI(),
@@ -666,6 +678,32 @@ func (h *Handler) shell(r *http.Request, current string) ShellView {
 		PoolerMetricsAvailable: h.sources.PoolerMetrics != nil,
 		Current:                current,
 	}
+	// Only for a reader whose level opens the screen. Which screens exist
+	// is not a secret and a disabled entry says so, but how many things
+	// are wrong is content, and content follows the route's gate.
+	if shell.DiagnosticsAvailable && shell.CanBrowse {
+		if result == nil {
+			run := diagnose.Run(h.diagnosticsInput(), catalog.Rules()...)
+			result = &run
+		}
+		shell.Findings = findingsBadge(result.Findings)
+	}
+	return shell
+}
+
+// findingsBadge reduces a run to the sidebar, or to nothing when no
+// finding matched. See FindingsBadge for why there is no zero state.
+func findingsBadge(findings []diagnose.Finding) *FindingsBadge {
+	if len(findings) == 0 {
+		return nil
+	}
+	// Findings arrive most severe first, so the first one is the worst.
+	badge := FindingsBadge{Count: len(findings), State: findings[0].Severity.String()}
+	badge.Label = fmt.Sprintf("%d findings", badge.Count)
+	if badge.Count == 1 {
+		badge.Label = "1 finding"
+	}
+	return &badge
 }
 
 // requestAccess is the request-scoped input to UI capability rendering.

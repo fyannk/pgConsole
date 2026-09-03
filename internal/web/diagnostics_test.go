@@ -579,3 +579,101 @@ func TestSwitchedOffChecksGroupApartFromFailingOnes(t *testing.T) {
 		t.Errorf("Total = %d, want every check counted", view.Total)
 	}
 }
+
+// TestTheBadgeReachesAScreenThatIsNotDiagnostics is the whole reason the
+// count is on the shell rather than on the diagnostics page. An operator
+// opening the console during an incident lands somewhere else, and the
+// console already knows the answer: it should not wait behind a
+// navigation the reader has to know to make.
+func TestTheBadgeReachesAScreenThatIsNotDiagnostics(t *testing.T) {
+	t.Parallel()
+	// A schedule running far more often than its author can have meant,
+	// which is a finding on any screen.
+	snapshots := staticSnapshots{backups: observe.BackupsSnapshot{
+		Generation: 1,
+		ObservedAt: testNow,
+		ScheduledBackups: []observe.ScheduledBackupFacts{
+			{Name: "orders-nightly", Schedule: "0 2 * * * *", Method: "barmanObjectStore"},
+		},
+	}, backupsOK: true}
+
+	h := newDiagnosticsHandler(t, true, snapshots)
+	body := getWithHeaders(t, h, "/cluster/overview", dba).Body.String()
+	if !strings.Contains(body, `class="sidebar-badge"`) {
+		t.Fatal("the overview carries no finding badge, so the console's answer waits behind a click")
+	}
+	// The colour is not the message: the count stands for words, and the
+	// words are in the markup for a reader who is not looking at it.
+	for _, want := range []string{"most severe", "finding"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the badge misses %q, leaving the count to speak alone", want)
+		}
+	}
+}
+
+// TestNoBadgeWithoutTheLevelThatOpensTheScreen keeps the count behind
+// the route's own gate. How many things are wrong is content, and
+// content follows the gate that serves it.
+//
+// It asserts on the shell rather than on the page, because the page
+// cannot tell the two mechanisms apart: the sidebar entry is already
+// absent for a reader below the level, so a badge left ungated would
+// render nowhere and the test would pass while proving nothing. What is
+// being held here is that the run is not made at all — a reader who will
+// never see the answer should not cost the console a catalog pass per
+// page.
+func TestNoBadgeWithoutTheLevelThatOpensTheScreen(t *testing.T) {
+	t.Parallel()
+	snapshots := staticSnapshots{backups: observe.BackupsSnapshot{
+		Generation: 1,
+		ObservedAt: testNow,
+		ScheduledBackups: []observe.ScheduledBackupFacts{
+			{Name: "orders-nightly", Schedule: "0 2 * * * *", Method: "barmanObjectStore"},
+		},
+	}, backupsOK: true}
+	h := newDiagnosticsHandler(t, true, snapshots)
+
+	for name, tc := range map[string]struct {
+		level string
+		want  bool
+	}{
+		"poweruser opens the screen, so the count is theirs": {"poweruser", true},
+		"view cannot open it":                                {"view", false},
+	} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/cluster/overview", nil)
+		req.Header.Set("X-Forwarded-User", "reader@corp")
+		req.Header.Set("X-PgToolBox-Level", tc.level)
+		shell := h.shell(req, "overview")
+		if got := shell.Findings != nil; got != tc.want {
+			t.Errorf("%s: badge present = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// TestTheBadgeIsAnnouncedOnceAsASentence keeps the count from being read
+// twice. The digit is what a sighted reader sees; the words are what
+// everyone else hears, and a badge that offered both to a screen reader
+// would announce "3, 3 findings, most severe critical".
+func TestTheBadgeIsAnnouncedOnceAsASentence(t *testing.T) {
+	t.Parallel()
+	snapshots := staticSnapshots{backups: observe.BackupsSnapshot{
+		Generation: 1,
+		ObservedAt: testNow,
+		ScheduledBackups: []observe.ScheduledBackupFacts{
+			{Name: "orders-nightly", Schedule: "0 2 * * * *", Method: "barmanObjectStore"},
+		},
+	}, backupsOK: true}
+	h := newDiagnosticsHandler(t, true, snapshots)
+	body := getWithHeaders(t, h, "/cluster/overview", dba).Body.String()
+
+	badge := body[strings.Index(body, `class="sidebar-badge"`):]
+	badge = badge[:strings.Index(badge, "</a>")]
+	if !strings.Contains(badge, `aria-hidden="true"`) {
+		t.Error("the visible count is offered to assistive technology as well as the words it stands for")
+	}
+	// The words themselves must survive: hiding the digit is only right
+	// because the sentence is there to replace it.
+	if !strings.Contains(badge, "badge-said") || !strings.Contains(badge, "most severe") {
+		t.Errorf("the badge carries no sentence for a reader who cannot see the count: %s", badge)
+	}
+}
