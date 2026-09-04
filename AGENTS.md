@@ -37,7 +37,7 @@ It is an observer of reported state, not a verifier. It renders claims and
 attributes them to their source; it never asserts that replication is
 healthy, that data is intact, or that a backup would restore.
 
-v0.6.1 is released, and the console is feature-complete for its stated
+v0.7.0 is released, and the console is feature-complete for its stated
 scope — but it is **pre-1.0**, so environment variables, route paths, and
 the forwarded-header contract may change within 0.x without a deprecation
 period. "Feature-complete" describes the surface, not a stability promise.
@@ -329,7 +329,7 @@ the fully-qualified name forever. `PgConsole` collides with nothing.
 The `PgConsole` CRD, its webhook, and the operator that reconciles it live
 in the pgtoolbox repository, not this one. This repo builds the application
 and image the operator deploys, plus example manifests mirroring what it
-generates. As of v0.6.1 the operator is not published, so the standalone
+generates. As of v0.7.0 the operator is not published, so the standalone
 manifests are the only install path.
 
 One consequence binds this repo directly: the console's environment

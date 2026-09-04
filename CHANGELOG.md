@@ -9,6 +9,30 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-04
+
+The diagnostics release. The console runs a catalog of 86 checks over the
+snapshots it already publishes and says, on one screen, what it found, what
+it could not run, and what it did not apply — with every finding attributed
+to the source that reported it. The count now rides the sidebar as well, so
+an operator who opens the console during an incident is told there is
+something to look at rather than having to know where to look.
+
+Most of what is listed under **Fixed** is that same feature, and most of it
+is one fault wearing different clothes: a source going unread while a check
+went on answering for it. A broken log stream, a frozen metrics exporter and
+a snapshot already known to be stale each produced a confident "clear"; a
+container that had stopped talking produced a finding that could never
+expire. They are itemized rather than summarized because the honesty of the
+screen is the feature — a check that clears from data it never read is worse
+than no check at all. One fix is unrelated to diagnostics and affects every
+deployment: a cluster idle longer than the API server's watch window froze
+the console on "Showing the last good view" while contact was in fact fine.
+
+Upgrading: `LOG_STREAM_ENABLED` now derives its default from
+`ALLOW_DIAGNOSTICS && ALLOW_LOGS` instead of being off. Read the **Changed**
+note below if you would rather the console not retain matched log lines.
+
 ### Changed
 
 - **Log following now defaults to on wherever it is read.** Twenty-seven
@@ -768,7 +792,9 @@ First public release.
   independently prove replication health, data integrity, or restoreability,
   and it provides no SQL access, database contents, or Secret reads.
 
-[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/fyannk/pgConsole/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/fyannk/pgConsole/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/fyannk/pgConsole/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/fyannk/pgConsole/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/fyannk/pgConsole/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/fyannk/pgConsole/compare/v0.3.0...v0.4.0
