@@ -7,7 +7,7 @@ module github.com/fyannk/pgConsole
 // fail rather than produce a binary govulncheck would reject.
 go 1.26.6
 
-toolchain go1.27.0
+toolchain go1.27.1
 
 require (
 	github.com/cloudnative-pg/api v1.30.0
