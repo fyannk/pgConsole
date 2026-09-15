@@ -1,6 +1,6 @@
 GO ?= go
 IMAGE ?= pgconsole:dev
-GOVULNCHECK_VERSION ?= v1.7.0
+GOVULNCHECK_VERSION ?= v1.8.0
 NPM_AUDIT_LEVEL ?= high
 # Per target, and matching pgObjectStoreViewer. Short on purpose: this is a
 # smoke run on every pull request, not a fuzzing campaign. Raise it locally
