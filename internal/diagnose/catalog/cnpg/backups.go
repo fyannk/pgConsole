@@ -36,6 +36,9 @@ func backupRules() []diagnose.Rule {
 			Detail: "A failed Backup object stays failed: only a new backup — scheduled or " +
 				"manual — produces the next recovery point.",
 			When: diagnose.BackupPhase{AnyOf: []string{"failed"}},
+			// The Backup's own events carry the error the phase summarises.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-backup-error"}, {Cause: "cnpg-backup-manager-restarted"}},
 		},
 		{
 			ID:        "cnpg-backup-stuck-pending",
@@ -49,6 +52,8 @@ func backupRules() []diagnose.Rule {
 				"not healthy enough to back up — including being hibernated. It stays " +
 				"pending until the blocker clears.",
 			When: diagnose.BackupPhase{AnyOf: []string{"pending"}, MinAge: 30 * time.Minute},
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-backup-waiting-for-target"}, {Cause: "cnpg-backup-target-unhealthy"}},
 		},
 		{
 			ID:        "cnpg-backup-wal-archiving",

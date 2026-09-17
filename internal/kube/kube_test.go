@@ -19,6 +19,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -49,6 +50,32 @@ func fullCluster() map[string]any {
 			"instances":      int64(3),
 			"timelineID":     int64(4),
 			"image":          "ghcr.io/cloudnative-pg/postgresql:16.4",
+			"instancesStatus": map[string]any{
+				"healthy": []any{"orders-1", "orders-2"},
+				"failed":  []any{"orders-3"},
+			},
+			"instancesReportedState": map[string]any{
+				"orders-1": map[string]any{"isPrimary": true, "timeLineID": int64(4)},
+				"orders-2": map[string]any{"isPrimary": false, "timeLineID": int64(3)},
+			},
+			"unusablePVC":                         []any{"orders-3-wal"},
+			"danglingPVC":                         []any{"orders-3"},
+			"resizingPVC":                         []any{"orders-2"},
+			"initializingPVC":                     []any{"orders-4"},
+			"currentPrimaryFailingSinceTimestamp": "2026-09-17T09:00:00Z",
+			"switchReplicaClusterStatus":          map[string]any{"inProgress": true},
+			"certificates": map[string]any{
+				"expirations": map[string]any{
+					"orders-server": "2026-12-01T00:00:00Z",
+					"orders-ca":     "not a date",
+				},
+			},
+			"managedRolesStatus": map[string]any{
+				"cannotReconcile": map[string]any{"app": []any{"role \"app\" cannot be dropped"}},
+			},
+			"tablespacesStatus": []any{
+				map[string]any{"name": "fast", "state": "pending", "error": "disk missing"},
+			},
 			"pgDataImageInfo": map[string]any{
 				"image":        "ghcr.io/cloudnative-pg/postgresql:16.4",
 				"majorVersion": int64(16),
@@ -95,6 +122,38 @@ func TestConvertClusterFullObject(t *testing.T) {
 	}
 	if len(facts.Conditions) != 1 || facts.Conditions[0].Reason != "ClusterIsReady" {
 		t.Errorf("conditions wrong: %+v", facts.Conditions)
+	}
+	if at := facts.Conditions[0].LastTransition; at == nil || !at.Equal(time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)) {
+		t.Errorf("condition transition time not converted: %v", at)
+	}
+	if facts.ReportedInstances == nil || *facts.ReportedInstances != 3 {
+		t.Error("ReportedInstances not converted")
+	}
+	if len(facts.FailedInstances) != 1 || facts.FailedInstances[0] != "orders-3" {
+		t.Errorf("FailedInstances = %v", facts.FailedInstances)
+	}
+	if len(facts.UnusablePVCs) != 1 || len(facts.DanglingPVCs) != 1 || len(facts.ResizingPVCs) != 1 || len(facts.InitializingPVCs) != 1 {
+		t.Errorf("PVC lists wrong: %+v", facts)
+	}
+	if facts.PrimaryFailingSince == nil || !facts.PrimaryFailingSince.Equal(time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("PrimaryFailingSince = %v", facts.PrimaryFailingSince)
+	}
+	if !facts.ReplicaSwitchInProgress {
+		t.Error("ReplicaSwitchInProgress not converted")
+	}
+	// The unparseable expiry is dropped rather than becoming an instant.
+	if len(facts.CertificateExpirations) != 1 || facts.CertificateExpirations[0].Secret != "orders-server" {
+		t.Errorf("CertificateExpirations = %+v", facts.CertificateExpirations)
+	}
+	if len(facts.UnreconcilableRoles) != 1 || facts.UnreconcilableRoles[0].Role != "app" || len(facts.UnreconcilableRoles[0].Errors) != 1 {
+		t.Errorf("UnreconcilableRoles = %+v", facts.UnreconcilableRoles)
+	}
+	if len(facts.Tablespaces) != 1 || facts.Tablespaces[0].Error != "disk missing" || facts.Tablespaces[0].State != "pending" {
+		t.Errorf("Tablespaces = %+v", facts.Tablespaces)
+	}
+	if len(facts.InstanceTimelines) != 2 || facts.InstanceTimelines[0].Instance != "orders-1" ||
+		!facts.InstanceTimelines[0].IsPrimary || facts.InstanceTimelines[1].TimelineID != 3 {
+		t.Errorf("InstanceTimelines = %+v", facts.InstanceTimelines)
 	}
 }
 

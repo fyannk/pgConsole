@@ -1,0 +1,298 @@
+// Copyright 2026 The pgConsole Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package diagnose
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/observe"
+)
+
+// heldInput is a cluster input whose store has been publishing long
+// enough to have a record of the given states.
+func heldInput(facts observe.ClusterFacts, since time.Time) Input {
+	facts.Present = true
+	facts.ObservedSince = map[string]time.Time{}
+	for _, key := range facts.HeldKeys() {
+		facts.ObservedSince[key] = since
+	}
+	return Input{Now: now, HasCluster: true, Cluster: observe.Snapshot{Cluster: facts}}
+}
+
+func evaluateOnce(t *testing.T, when Condition, in Input) (Check, []Finding) {
+	t.Helper()
+	return evaluateRule(Rule{ID: "held", Summary: "Held.", When: when}, in)
+}
+
+// TestAHeldPhaseNeedsTheConsolesClock proves the three answers a held
+// check gives: matched once the state has held long enough, clear
+// while it is younger, and could-not-run when the console has no
+// record of its age at all.
+func TestAHeldPhaseNeedsTheConsolesClock(t *testing.T) {
+	t.Parallel()
+	creating := observe.ClusterFacts{Phase: "Creating a new replica", PhaseReason: "Creating replica orders-2-join"}
+	when := ClusterPhaseHeld{AnyOf: []string{"Creating a new replica"}, MinAge: 30 * time.Minute}
+
+	check, findings := evaluateOnce(t, when, heldInput(creating, now.Add(-time.Hour)))
+	if check.Outcome != CheckMatched || len(findings) != 1 {
+		t.Fatalf("held an hour: %v %q", check.Outcome, check.Because)
+	}
+	if e := findings[0].Evidence; len(e) != 2 || e[1].Origin != "console-observed" ||
+		!strings.Contains(e[1].Detail, "since at least") || !strings.Contains(e[0].Detail, "Creating replica orders-2-join") {
+		t.Errorf("evidence = %+v", e)
+	}
+
+	check, _ = evaluateOnce(t, when, heldInput(creating, now.Add(-5*time.Minute)))
+	if check.Outcome != CheckClear {
+		t.Errorf("held five minutes: %v %q, want clear", check.Outcome, check.Because)
+	}
+
+	untracked := Input{Now: now, HasCluster: true, Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{
+		Present: true, Phase: "Creating a new replica"}}}
+	check, _ = evaluateOnce(t, when, untracked)
+	if check.Outcome != CheckUnavailable || !strings.Contains(check.Because, "no record yet") {
+		t.Errorf("untracked: %v %q, want could not run naming the missing record", check.Outcome, check.Because)
+	}
+
+	check, _ = evaluateOnce(t, when, heldInput(observe.ClusterFacts{Phase: "Cluster in healthy state"}, now.Add(-time.Hour)))
+	if check.Outcome != CheckClear {
+		t.Errorf("other phase: %v, want clear", check.Outcome)
+	}
+}
+
+// TestAHeldConditionUsesTheOperatorsTransitionTime proves the age bound
+// on a condition reads the operator's clock, and refuses to judge a
+// condition reported without one.
+func TestAHeldConditionUsesTheOperatorsTransitionTime(t *testing.T) {
+	t.Parallel()
+	old := now.Add(-time.Hour)
+	facts := observe.ClusterFacts{Present: true, Conditions: []observe.Condition{
+		{Type: "Ready", Status: "False", Reason: "ClusterIsNotReady", LastTransition: &old}}}
+	in := Input{Now: now, HasCluster: true, Cluster: observe.Snapshot{Cluster: facts}}
+	when := ClusterCondition{Type: "Ready", Status: "False", MinAge: 10 * time.Minute}
+
+	check, findings := evaluateOnce(t, when, in)
+	if check.Outcome != CheckMatched || !strings.Contains(findings[0].Evidence[0].Detail, "1h0m0s ago") {
+		t.Fatalf("held an hour: %v %+v", check.Outcome, findings)
+	}
+
+	recent := now.Add(-time.Minute)
+	facts.Conditions[0].LastTransition = &recent
+	if check, _ := evaluateOnce(t, when, in); check.Outcome != CheckClear {
+		t.Errorf("transitioned a minute ago: %v, want clear", check.Outcome)
+	}
+
+	facts.Conditions[0].LastTransition = nil
+	if check, _ := evaluateOnce(t, when, in); check.Outcome != CheckUnavailable ||
+		!strings.Contains(check.Because, "no transition time") {
+		t.Errorf("no transition time: %v %q", check.Outcome, check.Because)
+	}
+}
+
+// TestStatusListsNameTheirObjects proves each list yields one finding
+// per listed name with the right subject kind, and that the age bound
+// applies per name.
+func TestStatusListsNameTheirObjects(t *testing.T) {
+	t.Parallel()
+	facts := observe.ClusterFacts{
+		FailedInstances: []string{"orders-3"},
+		UnusablePVCs:    []string{"orders-1-wal"},
+		DanglingPVCs:    []string{"orders-2", "orders-4"},
+	}
+	in := heldInput(facts, now.Add(-time.Hour))
+	// orders-4 was listed only just now.
+	in.Cluster.Cluster.ObservedSince["danglingPVC=orders-4"] = now.Add(-time.Minute)
+
+	for _, tc := range []struct {
+		when StatusListed
+		want []EntityRef
+	}{
+		{StatusListed{List: ListFailedInstances}, []EntityRef{{Kind: "Pod", Name: "orders-3"}}},
+		{StatusListed{List: ListUnusablePVC}, []EntityRef{{Kind: "PersistentVolumeClaim", Name: "orders-1-wal"}}},
+		{StatusListed{List: ListDanglingPVC, MinAge: 15 * time.Minute},
+			[]EntityRef{{Kind: "PersistentVolumeClaim", Name: "orders-2"}}},
+		{StatusListed{List: ListResizingPVC}, nil},
+	} {
+		_, findings := evaluateOnce(t, tc.when, in)
+		if len(findings) != len(tc.want) {
+			t.Errorf("%s: %d findings, want %d", tc.when.List, len(findings), len(tc.want))
+			continue
+		}
+		for i, want := range tc.want {
+			if findings[i].Subject != want {
+				t.Errorf("%s: subject %v, want %v", tc.when.List, findings[i].Subject, want)
+			}
+		}
+	}
+}
+
+// TestTimelineDivergenceComparesEachInstanceToTheCluster proves an
+// instance on another timeline is named, one on the cluster's is not,
+// one that reported none is not, and the check cannot run without a
+// cluster timeline to compare against.
+func TestTimelineDivergenceComparesEachInstanceToTheCluster(t *testing.T) {
+	t.Parallel()
+	four := 4
+	facts := observe.ClusterFacts{TimelineID: &four, InstanceTimelines: []observe.InstanceTimeline{
+		{Instance: "orders-1", TimelineID: 4, IsPrimary: true},
+		{Instance: "orders-2", TimelineID: 3},
+		{Instance: "orders-3"},
+	}}
+	check, findings := evaluateOnce(t, TimelineDivergence{MinAge: 10 * time.Minute}, heldInput(facts, now.Add(-time.Hour)))
+	if check.Outcome != CheckMatched || len(findings) != 1 || findings[0].Subject.Name != "orders-2" {
+		t.Fatalf("outcome %v, findings %+v", check.Outcome, findings)
+	}
+	if !strings.Contains(findings[0].Summary, "timeline 3 while the cluster is on timeline 4") {
+		t.Errorf("summary = %q", findings[0].Summary)
+	}
+	facts.TimelineID = nil
+	if check, _ := evaluateOnce(t, TimelineDivergence{}, heldInput(facts, now)); check.Outcome != CheckUnavailable {
+		t.Errorf("no cluster timeline: %v, want could not run", check.Outcome)
+	}
+}
+
+// TestCertificateExpiryIsSplitBetweenExpiringAndExpired proves the two
+// spans never report the same certificate.
+func TestCertificateExpiryIsSplitBetweenExpiringAndExpired(t *testing.T) {
+	t.Parallel()
+	facts := observe.ClusterFacts{Present: true, CertificateExpirations: []observe.CertificateExpiry{
+		{Secret: "orders-ca", ExpiresAt: now.Add(-time.Hour)},
+		{Secret: "orders-server", ExpiresAt: now.Add(2 * 24 * time.Hour)},
+		{Secret: "orders-replication", ExpiresAt: now.Add(60 * 24 * time.Hour)},
+	}}
+	in := Input{Now: now, HasCluster: true, Cluster: observe.Snapshot{Cluster: facts}}
+	_, expired := evaluateOnce(t, CertificateExpiring{}, in)
+	_, expiring := evaluateOnce(t, CertificateExpiring{Within: 3 * 24 * time.Hour}, in)
+	if len(expired) != 1 || expired[0].Subject != (EntityRef{Kind: "Secret", Name: "orders-ca"}) {
+		t.Errorf("expired = %+v", expired)
+	}
+	if len(expiring) != 1 || expiring[0].Subject.Name != "orders-server" {
+		t.Errorf("expiring = %+v", expiring)
+	}
+}
+
+// TestPrimaryFailingReadsTheOperatorsStamp proves the finding names the
+// current primary, carries the operator's instant as its time, and
+// waits out the minimum age.
+func TestPrimaryFailingReadsTheOperatorsStamp(t *testing.T) {
+	t.Parallel()
+	since := now.Add(-5 * time.Minute)
+	facts := observe.ClusterFacts{Present: true, CurrentPrimary: "orders-1", PrimaryFailingSince: &since}
+	in := Input{Now: now, HasCluster: true, Cluster: observe.Snapshot{Cluster: facts}}
+	_, findings := evaluateOnce(t, PrimaryFailing{MinAge: time.Minute}, in)
+	if len(findings) != 1 || findings[0].Subject != (EntityRef{Kind: "Pod", Name: "orders-1"}) || !findings[0].At.Equal(since) {
+		t.Fatalf("findings = %+v", findings)
+	}
+	if check, _ := evaluateOnce(t, PrimaryFailing{MinAge: 10 * time.Minute}, in); check.Outcome != CheckClear {
+		t.Errorf("younger than the bound: %v, want clear", check.Outcome)
+	}
+}
+
+// TestRolesTablespacesAndPoolersQuoteTheOperator covers the three
+// simple restatements.
+func TestRolesTablespacesAndPoolersQuoteTheOperator(t *testing.T) {
+	t.Parallel()
+	facts := observe.ClusterFacts{Present: true,
+		UnreconcilableRoles: []observe.RoleProblem{{Role: "app", Errors: []string{"role \"app\" cannot be dropped"}}},
+		Tablespaces: []observe.TablespaceFacts{
+			{Name: "fast", State: "pending", Error: "disk missing"}, {Name: "ok", State: "reconciled"}},
+	}
+	in := Input{Now: now, HasCluster: true, Cluster: observe.Snapshot{Cluster: facts},
+		HasPoolers: true, Poolers: observe.PoolersSnapshot{Poolers: []observe.PoolerFacts{
+			{Name: "orders-rw", Phase: "failed", PhaseReason: "image not found"}, {Name: "orders-ro", Phase: "active"}}}}
+	_, roles := evaluateOnce(t, RoleUnreconcilable{}, in)
+	if len(roles) != 1 || roles[0].Subject != (EntityRef{Kind: "ManagedRole", Name: "app"}) ||
+		!strings.Contains(roles[0].Evidence[0].Detail, "cannot be dropped") {
+		t.Errorf("roles = %+v", roles)
+	}
+	_, tablespaces := evaluateOnce(t, TablespaceError{}, in)
+	if len(tablespaces) != 1 || tablespaces[0].Subject != (EntityRef{Kind: "Tablespace", Name: "fast"}) {
+		t.Errorf("tablespaces = %+v", tablespaces)
+	}
+	_, poolers := evaluateOnce(t, PoolerPhase{AnyOf: []string{"failed", "inactive"}}, in)
+	if len(poolers) != 1 || poolers[0].Subject != (EntityRef{Kind: "Pooler", Name: "orders-rw"}) ||
+		!strings.Contains(poolers[0].Evidence[0].Detail, "image not found") {
+		t.Errorf("poolers = %+v", poolers)
+	}
+}
+
+// TestInstancesShortHoldsBeforeReporting proves a shortfall reads the
+// operator's own counts and waits out the bound, and that a fresh
+// shortfall — a different pair of numbers — starts a new clock.
+func TestInstancesShortHoldsBeforeReporting(t *testing.T) {
+	t.Parallel()
+	three, two := 3, 2
+	facts := observe.ClusterFacts{DesiredInstances: &three, ReadyInstances: &two}
+	check, findings := evaluateOnce(t, InstancesShort{MinAge: 10 * time.Minute}, heldInput(facts, now.Add(-time.Hour)))
+	if check.Outcome != CheckMatched || len(findings) != 1 || findings[0].Summary != "2 of 3 declared instances are ready." {
+		t.Fatalf("outcome %v, findings %+v", check.Outcome, findings)
+	}
+	if check, _ := evaluateOnce(t, InstancesShort{MinAge: 10 * time.Minute}, heldInput(facts, now.Add(-time.Minute))); check.Outcome != CheckClear {
+		t.Errorf("young shortfall: %v, want clear", check.Outcome)
+	}
+	facts.ReadyInstances = &three
+	if check, _ := evaluateOnce(t, InstancesShort{}, heldInput(facts, now.Add(-time.Hour))); check.Outcome != CheckClear {
+		t.Errorf("no shortfall: %v, want clear", check.Outcome)
+	}
+}
+
+// TestEventMatchAttributesSecondaryKindsThroughTheirCatalog proves an
+// event on a Backup, ScheduledBackup or Pooler counts only when the
+// respective catalog lists the object as this cluster's, cannot be
+// judged while that catalog is unreadable, and is ignored by a rule
+// scoped to the Cluster and its pods.
+func TestEventMatchAttributesSecondaryKindsThroughTheirCatalog(t *testing.T) {
+	t.Parallel()
+	in := withEvents(
+		warning("Backup", "orders-20260917", "Error", "Backup exit with error: boom"),
+		warning("Backup", "billing-20260917", "Error", "Backup exit with error: not ours"),
+		warning("Pooler", "orders-rw", "ImageCatalogError", "no image"),
+	)
+	on := EventMatch{Reasons: []string{"Error"}, Kinds: []string{"Backup"}}
+
+	check, _ := evaluateOnce(t, on, in)
+	if check.Outcome != CheckUnavailable || !strings.Contains(check.Because, "backup catalog") {
+		t.Fatalf("no backup catalog: %v %q, want could not run naming it", check.Outcome, check.Because)
+	}
+
+	in.HasBackups = true
+	in.Backups = observe.BackupsSnapshot{Backups: []observe.BackupFacts{{Name: "orders-20260917"}}}
+	check, findings := evaluateOnce(t, on, in)
+	if check.Outcome != CheckMatched || len(findings) != 1 || len(findings[0].Evidence) != 1 ||
+		findings[0].Subject != (EntityRef{Kind: "Backup", Name: "orders-20260917"}) {
+		t.Fatalf("catalogued backup: %v %+v", check.Outcome, findings)
+	}
+
+	// The default scope never reads a Backup event, catalog or not.
+	if check, _ := evaluateOnce(t, EventMatch{Reasons: []string{"Error"}}, in); check.Outcome != CheckClear {
+		t.Errorf("default scope read a Backup event: %v", check.Outcome)
+	}
+
+	pooler := EventMatch{Reasons: []string{"ImageCatalogError"}, Kinds: []string{"Pooler"}}
+	if check, _ := evaluateOnce(t, pooler, in); check.Outcome != CheckUnavailable {
+		t.Errorf("no pooler catalog: %v, want could not run", check.Outcome)
+	}
+	in.HasPoolers = true
+	in.Poolers = observe.PoolersSnapshot{Poolers: []observe.PoolerFacts{{Name: "orders-rw"}}}
+	if check, findings := evaluateOnce(t, pooler, in); check.Outcome != CheckMatched ||
+		findings[0].Subject != (EntityRef{Kind: "Pooler", Name: "orders-rw"}) {
+		t.Errorf("catalogued pooler: %v %+v", check.Outcome, findings)
+	}
+	if got := PodSubjectOf(pooler); got != PodSubjectNever {
+		t.Errorf("a Pooler-scoped event rule classified as %v, want never naming a pod", got)
+	}
+}

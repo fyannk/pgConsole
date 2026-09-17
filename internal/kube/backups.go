@@ -42,6 +42,7 @@ const (
 	maxScheduledCandidates = 1000
 	barmanPluginName       = "barman-cloud.cloudnative-pg.io"
 	barmanObjectName       = "barmanObjectName"
+	barmanServerName       = "serverName"
 )
 
 // FetchBackupCatalog lists both namespaced resource kinds, selecting the
@@ -150,7 +151,7 @@ func (c *Client) fetchObjectStoreReference(ctx context.Context) observe.ObjectSt
 		c.logObjectStoreUnavailable(err)
 		return unknown
 	}
-	name, err := objectStoreName(cluster.Object)
+	name, serverName, err := objectStoreName(cluster.Object)
 	if err != nil {
 		c.logObjectStoreUnavailable(err)
 		return unknown
@@ -158,7 +159,10 @@ func (c *Client) fetchObjectStoreReference(ctx context.Context) observe.ObjectSt
 	if name == "" {
 		return observe.ObjectStoreReference{State: observe.ObjectStoreNotReferenced}
 	}
-	ref := observe.ObjectStoreReference{Name: name, State: observe.ObjectStoreUnknown}
+	if serverName == "" {
+		serverName = c.opts.ClusterName
+	}
+	ref := observe.ObjectStoreReference{Name: name, ServerName: serverName, State: observe.ObjectStoreUnknown}
 	store, err := c.dyn.Resource(objectStoreGVR).Namespace(c.opts.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		c.logObjectStoreUnavailable(err)
@@ -177,7 +181,28 @@ func (c *Client) fetchObjectStoreReference(ctx context.Context) observe.ObjectSt
 		"spec", "configuration", "endpointURL")
 	ref.RetentionPolicy, _, _ = unstructured.NestedString(store.Object,
 		"spec", "retentionPolicy")
+	// The plugin files each cluster's backups under a server name and
+	// summarises them per server in its status. Only this cluster's
+	// entry is read; the others are other clusters' business.
+	if window, found, _ := unstructured.NestedMap(store.Object,
+		"status", "serverRecoveryWindow", serverName); found {
+		ref.RecoveryWindow = &observe.RecoveryWindow{
+			FirstRecoverabilityPoint: nestedInstant(window, "firstRecoverabilityPoint"),
+			LastSuccessfulBackup:     nestedInstant(window, "lastSuccessfulBackupTime"),
+			LastFailedBackup:         nestedInstant(window, "lastFailedBackupTime"),
+		}
+	}
 	return ref
+}
+
+// nestedInstant reads one RFC3339 timestamp out of an unstructured map;
+// nil for an absent or unparseable value, never a wrong instant.
+func nestedInstant(object map[string]any, field string) *time.Time {
+	raw, found, _ := unstructured.NestedString(object, field)
+	if !found {
+		return nil
+	}
+	return operatorInstant(raw)
 }
 
 func (c *Client) logObjectStoreUnavailable(err error) {
@@ -185,18 +210,22 @@ func (c *Client) logObjectStoreUnavailable(err error) {
 	c.logger.Info("object store reference unavailable", slog.String("category", category))
 }
 
-func objectStoreName(content map[string]any) (string, error) {
+// objectStoreName is the referenced ObjectStore and the server name the
+// cluster files its backups under, from the enabled barman-cloud plugin
+// stanza; both empty when the plugin is not enabled, the server name
+// alone empty when the stanza leaves it to default.
+func objectStoreName(content map[string]any) (name, serverName string, err error) {
 	var cluster apiv1.Cluster
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(content, &cluster); err != nil {
-		return "", redact.NewError("cluster plugin convert", redact.CategoryInternal, err)
+		return "", "", redact.NewError("cluster plugin convert", redact.CategoryInternal, err)
 	}
 	for _, plugin := range cluster.Spec.Plugins {
 		if plugin.Name != barmanPluginName || (plugin.Enabled != nil && !*plugin.Enabled) {
 			continue
 		}
-		return plugin.Parameters[barmanObjectName], nil
+		return plugin.Parameters[barmanObjectName], plugin.Parameters[barmanServerName], nil
 	}
-	return "", nil
+	return "", "", nil
 }
 
 func (c *Client) convertBackup(content map[string]any) (observe.BackupFacts, bool, error) {

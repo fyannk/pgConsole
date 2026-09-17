@@ -114,5 +114,77 @@ func conditionRules() []diagnose.Rule {
 			Link:      "/cluster/overview",
 			LinkLabel: "Cluster overview",
 		},
+		{
+			// Ready goes False during every rollout, so the condition is a
+			// finding only once it has held; the operator's own transition
+			// time is the clock.
+			ID:        "cnpg-not-ready",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "the operator reporting the cluster not ready for ten minutes",
+			Summary:   "The operator has reported the cluster as not ready for ten minutes.",
+			Detail: "Ready is the operator's summary: every declared instance up and " +
+				"the primary serving. It goes False for the length of a restart in " +
+				"every rollout; ten minutes is past that. The quoted reason names " +
+				"the specific cause when the operator has one — a detached volume, " +
+				"for instance — and the other findings on this screen carry the " +
+				"rest.",
+			When:      diagnose.ClusterCondition{Type: "Ready", Status: "False", MinAge: notReadyHeld},
+			Pinned:    []string{"ClusterIsNotReady", "DetachedVolume"},
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
+		{
+			ID:        "cnpg-no-system-id",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "no instance reporting a system identifier for a quarter of an hour",
+			Summary:   "No instance has reported a PostgreSQL system identifier to the operator for a quarter of an hour.",
+			Detail: "The instances report their system identifier once PostgreSQL is " +
+				"up; the operator writes ConsistentSystemID as NotFound while none " +
+				"has. Past the first minutes of a bootstrap, that is a cluster with " +
+				"no running PostgreSQL anywhere, or instances the operator cannot " +
+				"reach.",
+			When: diagnose.ClusterCondition{
+				Type: "ConsistentSystemID", Status: "False", Reason: "NotFound", MinAge: noSystemIDHeld},
+			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-status-unreachable"}, {Cause: "cnpg-bootstrap-stuck"}},
+			Link:          "/cluster/overview",
+			LinkLabel:     "Cluster overview",
+		},
+		{
+			ID:        "cnpg-hibernation-stuck",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "hibernation waiting on pod deletion for a quarter of an hour",
+			Summary:   "Hibernation has been deleting the cluster's pods for a quarter of an hour, and they are not gone.",
+			Detail: "Hibernation deletes the primary pod first and the replicas after, " +
+				"keeping every volume. A pod that will not go is usually one " +
+				"terminating slowly — PostgreSQL still shutting down — or a " +
+				"finalizer holding it.",
+			When: diagnose.ClusterCondition{
+				Type: "cnpg.io/hibernation", Status: "False", Reason: "WaitingPodsDeletion", MinAge: hibernationHeld},
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
+		{
+			// Not a fault: a note, so that a reader asking why nothing
+			// answers on the cluster's service is told the cluster is
+			// deliberately down rather than left to find it out.
+			ID:        "cnpg-hibernated",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityNote,
+			Describes: "the operator reporting the cluster as hibernated",
+			Summary:   "The cluster is hibernated: every pod is deleted on purpose and nothing serves.",
+			Detail: "The volumes are kept and the cluster resumes when the hibernation " +
+				"annotation is set to off or removed. Nothing here is a fault; every " +
+				"connection to the cluster's services fails while this holds.",
+			When:      diagnose.ClusterCondition{Type: "cnpg.io/hibernation", Status: "True", Reason: "Hibernated"},
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
 	}
 }

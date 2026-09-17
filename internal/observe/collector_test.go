@@ -304,3 +304,93 @@ func TestStoreSnapshotsAreImmutableCopies(t *testing.T) {
 		t.Errorf("generation not monotonic: %d then %d", first.Generation, second.Generation)
 	}
 }
+
+// TestStoreTracksHowLongAStateHasHeld pins the console-observed clock
+// on the operator's clockless states: a phase that stays keeps its
+// first-seen instant across publications, a phase that changes starts
+// a new one, and a state that goes away and comes back is not resumed.
+func TestStoreTracksHowLongAStateHasHeld(t *testing.T) {
+	t.Parallel()
+	store := NewStore()
+	t0 := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	creating := ClusterFacts{Present: true, Phase: "Creating a new replica", DanglingPVCs: []string{"orders-2"}}
+
+	store.publish(creating, t0)
+	snap, _ := store.Current()
+	if since, ok := snap.Cluster.Since("phase=Creating a new replica"); !ok || !since.Equal(t0) {
+		t.Fatalf("first publication: phase since = %v, %v; want %v", since, ok, t0)
+	}
+
+	store.publish(creating, t0.Add(time.Minute))
+	snap, _ = store.Current()
+	if since, _ := snap.Cluster.Since("phase=Creating a new replica"); !since.Equal(t0) {
+		t.Errorf("unchanged phase did not keep its first-seen instant: %v", since)
+	}
+	if since, _ := snap.Cluster.Since("danglingPVC=orders-2"); !since.Equal(t0) {
+		t.Errorf("unchanged PVC list did not keep its first-seen instant: %v", since)
+	}
+
+	healthy := ClusterFacts{Present: true, Phase: "Cluster in healthy state"}
+	store.publish(healthy, t0.Add(2*time.Minute))
+	snap, _ = store.Current()
+	if _, ok := snap.Cluster.Since("phase=Creating a new replica"); ok {
+		t.Error("a phase that ended is still tracked")
+	}
+	if _, ok := snap.Cluster.Since("danglingPVC=orders-2"); ok {
+		t.Error("a PVC no longer listed is still tracked")
+	}
+	if since, _ := snap.Cluster.Since("phase=Cluster in healthy state"); !since.Equal(t0.Add(2 * time.Minute)) {
+		t.Errorf("new phase since = %v, want the publication that introduced it", since)
+	}
+
+	store.publish(creating, t0.Add(3*time.Minute))
+	snap, _ = store.Current()
+	if since, _ := snap.Cluster.Since("phase=Creating a new replica"); !since.Equal(t0.Add(3 * time.Minute)) {
+		t.Errorf("a recurring phase resumed its old clock: %v", since)
+	}
+	if _, ok := snap.Cluster.Since("phase=Cluster in healthy state"); ok {
+		t.Error("the previous phase is still tracked after being replaced")
+	}
+}
+
+// TestHeldKeysEnumerateEveryTrackedState is the closed list the store
+// tracks, so adding a tracked field means adding it here as well.
+func TestHeldKeysEnumerateEveryTrackedState(t *testing.T) {
+	t.Parallel()
+	three, two := 3, 2
+	facts := ClusterFacts{
+		Phase:                   "Upgrading cluster",
+		FailedInstances:         []string{"orders-3"},
+		UnusablePVCs:            []string{"orders-1-wal"},
+		DanglingPVCs:            []string{"orders-2"},
+		ResizingPVCs:            []string{"orders-1"},
+		InitializingPVCs:        []string{"orders-4"},
+		InstanceTimelines:       []InstanceTimeline{{Instance: "orders-1", TimelineID: 4}, {Instance: "orders-5"}},
+		ReplicaSwitchInProgress: true,
+		DesiredInstances:        &three,
+		ReadyInstances:          &two,
+	}
+	want := []string{
+		"phase=Upgrading cluster",
+		"failedInstance=orders-3",
+		"unusablePVC=orders-1-wal",
+		"danglingPVC=orders-2",
+		"resizingPVC=orders-1",
+		"initializingPVC=orders-4",
+		"instanceTimeline=orders-1:4",
+		"replicaSwitch=inProgress",
+		"readyShort=2/3",
+	}
+	got := facts.HeldKeys()
+	if len(got) != len(want) {
+		t.Fatalf("HeldKeys = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("HeldKeys[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if keys := (ClusterFacts{}).HeldKeys(); len(keys) != 0 {
+		t.Errorf("empty facts track %v", keys)
+	}
+}

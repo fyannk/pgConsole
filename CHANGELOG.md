@@ -9,6 +9,70 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ## [Unreleased]
 
+### Added
+
+- **The catalog reads the rest of the Cluster status.** The operator's
+  own lists of failed instances and of unusable, dangling, resizing and
+  initializing volume claims; the certificate expiries it reports per
+  Secret; the managed roles and tablespaces it could not reconcile; the
+  timeline each instance reported back; the instant it detected the
+  primary as failing; and the in-progress switch to a replica cluster
+  each carry a check now. Thirteen rules, every one quoting the status
+  field it read and pinned to that field's JSON tag.
+
+- **A state that lasts is a finding; a state in passing is not.** Four
+  phases the operator passes through on its way somewhere — creating an
+  instance, rolling the cluster out, upgrading the PostgreSQL major,
+  promoting a replica cluster — and four conditions (`Ready=False`, no
+  system identifier, hibernation stuck deleting pods, and hibernated)
+  are checked against a minimum age stated in the check row. Conditions
+  read the operator's own `lastTransitionTime`; phases and lists read a
+  clock the console now keeps, recording when it first saw the state it
+  currently sees. That clock is a floor and the evidence says so. See
+  the diagnostics guide, *Checks that need a state to hold*.
+
+- **Events on Backup, ScheduledBackup and Pooler objects.** The event
+  window was limited to the Cluster and its pods. It now admits the
+  operator's events on those three kinds, and nine rules read them: a
+  backup refused for an unhealthy target, waiting for its target,
+  exiting with an error, or failed by an instance-manager restart; a
+  schedule held back by an unhealthy cluster, given an expression no
+  time satisfies, refusing to adopt a Backup it did not create, or
+  unable to create one; and a Pooler whose image the catalog cannot
+  resolve. An event on one of these kinds is admitted only when the
+  respective catalog lists the object as this cluster's, and cannot be
+  judged at all while that catalog is unreadable — the namespace may
+  hold another cluster's objects of the same kind.
+
+- **The barman-cloud plugin's recovery window.** The plugin summarises
+  each server's backups in its `ObjectStore` status; the console reads
+  this cluster's entry under the existing optional `objectstores`
+  grant, shows the first recoverability point and the last successful
+  and failed backup on the overview, and carries two rules: the last
+  backup reported as failed, and no successful backup at all on a
+  cluster whose schedule is a day old. With in-tree Barman removed in
+  CloudNativePG 1.31, this is where those instants live.
+
+- **Five metric rules on readings the console already scraped.** WAL
+  segments piling up unarchived (the earliest signal of archiving
+  trouble, before the condition flips or the volume fills), the
+  archiver's failure rate held above zero, deadlocks at a sustained
+  rate, hundreds of backends waiting on a lock, and an installed
+  extension older than the version its image ships.
+
+- **Pooler phases.** CloudNativePG 1.30 gave the Pooler a phase; a
+  Pooler the operator reports as `failed` or `inactive` is a finding,
+  pinned 1.30-only.
+
+### Changed
+
+- **The catalog grew from 86 to 125 rules, 131 checks with the six
+  hand-written detectors.** The additions are related where the
+  evidence supports it: a stuck bootstrap nests under the bootstrap log
+  line that explains it, a failed backup phase under the Backup's own
+  error event, the ready-instance shortfall under whichever pod-level
+  check names the missing member.
+
 ## [0.7.0] - 2026-09-04
 
 The diagnostics release. The console runs a catalog of 86 checks over the

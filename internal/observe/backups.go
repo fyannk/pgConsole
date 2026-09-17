@@ -118,6 +118,25 @@ type ObjectStoreReference struct {
 	Endpoint string
 	// RetentionPolicy is the reported retention, empty when none is set.
 	RetentionPolicy string
+	// ServerName is the name this cluster's backups are filed under in
+	// the store: the plugin's serverName parameter, or the cluster name.
+	ServerName string
+	// RecoveryWindow is the plugin's report for that server, nil when
+	// the store reports none for it yet.
+	RecoveryWindow *RecoveryWindow
+}
+
+// RecoveryWindow is the barman-cloud plugin's own summary of one
+// server's backups in the store. Every instant is the plugin's; nil
+// means the plugin reported none.
+type RecoveryWindow struct {
+	// FirstRecoverabilityPoint is the earliest instant a recovery could
+	// target.
+	FirstRecoverabilityPoint *time.Time
+	// LastSuccessfulBackup is when the last successful backup was taken.
+	LastSuccessfulBackup *time.Time
+	// LastFailedBackup is when the last backup failed.
+	LastFailedBackup *time.Time
 }
 
 // BackupCatalogState is one complete seed and the resource versions from

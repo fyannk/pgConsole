@@ -14,7 +14,29 @@
 
 package cnpg
 
-import "github.com/fyannk/pgConsole/internal/diagnose"
+import (
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/diagnose"
+)
+
+// The metric thresholds, console-pinned knowledge stated in one place.
+const (
+	// archiveBacklogSegments is how many segments may wait to be
+	// archived. Each is sixteen megabytes by default; thirty-two is half
+	// a gigabyte of WAL the archiver has not taken.
+	archiveBacklogSegments = 32
+	// archiveBacklogHeld is how long the backlog must hold. A burst of
+	// writes outruns the archiver for a moment; a quarter of an hour is
+	// an archiver that is not catching up.
+	archiveBacklogHeld = 15 * time.Minute
+	// archiverFailureRate is the failure rate, per second, that counts
+	// as continuous: one failure a minute, which is the archiver
+	// retrying and failing every time.
+	archiverFailureRate = 1.0 / 60
+	// archiverFailingHeld is how long that rate must hold.
+	archiverFailingHeld = 15 * time.Minute
+)
 
 // metricRules cover the exporter flags whose non-zero value is a
 // standing operator state — states that are otherwise only visible in
@@ -79,6 +101,49 @@ func metricRules() []diagnose.Rule {
 				"demote by hand while the two sources still disagree.",
 			Link:      "/cluster/metrics",
 			LinkLabel: "Metrics",
+		},
+		{
+			// The earliest signal of archiving trouble: segments the
+			// archiver has not taken pile up as .ready files long before
+			// the condition flips or the volume fills. The instance
+			// manager publishes the count under the pinned collector.
+			ID:        "cnpg-wal-archive-backlog",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "WAL segments waiting to be archived, at least 32 of them, held for a quarter of an hour",
+			Summary:   "WAL segments are piling up unarchived on an instance: at least 32 have waited a quarter of an hour.",
+			Detail: "PostgreSQL marks each finished segment ready and the archiver " +
+				"takes it; a backlog that holds is an archiver that is slower than " +
+				"the WAL rate or not taking segments at all. The WAL volume fills at " +
+				"the backlog's pace. The archiving condition and the archive-command " +
+				"log check usually say why.",
+			When:          diagnose.SeriesAbove{Key: "wal-archive-ready", Threshold: archiveBacklogSegments, For: archiveBacklogHeld},
+			Pinned:        []string{"pg_wal_archive_status"},
+			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-wal-archiving-failing"}, {Cause: "cnpg-wal-archive-command-failed"}},
+			Link:          "/cluster/metrics",
+			LinkLabel:     "Metrics",
+		},
+		{
+			// PostgreSQL's own count of archive_command failures, read as
+			// a rate: a rate above zero held for a quarter of an hour is an
+			// archiver failing continuously, in the server's words rather
+			// than the instance manager's.
+			ID:        "cnpg-archiver-failing",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "PostgreSQL counting archive failures continuously for a quarter of an hour",
+			Summary:   "PostgreSQL has been counting archive-command failures continuously for a quarter of an hour.",
+			Detail: "pg_stat_archiver counts every failed archive attempt. A failure rate " +
+				"that never returns to zero across the window is an archiver failing " +
+				"on every attempt, which the archiving condition reports from the " +
+				"instance manager's side.",
+			When:          diagnose.SeriesAbove{Key: "wal-archive-failed", Threshold: archiverFailureRate, For: archiverFailingHeld},
+			Pinned:        []string{"pg_stat_archiver", "failed_count"},
+			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-wal-archiving-failing"}},
+			Link:          "/cluster/metrics",
+			LinkLabel:     "Metrics",
 		},
 	}
 }

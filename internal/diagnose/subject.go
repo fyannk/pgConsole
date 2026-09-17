@@ -63,10 +63,29 @@ func PodSubjectOf(when Condition) PodSubject {
 	case InstantNonZero, InstantZero, InstantShortfall, SeriesAbove, PrimaryDisagreement:
 		// The instance the exporter reported for.
 		return PodSubjectAlways
+	case PrimaryFailing, TimelineDivergence:
+		// The instance the operator's status names.
+		return PodSubjectAlways
+	case StatusListed:
+		// The failed-instances list names pods; the claim lists name
+		// claims.
+		if condition.List == ListFailedInstances {
+			return PodSubjectAlways
+		}
+		return PodSubjectNever
 	case EventMatch:
-		// Whatever object the event was recorded on: the observed window
-		// holds events on the Cluster and on its member pods.
-		return PodSubjectSometimes
+		// Whatever object the event was recorded on. The default scope
+		// is the Cluster and its member pods; a rule naming kinds that
+		// exclude pods never names one.
+		if len(condition.Kinds) == 0 {
+			return PodSubjectSometimes
+		}
+		for _, kind := range condition.Kinds {
+			if kind == "Pod" {
+				return PodSubjectSometimes
+			}
+		}
+		return PodSubjectNever
 	case AllOf:
 		// A composite carries its first branch's subject — the others
 		// corroborate it and must agree with it, but the finding is the

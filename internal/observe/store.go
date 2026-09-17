@@ -46,6 +46,23 @@ func (s *Store) Current() (Snapshot, bool) {
 func (s *Store) publish(facts ClusterFacts, observedAt time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The duration of a state is the console's own observation: the
+	// operator writes no clock beside its phase or its PVC lists. A
+	// state present in the previous publication keeps its first-seen
+	// instant; a new one starts at this observation; one that went
+	// away is dropped, so a recurrence is a fresh clock rather than a
+	// resumed one. Staleness does not interrupt it: a stale snapshot
+	// is the same last-good observation, and the state it shows has
+	// not been seen to change.
+	held := make(map[string]time.Time)
+	for _, key := range facts.HeldKeys() {
+		if since, ok := s.snap.Cluster.ObservedSince[key]; s.has && ok {
+			held[key] = since
+		} else {
+			held[key] = observedAt
+		}
+	}
+	facts.ObservedSince = held
 	s.snap = Snapshot{
 		Generation: s.snap.Generation + 1,
 		ObservedAt: observedAt,

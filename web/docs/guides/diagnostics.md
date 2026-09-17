@@ -214,6 +214,37 @@ because its timing is bounded rather than known.
 
 With `HISTORY_ENABLED=false` both checks report "could not run".
 
+## Checks that need a state to hold
+
+Several operator states are ordinary in passing and a fault only when
+they last. Every rollout passes through `Ready=False`; every deleted
+pod leaves its claim dangling for the seconds the recreation takes;
+every new replica sits in *Creating a new replica* while it clones.
+A check that reported these on sight would teach a reader to ignore
+the screen, so a check on such a state names a minimum age, stated in
+its check row, and reads a clock to enforce it.
+
+Two clocks exist, and each check says which it read:
+
+| Clock | Used for | Who keeps it |
+|---|---|---|
+| The condition's `lastTransitionTime` | Conditions such as `Ready`, `ConsistentSystemID`, `cnpg.io/hibernation` | The operator. It is the instant the operator itself recorded the change, so a check reading it knows how long the condition has held without having watched it. A condition reported without one leaves the check unable to run. |
+| The console's own record of first sight | Phases, the operator's PVC lists, the failed-instance list, instance timelines, the ready-instance shortfall, the replica-cluster switch | The console. The operator writes no clock beside these, so the store notes when it first saw the state it now sees and keeps that instant while the state stays identical across publications. |
+
+The console's clock is a **floor**, and the evidence says so: *unchanged
+since at least 09:14:03Z, when the console first saw it*. A console
+started ten minutes into a stuck rollout knows the phase has held ten
+minutes, not how long before that. A state that goes away and comes
+back starts a new clock rather than resuming the old one, and a phase
+that changes to another phase is a different state with its own clock.
+Until the store has published once, no such check can run, and it says
+so rather than guessing.
+
+Two operator states carry their own instant and need neither clock:
+`currentPrimaryFailingSinceTimestamp`, which the operator stamps when
+its status check on the primary starts failing, and the certificate
+expiries it reports per Secret.
+
 ## Thresholds and holding windows
 
 A metric check states the number it applies in its own check row, so
@@ -305,11 +336,15 @@ adding the release to the verified list and letting that check pass.
 | Evidence | Requires |
 |---|---|
 | Operator status: phases, conditions, backup phases, declared database objects, primary-move timing | The cluster collectors (always on). |
-| Events | The event collector (always on). Only events on the `Cluster` object and member pods are observable. |
+| Operator status lists: failed instances, unusable, dangling, resizing and initializing claims, certificate expiries, unreconcilable managed roles, tablespace errors, per-instance timelines, the replica-cluster switch | The cluster collector (always on). The held-state checks additionally need the store to have published once; see [checks that need a state to hold](#checks-that-need-a-state-to-hold). |
+| Events on the `Cluster` and its pods | The event collector (always on). |
+| Events on `Backup`, `ScheduledBackup` and `Pooler` objects | The event collector, plus the catalog that attributes the object to this cluster: the backup catalog for the first two, the pooler collector for the third. While that catalog is unreadable the event check reports that it could not run, because the namespace may hold another cluster's objects of the same kind. |
+| Pooler phases (`failed`, `inactive`) | The pooler collector (always on); the phases exist from CloudNativePG 1.30. |
+| The barman-cloud plugin's recovery window: first recoverability point, last successful and last failed backup | The optional `objectstores` `get` grant, and a Cluster that enables the plugin. The window is read from the `ObjectStore` status under the cluster's server name. A cluster without the plugin leaves these checks clear — there is no store to report — and a referenced store the console cannot read leaves them unable to run. |
 | Resource quotas | The `resourcequotas` grant in the Role (in the shipped example). It is what lets a quota refusal name the quota — ceiling and usage — instead of only the refused object's symptom. |
 | Container states | The pod collectors (always on). |
 | Log messages | `LOG_STREAM_ENABLED`, which defaults to on wherever it is read — diagnostics enabled and `ALLOW_LOGS=true` — and can be switched off explicitly. With following off, every log-backed check reports that it needs a source that is switched off. They are the largest group in the catalog and mostly critical — the checks that quote the server's own words rather than inferring a fault from a phase — so turning following off is a real reduction in what the screen can tell you. What it buys back: a line that matches a rule is retained verbatim as that finding's evidence, and a PostgreSQL error record can carry statement text with literal values. |
-| Metric flags and thresholds | Metrics scraping enabled. |
+| Metric flags and thresholds, including the WAL archive backlog, the archiver's failure rate, deadlocks, waiting backends and extension updates | Metrics scraping enabled. |
 | Pooler instance counts and pooler pod states | The pooler collectors (always on). |
 | Pooler queue depth | Metrics scraping enabled; the PgBouncer exporter's window. |
 | Failover quorum | The failover-quorum collector (always on). Absence of the resource is a clear result: the cluster runs no quorum. |

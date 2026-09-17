@@ -94,6 +94,10 @@ func conditionLiterals(when diagnose.Condition) []string {
 	switch condition := when.(type) {
 	case diagnose.ClusterPhase:
 		return condition.AnyOf
+	case diagnose.ClusterPhaseHeld:
+		return condition.AnyOf
+	case diagnose.PoolerPhase:
+		return condition.AnyOf
 	case diagnose.ClusterCondition:
 		literals := []string{condition.Type}
 		if condition.Reason != "" {
