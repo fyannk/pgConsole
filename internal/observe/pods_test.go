@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/fyannk/pgConsole/internal/redact"
 )
@@ -210,5 +211,32 @@ func TestPodStoreSnapshotsAreImmutableCopies(t *testing.T) {
 	store.publish([]PodFacts{pod("orders-1", "u1", "replica")}, newFakeClock().Now())
 	if first.Pods[0].Role != "primary" {
 		t.Error("a previously returned snapshot changed after publication")
+	}
+}
+
+// TestPodStoreRetainsTheLastOperatorImage proves the operator's image
+// survives the pods' absence: set from the bootstrap init container,
+// kept across a publication with no pods, and refreshed by a later pod.
+func TestPodStoreRetainsTheLastOperatorImage(t *testing.T) {
+	t.Parallel()
+	store := NewPodStore()
+	clock := newFakeClock()
+	withImage := func(name, image string) PodFacts {
+		p := pod(name, "u-"+name, "primary")
+		p.Containers = []ContainerFacts{{Name: BootstrapControllerContainer, Init: true, Image: image}}
+		return p
+	}
+	t0 := clock.Now()
+	store.publish([]PodFacts{withImage("orders-1", "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0")}, t0)
+	store.publish(nil, t0.Add(time.Minute))
+	snap, _ := store.CurrentPods()
+	if len(snap.Pods) != 0 || snap.LastOperatorImage != "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0" ||
+		snap.LastOperatorImagePod != "orders-1" || !snap.LastOperatorImageSeenAt.Equal(t0) {
+		t.Fatalf("image not retained across an empty publication: %+v", snap)
+	}
+	store.publish([]PodFacts{withImage("orders-2", "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1")}, t0.Add(2*time.Minute))
+	snap, _ = store.CurrentPods()
+	if snap.LastOperatorImage != "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1" || snap.LastOperatorImagePod != "orders-2" {
+		t.Errorf("a later pod did not refresh the image: %+v", snap)
 	}
 }

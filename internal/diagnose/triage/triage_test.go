@@ -206,3 +206,33 @@ func TestAStepAnswersHonestly(t *testing.T) {
 		t.Errorf("a fact that cannot answer does not say why: %q", walk.Steps[7].Because)
 	}
 }
+
+// TestFactsReadTheSnapshotsTheyName proves each fact answers from the
+// snapshot it is about, in the vocabulary the adapters actually write,
+// and cannot answer without it.
+func TestFactsReadTheSnapshotsTheyName(t *testing.T) {
+	t.Parallel()
+	ready := true
+	in := diagnose.Input{Now: now,
+		HasCluster: true, Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{Present: true, CurrentPrimary: "orders-1"}},
+		HasPods: true, Pods: observe.PodsSnapshot{Pods: []observe.PodFacts{{Name: "orders-1", Ready: &ready}}},
+		HasInfrastructure: true, Infrastructure: observe.InfrastructureSnapshot{Services: []observe.ServiceFacts{
+			{Name: "orders-rw", Role: "read-write"}, {Name: "orders-r", Role: "any instance"}}},
+		HasBackups: true, Backups: observe.BackupsSnapshot{ScheduledBackups: []observe.ScheduledBackupFacts{{Name: "nightly"}}},
+	}
+	for _, fact := range []Fact{ClusterAbsent{}, NoPrimaryNamed{}, NoReadyInstance{}, NoWriteService{}, NoBackupSchedule{}} {
+		if yes, _, unknown := fact.Answer(in); yes || unknown != "" {
+			t.Errorf("%s: answered yes=%v unknown=%q on a healthy cluster", fact.Describe(), yes, unknown)
+		}
+	}
+	empty := diagnose.Input{Now: now}
+	for _, fact := range []Fact{ClusterAbsent{}, NoPrimaryNamed{}, NoReadyInstance{}, NoWriteService{}, NoBackupSchedule{}} {
+		if _, _, unknown := fact.Answer(empty); unknown == "" {
+			t.Errorf("%s: answered without its snapshot", fact.Describe())
+		}
+	}
+	in.Infrastructure.Services = in.Infrastructure.Services[1:]
+	if yes, evidence, _ := (NoWriteService{}).Answer(in); !yes || len(evidence) != 1 {
+		t.Errorf("no read-write service: yes=%v evidence=%+v", yes, evidence)
+	}
+}

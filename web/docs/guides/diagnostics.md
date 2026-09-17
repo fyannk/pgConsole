@@ -363,7 +363,7 @@ The versions themselves are **observed, never configured**:
 
 | Component | Source |
 |---|---|
-| CloudNativePG | The `bootstrap-controller` init container the operator injects into every instance pod runs the operator's own image; its tag is parsed. |
+| CloudNativePG | The `bootstrap-controller` init container the operator injects into every instance pod runs the operator's own image; its tag is parsed. With no pod, the bootstrap Job's is read; with neither — a hibernated cluster, or one whose instances are all gone — the image the pod store retained from the last instance pod it saw is used, labelled as retained rather than observed now. A console started while the cluster has no pod has nothing to retain, and its pinned checks report that they could not run until a pod appears. |
 | PostgreSQL | The operator-reported major version in the `Cluster` status. |
 | Barman Cloud plugin | The plugin sidecar's image tag. |
 | Kubernetes | The API server's own `/version` endpoint, polled every five minutes — the console's only poll against the API server, a non-resource URL every authenticated principal may read. No Role change is involved. |
@@ -380,6 +380,17 @@ tests fail once that date passes, naming what to go and read. A console
 that kept telling operators a supported version is unsupported — or
 said nothing about one that no longer is — would be worse than a red
 build.
+
+The pins are verified in both directions. The **coverage** half runs
+first: every phase, condition reason, backup and pooler phase, and
+Warning event reason the verified releases' source can write must be
+either listened for by a rule or declined by name, with its reason, in
+the catalog's declined list (rendered on the
+[checks reference](../reference/checks.md)). A release that adds a
+signal the catalog has never heard of fails the build there, so
+ignoring one is a decision on record rather than an omission; a
+declined signal upstream no longer says, or that a rule has since
+started listening for, fails it too.
 
 The pins are **verified, not merely recorded**: `make verify-pins`
 (run in CI beside the other repository checks) fetches each verified

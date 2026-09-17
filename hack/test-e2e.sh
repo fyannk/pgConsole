@@ -259,6 +259,116 @@ wait_path_contains "/cluster/overview" 'class="sidebar-badge"' 60 overview-badge
   exit 1
 }
 kubectl -n payments delete resourcequota tight > /dev/null
+
+# Four more faults, each injected into the real cluster and asserted on
+# three screens: the finding on /diagnostics, the layer it lands on, and
+# the triage step the reader would be told to start at. Every one is
+# reversed before the next, and the cluster is waited back to healthy,
+# so the demonstrations below still read the cluster they were written
+# for. E2E_FAULTS=false skips them.
+wait_phase() {
+  want="$1"; timeout="$2"
+  i=0
+  until [ "$(kubectl -n payments get cluster orders -o jsonpath='{.status.phase}' 2>/dev/null)" = "$want" ]; do
+    i=$((i + 5))
+    [ "$i" -le "$timeout" ] || { log "cluster never reached phase: $want (now: $(kubectl -n payments get cluster orders -o jsonpath='{.status.phase}'))"; return 1; }
+    sleep 5
+  done
+}
+if [ "${E2E_FAULTS:-true}" = "true" ]; then
+  # A NetworkPolicy is not among these on purpose: kind's policy
+  # enforcement also blocks the kubelet's probes, so the operator sees
+  # an instance that is not ready rather than one it cannot reach, and
+  # the fault lands on the held-state checks, which take minutes by
+  # design. The four below are the operator's own report within seconds.
+  log "fault 1: a backup schedule that is suspended"
+  cat <<'YAML' | kubectl apply -f - > /dev/null
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: nightly
+  namespace: payments
+spec:
+  schedule: "0 0 2 * * *"
+  suspend: true
+  cluster:
+    name: orders
+YAML
+  wait_path_contains "/diagnostics" "A backup schedule is suspended" 120 fault-suspended.html || {
+    log "the console never reported the suspended schedule"; exit 1; }
+  wait_path_contains "/triage" "start at step 1: Is there a schedule, and is it firing?" 60 fault-suspended-triage.html || {
+    log "triage does not start the backups playbook at the schedule step"; exit 1; }
+  grep -qF 'href="/diagnostics#finding-cnpg-schedule-suspended/nightly"' "$OUT/fault-suspended-triage.html" || {
+    log "triage does not link the finding to its card"; exit 1; }
+  kubectl -n payments delete scheduledbackup nightly > /dev/null
+  log "fault 1 ok (suspended schedule found, triage starts there and links the card)"
+
+  log "fault 5: a declared Database whose owner does not exist"
+  cat <<'YAML' | kubectl apply -f - > /dev/null
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: reports
+  namespace: payments
+spec:
+  name: reports
+  owner: nobody
+  cluster:
+    name: orders
+YAML
+  wait_path_contains "/diagnostics" "The operator cannot apply the declared Database" 180 fault-database.html || {
+    log "the console never reported the unapplied Database"; exit 1; }
+  grep -qF '<span class="layer-name">Declared objects</span>' "$OUT/fault-database.html" || { log "declared-objects layer missing"; exit 1; }
+  grep -qF "does not exist" "$OUT/fault-database.html" || { log "finding misses PostgreSQL's own refusal"; exit 1; }
+  kubectl -n payments delete database reports > /dev/null
+  log "fault 5 ok (declared object failure found with the server's own words)"
+
+  log "fault 2: the cluster is hibernated on purpose"
+  kubectl -n payments annotate cluster orders cnpg.io/hibernation=on --overwrite > /dev/null
+  wait_path_contains "/diagnostics" "The cluster is hibernated" 240 fault-hibernated.html || {
+    log "the console never reported the hibernation"; exit 1; }
+  wait_path_contains "/triage" "start at step 1: Is the cluster deliberately down?" 60 fault-hibernated-triage.html || {
+    log "triage does not start the connection playbook at the hibernation step"; exit 1; }
+  kubectl -n payments annotate cluster orders cnpg.io/hibernation=off --overwrite > /dev/null
+  wait_phase "Cluster in healthy state" 300 || exit 1
+  log "fault 2 ok (hibernation found as a note, triage starts there)"
+
+  log "fault 3: a supervised strategy parks a restart on a person"
+  # The operator refuses a supervised strategy on a single instance, so
+  # the cluster grows a replica first — which also puts a real join
+  # through the console — and shrinks back afterwards.
+  kubectl -n payments patch cluster orders --type merge -p '{"spec":{"instances":2}}' > /dev/null
+  wait_phase "Cluster in healthy state" 300 || exit 1
+  wait_path_contains "/cluster/pods" "orders-2" 120 fault-supervised-replica.html || { log "the replica never reached the pods screen"; exit 1; }
+  kubectl -n payments patch cluster orders --type merge -p \
+    '{"spec":{"primaryUpdateStrategy":"supervised","postgresql":{"parameters":{"shared_buffers":"48MB"}}}}' > /dev/null
+  wait_path_contains "/diagnostics" "The operator is waiting for a manual switchover" 240 fault-supervised.html || {
+    log "the console never reported the operator waiting for a person"; exit 1; }
+  wait_path_contains "/triage" "Is the operator waiting for a person?" 60 fault-supervised-triage.html || {
+    log "triage never rendered"; exit 1; }
+  grep -qF "start at step 2: Is the operator waiting for a person?" "$OUT/fault-supervised-triage.html" || {
+    log "triage does not start the stuck-operation playbook at the supervised step"; exit 1; }
+  kubectl -n payments patch cluster orders --type merge -p '{"spec":{"primaryUpdateStrategy":"unsupervised","instances":1}}' > /dev/null
+  wait_phase "Cluster in healthy state" 300 || exit 1
+  log "fault 3 ok (waiting-for-user found, triage starts there)"
+
+  log "fault 4: an image that cannot be pulled"
+  image=$(kubectl -n payments get cluster orders -o jsonpath='{.status.image}')
+  # The webhook reads the tag as a PostgreSQL version and refuses a
+  # downgrade, so the unpullable tag keeps the running version's number.
+  missing=$(echo "$image" | sed 's/:\([0-9][0-9.]*\).*$/:\1-e2e-missing/')
+  kubectl -n payments patch cluster orders --type merge -p "{\"spec\":{\"imageName\":\"$missing\"}}" > /dev/null
+  wait_path_contains "/diagnostics" "cannot pull its image" 300 fault-image.html || {
+    log "the console never reported the unpullable image"; exit 1; }
+  grep -qF "Kubernetes-reported" "$OUT/fault-image.html" || { log "image finding misses its origin"; exit 1; }
+  kubectl -n payments patch cluster orders --type merge -p "{\"spec\":{\"imageName\":\"$image\"}}" > /dev/null
+  # The operator waits on the pod it is restarting and a pod that never
+  # pulled its image never finishes; deleting it is what the upstream
+  # guide says to do, and the operator recreates it on the restored image.
+  kubectl -n payments delete pod orders-1 --wait=false > /dev/null
+  wait_phase "Cluster in healthy state" 300 || exit 1
+  log "fault 4 ok (image pull found, reverted)"
+fi
 # The quota is removed before the demonstrations below, so the staleness
 # and RBAC sections are read against the cluster they were written for.
 log "baseline ok (verdict, conditions, pods, backups, link-out all render)"
