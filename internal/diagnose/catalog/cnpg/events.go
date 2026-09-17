@@ -170,12 +170,13 @@ func eventRules() []diagnose.Rule {
 			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
-			Describes: "a backup waiting because its target instance is not ready",
+			Describes: "a backup waiting because its target instance is not ready or not found",
 			Summary:   "A backup is waiting for its target instance to become ready.",
 			Detail: "The operator keeps the backup pending while the instance it would " +
-				"run on is not ready, and retries. A target that never becomes " +
-				"ready is the finding; the pod-level checks say why it is not.",
-			When:      diagnose.EventMatch{Reasons: []string{"BackupPending"}, Kinds: []string{"Backup"}},
+				"run on is not ready or does not exist yet, and retries. A target " +
+				"that never becomes ready is the finding; the pod-level checks say " +
+				"why it is not.",
+			When:      diagnose.EventMatch{Reasons: []string{"BackupPending", "FindingPod"}, Kinds: []string{"Backup"}},
 			Link:      "/backups",
 			LinkLabel: "Backups",
 		},
@@ -280,6 +281,22 @@ func eventRules() []diagnose.Rule {
 			Describes: "a Pooler whose image the operator cannot resolve from its catalog",
 			Summary:   "The operator cannot resolve a Pooler's image from the catalog it names.",
 			When:      diagnose.EventMatch{Reasons: []string{"ImageCatalogError"}, Kinds: []string{"Pooler"}},
+			Link:      "/poolers",
+			LinkLabel: "Poolers",
+		},
+		{
+			ID:        "cnpg-pooler-ownership-invalid",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a Pooler whose managed resources the operator found owned by something else",
+			Summary:   "A Pooler's managed resources are owned by something other than the Pooler, and the operator will not touch them.",
+			Detail: "The operator creates a Deployment, a Service and a ServiceAccount " +
+				"for each Pooler and refuses to manage ones it did not create. A " +
+				"pre-existing object of the same name — from a previous Pooler, or " +
+				"made by hand — leaves the pooler unreconciled until it is removed.",
+			When:      diagnose.EventMatch{Reasons: []string{"InvalidOwnership"}, Kinds: []string{"Pooler"}},
 			Link:      "/poolers",
 			LinkLabel: "Poolers",
 		},

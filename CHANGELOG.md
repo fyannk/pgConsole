@@ -97,9 +97,38 @@ period. Pin an exact image tag and read the notes before upgrading.
   a step naming a check the catalog does not declare. A step the
   console cannot observe hands the reader the guide's own command.
 
+- **Every upstream signal is decided.** `make verify-pins` now runs
+  the inverse of the pin check as well: every phase, condition reason,
+  backup and pooler phase, and Warning event reason the verified
+  CloudNativePG releases can write must be listened for by a rule or
+  declined by name with a reason. Twenty signals are declined, each
+  with its reason on the new checks reference; a release that adds one
+  the catalog has never heard of fails the build.
+
+- **A generated checks reference.** `web/docs/reference/checks.md` is
+  generated from the catalog by `make catalog-docs` — every check by
+  layer with its severity, what it looks for, its pin and its
+  relations; the declined signals; every playbook step with the checks
+  behind it — and a test keeps the file equal to the code.
+
+- **Five faults in the operator journey.** The end-to-end test injects
+  a suspended backup schedule, a declared Database whose owner does
+  not exist, hibernation, a supervised strategy parking a restart on a
+  person, and an image that cannot be pulled, and asserts each on the
+  diagnostics screen, the layer it lands on and the triage step the
+  reader would be told to start at, reversing each before the next.
+
+- **The operator version outlives the pods.** The version-pinned
+  checks read the operator's version from the instance pods' bootstrap
+  init container, so a hibernated cluster — no pod at all — left every
+  one of them unable to run, including the one that says it is
+  hibernated. The pod store now retains the last image an instance pod
+  carried, and the version of last resort is read from it, labelled
+  as retained rather than observed now.
+
 ### Changed
 
-- **The catalog grew from 86 to 127 rules, 133 checks with the six
+- **The catalog grew from 86 to 129 rules, 135 checks with the six
   hand-written detectors.** The additions are related where the
   evidence supports it: a stuck bootstrap nests under the bootstrap log
   line that explains it, a failed backup phase under the Backup's own

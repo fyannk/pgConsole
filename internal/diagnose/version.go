@@ -18,6 +18,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/observe"
 )
 
 // Component names one versioned part of the stack a catalog rule can pin
@@ -142,6 +145,22 @@ func versionFacts(in Input) VersionFacts {
 		}
 	}
 
+	// No pod and no job — a hibernated cluster, or one whose instances
+	// are all gone — leaves the last image an instance pod carried. It
+	// is retained by the pod store and labelled as such: the version is
+	// what it was, not what a pod says now.
+	if _, known := facts[ComponentCNPG]; !known && in.HasPods && in.Pods.LastOperatorImage != "" {
+		if version, ok := imageTagVersion(in.Pods.LastOperatorImage); ok {
+			facts[ComponentCNPG] = ComponentVersion{
+				Version: version,
+				Origin:  "console-retained from a Kubernetes-observed image",
+				Object:  fmt.Sprintf("Pod/%s init container %s", in.Pods.LastOperatorImagePod, bootstrapControllerContainer),
+				Detail: fmt.Sprintf("operator bootstrap image %q, last seen %s; no instance pod carries it now",
+					in.Pods.LastOperatorImage, in.Pods.LastOperatorImageSeenAt.UTC().Format(time.RFC3339)),
+			}
+		}
+	}
+
 	return facts
 }
 
@@ -151,7 +170,7 @@ const barmanSidecarContainer = "plugin-barman-cloud"
 
 // bootstrapControllerContainer is the init container the operator adds
 // to every instance pod, running the operator's own image.
-const bootstrapControllerContainer = "bootstrap-controller"
+const bootstrapControllerContainer = observe.BootstrapControllerContainer
 
 // memberContainerVersion finds the named container on any instance pod
 // and parses its image tag. The first pod carrying one wins: the

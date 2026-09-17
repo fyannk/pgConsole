@@ -12,7 +12,7 @@ DIST_DIR ?= dist
 ARTIFACT_DIR ?= artifacts
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build clean dev-up test test-race test-fuzz test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln audit check docs package docker-build supply-chain supply-chain-published release-check
+.PHONY: build clean dev-up catalog-docs test test-race test-fuzz test-integration test-scale test-container test-multiarch test-e2e test-ui lint golangci-lint vuln audit check docs package docker-build supply-chain supply-chain-published release-check
 
 build:
 	mkdir -p bin
@@ -91,9 +91,17 @@ audit:
 # The catalog's version pins are claims about specific operator releases.
 # This fetches each verified release's source through the Go module proxy
 # and greps every pinned rule's strings in it, so a reworded upstream
-# message fails here instead of silently never matching.
+# message fails here instead of silently never matching. The inverse
+# runs beside it: every phase, condition reason, backup or pooler phase
+# and Warning event reason those trees can write must be listened for
+# by a rule or declined by name in the catalog's Undiagnosed list.
 verify-pins:
-	$(GO) test -tags catalogpins -count=1 -run TestPinnedStringsExistInVerifiedReleases ./internal/diagnose/catalog/
+	$(GO) test -tags catalogpins -count=1 -run 'TestPinnedStringsExistInVerifiedReleases|TestEveryUpstreamSignalIsDecided' ./internal/diagnose/catalog/
+
+# The check reference on the documentation site is generated from the
+# catalog's declarations; a test keeps the file equal to them.
+catalog-docs:
+	UPDATE_CATALOG_DOCS=1 $(GO) test -count=1 -run TestCheckReferenceIsCurrent ./internal/diagnose/catalog/
 
 check: lint test test-fuzz test-race vuln audit verify-pins
 

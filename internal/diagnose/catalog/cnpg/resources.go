@@ -170,5 +170,20 @@ func resourceRules() []diagnose.Rule {
 			Link:      "/poolers",
 			LinkLabel: "Poolers",
 		},
+		{
+			// A note, like hibernation: a paused pooler is deliberate, and a
+			// reader asking why the pooler answers nothing is told so.
+			ID:        "cnpg-pooler-paused",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
+			Requires:  pin(only130),
+			Severity:  diagnose.SeverityNote,
+			Describes: "a Pooler the operator reports as paused",
+			Summary:   "A Pooler is paused on purpose: it runs no instances and answers no client.",
+			When:      diagnose.PoolerPhase{AnyOf: []string{"paused"}},
+			Pinned:    []string{"PoolerPhasePaused"},
+			Link:      "/poolers",
+			LinkLabel: "Poolers",
+		},
 	}
 }

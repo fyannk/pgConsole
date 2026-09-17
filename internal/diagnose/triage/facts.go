@@ -120,12 +120,13 @@ func (NoWriteService) Answer(in diagnose.Input) (bool, []diagnose.Evidence, stri
 		return false, nil, "the cluster's Services are stale"
 	}
 	for _, service := range in.Infrastructure.Services {
-		if service.Role == "rw" {
+		// The adapter names the role from the operator's -rw suffix.
+		if service.Role == "read-write" {
 			return false, nil, ""
 		}
 	}
 	return true, []diagnose.Evidence{{Origin: "Kubernetes-observed", Object: "Services",
-		Detail: fmt.Sprintf("%d services observed, none with the rw role", len(in.Infrastructure.Services))}}, ""
+		Detail: fmt.Sprintf("%d services observed, none the read-write one", len(in.Infrastructure.Services))}}, ""
 }
 
 // NoBackupSchedule is the cluster having no ScheduledBackup at all.
