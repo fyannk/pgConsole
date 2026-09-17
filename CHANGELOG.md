@@ -128,6 +128,13 @@ period. Pin an exact image tag and read the notes before upgrading.
 
 ### Changed
 
+- **CloudNativePG 1.29 and 1.30 are the supported minors.** The
+  catalog's pins are verified against 1.29.2 and 1.30.0 and apply to
+  the 1.29 and 1.30 series only; 1.28.4 is dropped from the verified
+  list. On a 1.28 operator every CloudNativePG rule now answers "does
+  not apply", as it always has on any release outside the verified
+  span.
+
 - **The catalog grew from 86 to 129 rules, 135 checks with the six
   hand-written detectors.** The additions are related where the
   evidence supports it: a stuck bootstrap nests under the bootstrap log

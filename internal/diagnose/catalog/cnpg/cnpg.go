@@ -18,9 +18,10 @@
 //
 // Every string here was read out of the operator's own source, and
 // every rule is pinned to the span of releases that reading was
-// actually performed against — currently 1.28.4, 1.29.2 and 1.30.0.
-// The pin is the claim's scope: a rule pinned since128 was verified
-// verbatim in all three trees; only130 marks machinery (the primary
+// actually performed against — currently 1.29.2 and 1.30.0, the two
+// minors this console supports. The pin is the claim's scope: a rule
+// pinned supported was verified verbatim in both trees; only130 marks
+// machinery (the primary
 // lease, the invalid-definition phase) that does not exist before 1.30.
 // Verifying another release means checking the strings in its tree and
 // widening the spans, not trusting that nothing moved.
@@ -54,7 +55,7 @@ func Rules() []diagnose.Rule {
 // (make verify-pins) fetches each tree and greps every pinned rule's
 // strings in it; widening a span means adding the release here and
 // letting that check pass, not trusting that nothing moved.
-var VerifiedReleases = []string{"1.28.4", "1.29.2", "1.30.0"}
+var VerifiedReleases = []string{"1.29.2", "1.30.0"}
 
 // VerifiedReviewBy is the date by which this list stops being safe to
 // leave alone. Pin verification proves the strings still say what the
@@ -69,10 +70,10 @@ const VerifiedReviewBy = "2026-11-30"
 // The verified spans. A span is widened only by verifying the strings
 // in another release's tree.
 const (
-	// since128: verified verbatim in 1.28.4, 1.29.2 and 1.30.0.
-	since128 = ">=1.28 <1.31"
-	// since129: absent from 1.28.4, verified in 1.29.2 and 1.30.0.
-	since129 = ">=1.29 <1.31"
+	// supported: verified verbatim in 1.29.2 and 1.30.0, the two minors
+	// this console supports. The upper bound is the next minor, which
+	// widens when its tree is verified.
+	supported = ">=1.29 <1.31"
 	// only130: machinery that first appears in 1.30.0.
 	only130 = ">=1.30 <1.31"
 )
