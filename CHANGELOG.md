@@ -85,9 +85,75 @@ period. Pin an exact image tag and read the notes before upgrading.
   them in the order they were made, with the cluster's own clocks
   beside them; a state with no instant is never given one.
 
+- **Triage: start from the symptom.** A new screen (`/triage`, same
+  flag and level as diagnostics) reads the same run in the other
+  direction. Seven playbooks — clients cannot connect, writes refused,
+  backups not happening, the cluster will not come up, a replica
+  behind, an operation stuck, the operator silent — each walk an
+  ordered list of questions in the order the upstream troubleshooting
+  guide asks them, every question answered by the checks that already
+  ran and the first found one marked as where to start. A playbook adds
+  no check; it is a reading order written as data, and the tests refuse
+  a step naming a check the catalog does not declare. A step the
+  console cannot observe hands the reader the guide's own command.
+
+- **Every upstream signal is decided.** `make verify-pins` now runs
+  the inverse of the pin check as well: every phase, condition reason,
+  backup and pooler phase, and Warning event reason the verified
+  CloudNativePG releases can write must be listened for by a rule or
+  declined by name with a reason. Twenty signals are declined, each
+  with its reason on the new checks reference; a release that adds one
+  the catalog has never heard of fails the build.
+
+- **A generated checks reference.** `web/docs/reference/checks.md` is
+  generated from the catalog by `make catalog-docs` — every check by
+  layer with its severity, what it looks for, its pin and its
+  relations; the declined signals; every playbook step with the checks
+  behind it — and a test keeps the file equal to the code.
+
+- **The instance managers' own status reports.** A new sweep reads
+  `/pg/status` from every instance pod's status port — the report the
+  operator reads before deciding and `kubectl cnpg status` prints — on
+  by default like the metrics sweep (`INSTANCE_STATUS_ENABLED`,
+  `INSTANCE_STATUS_INTERVAL`). The pods screen shows each instance's
+  report, attributed as the instance's own claim, and seven rules read
+  it: a configuration change waiting for a restart, a replica with
+  replay paused, an instance manager doubting its own PostgreSQL is
+  reachable, pg_stat_archiver's last failure newer than its last
+  success, WAL segments waiting by the instance's own count, an
+  inactive replication slot the operator does not manage, and
+  instance-manager version drift across the instances. Reports are
+  judged per instance against the sweep cadence, as scraped metrics
+  are. The status port serves TLS from 1.30 with the cluster's own
+  certificate; it is checked for naming this cluster's read-write
+  Service, and verified against the cluster CA when the deployer
+  mounts it and names it in `INSTANCE_STATUS_CA_FILE`.
+
+- **Five faults in the operator journey.** The end-to-end test injects
+  a suspended backup schedule, a declared Database whose owner does
+  not exist, hibernation, a supervised strategy parking a restart on a
+  person, and an image that cannot be pulled, and asserts each on the
+  diagnostics screen, the layer it lands on and the triage step the
+  reader would be told to start at, reversing each before the next.
+
+- **The operator version outlives the pods.** The version-pinned
+  checks read the operator's version from the instance pods' bootstrap
+  init container, so a hibernated cluster — no pod at all — left every
+  one of them unable to run, including the one that says it is
+  hibernated. The pod store now retains the last image an instance pod
+  carried, and the version of last resort is read from it, labelled
+  as retained rather than observed now.
+
 ### Changed
 
-- **The catalog grew from 86 to 127 rules, 133 checks with the six
+- **CloudNativePG 1.29 and 1.30 are the supported minors.** The
+  catalog's pins are verified against 1.29.2 and 1.30.0 and apply to
+  the 1.29 and 1.30 series only; 1.28.4 is dropped from the verified
+  list. On a 1.28 operator every CloudNativePG rule now answers "does
+  not apply", as it always has on any release outside the verified
+  span.
+
+- **The catalog grew from 86 to 136 rules, 142 checks with the six
   hand-written detectors.** The additions are related where the
   evidence supports it: a stuck bootstrap nests under the bootstrap log
   line that explains it, a failed backup phase under the Backup's own

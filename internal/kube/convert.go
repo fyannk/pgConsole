@@ -131,21 +131,40 @@ const (
 	maxRoleErrors   = 4
 )
 
-// boundNames copies at most maxStatusNames of the operator's names,
-// sorted so two publications of the same state compare equal.
+// boundNames copies the operator's names sorted, then keeps the first
+// maxStatusNames of them. Sorting before cutting is what makes the
+// bounded set a function of the state rather than of the order the
+// operator happened to write it in: the same status yields the same
+// names, so the store's held clocks are not reset by a reordering.
 func boundNames(names []string) []string {
 	if len(names) == 0 {
 		return nil
 	}
-	out := make([]string, 0, min(len(names), maxStatusNames))
-	for i, name := range names {
-		if i == maxStatusNames {
-			break
-		}
-		out = append(out, boundOperatorMessage(name))
+	sorted := make([]string, 0, len(names))
+	for _, name := range names {
+		sorted = append(sorted, boundOperatorMessage(name))
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(sorted)
+	if len(sorted) > maxStatusNames {
+		sorted = sorted[:maxStatusNames]
+	}
+	return sorted
+}
+
+// sortedKeys is a map's keys sorted, cut at maxStatusNames, for the
+// same reason boundNames sorts before cutting: map iteration is
+// randomised, and a bounded selection taken in iteration order would
+// make the same status yield different facts on successive reads.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > maxStatusNames {
+		keys = keys[:maxStatusNames]
+	}
+	return keys
 }
 
 // operatorInstant parses one of the RFC3339 timestamps the operator
@@ -184,25 +203,20 @@ func convertClusterStatusLists(cluster *apiv1.Cluster, facts *observe.ClusterFac
 	facts.PrimaryFailingSince = operatorInstant(status.CurrentPrimaryFailingSinceTimestamp)
 	facts.ReplicaSwitchInProgress = status.SwitchReplicaClusterStatus.InProgress
 
-	for secret, raw := range status.Certificates.Expirations {
-		if len(facts.CertificateExpirations) == maxStatusNames {
-			break
-		}
-		if at := operatorInstant(raw); at != nil {
+	for _, secret := range sortedKeys(status.Certificates.Expirations) {
+		if at := operatorInstant(status.Certificates.Expirations[secret]); at != nil {
 			facts.CertificateExpirations = append(facts.CertificateExpirations,
 				observe.CertificateExpiry{Secret: boundOperatorMessage(secret), ExpiresAt: *at})
 		}
 	}
-	sort.Slice(facts.CertificateExpirations, func(a, b int) bool {
-		return facts.CertificateExpirations[a].Secret < facts.CertificateExpirations[b].Secret
-	})
 
-	for role, errs := range status.ManagedRolesStatus.CannotReconcile {
-		if len(facts.UnreconcilableRoles) == maxRoleProblems {
-			break
-		}
+	roles := sortedKeys(status.ManagedRolesStatus.CannotReconcile)
+	if len(roles) > maxRoleProblems {
+		roles = roles[:maxRoleProblems]
+	}
+	for _, role := range roles {
 		problem := observe.RoleProblem{Role: boundOperatorMessage(role)}
-		for i, msg := range errs {
+		for i, msg := range status.ManagedRolesStatus.CannotReconcile[role] {
 			if i == maxRoleErrors {
 				break
 			}
@@ -210,14 +224,8 @@ func convertClusterStatusLists(cluster *apiv1.Cluster, facts *observe.ClusterFac
 		}
 		facts.UnreconcilableRoles = append(facts.UnreconcilableRoles, problem)
 	}
-	sort.Slice(facts.UnreconcilableRoles, func(a, b int) bool {
-		return facts.UnreconcilableRoles[a].Role < facts.UnreconcilableRoles[b].Role
-	})
 
-	for i, ts := range status.TablespacesStatus {
-		if i == maxStatusNames {
-			break
-		}
+	for _, ts := range status.TablespacesStatus {
 		facts.Tablespaces = append(facts.Tablespaces, observe.TablespaceFacts{
 			Name:  boundOperatorMessage(ts.Name),
 			State: string(ts.State),
@@ -227,18 +235,19 @@ func convertClusterStatusLists(cluster *apiv1.Cluster, facts *observe.ClusterFac
 	sort.Slice(facts.Tablespaces, func(a, b int) bool {
 		return facts.Tablespaces[a].Name < facts.Tablespaces[b].Name
 	})
+	if len(facts.Tablespaces) > maxStatusNames {
+		facts.Tablespaces = facts.Tablespaces[:maxStatusNames]
+	}
 
-	for instance, reported := range status.InstancesReportedState {
-		if len(facts.InstanceTimelines) == maxStatusNames {
-			break
-		}
+	reported := make(map[string]apiv1.InstanceReportedState, len(status.InstancesReportedState))
+	for instance, state := range status.InstancesReportedState {
+		reported[string(instance)] = state
+	}
+	for _, instance := range sortedKeys(reported) {
 		facts.InstanceTimelines = append(facts.InstanceTimelines, observe.InstanceTimeline{
-			Instance:   boundOperatorMessage(string(instance)),
-			TimelineID: reported.TimeLineID,
-			IsPrimary:  reported.IsPrimary,
+			Instance:   boundOperatorMessage(instance),
+			TimelineID: reported[instance].TimeLineID,
+			IsPrimary:  reported[instance].IsPrimary,
 		})
 	}
-	sort.Slice(facts.InstanceTimelines, func(a, b int) bool {
-		return facts.InstanceTimelines[a].Instance < facts.InstanceTimelines[b].Instance
-	})
 }

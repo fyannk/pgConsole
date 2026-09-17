@@ -93,9 +93,9 @@ func TestEveryRuleIsPinned(t *testing.T) {
 }
 
 // TestSpansApplyPerRelease pins the applicability boundaries the
-// verification established: the since128 span covers all three verified
-// releases, since129 excludes 1.28, and only130 excludes both older
-// ones. One representative rule per span.
+// verification established: the supported span covers both verified
+// releases and nothing outside them, and only130 excludes 1.29. One
+// representative rule per span.
 func TestSpansApplyPerRelease(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -103,11 +103,10 @@ func TestSpansApplyPerRelease(t *testing.T) {
 		version string
 		want    diagnose.CheckOutcome
 	}{
-		{"cnpg-unrecoverable", "1.28.4", diagnose.CheckClear},
 		{"cnpg-unrecoverable", "1.29.2", diagnose.CheckClear},
 		{"cnpg-unrecoverable", "1.30.0", diagnose.CheckClear},
+		{"cnpg-unrecoverable", "1.28.4", diagnose.CheckNotApplicable},
 		{"cnpg-service-account-missing", "1.28.4", diagnose.CheckNotApplicable},
-		{"cnpg-invalid-definition", "1.28.4", diagnose.CheckNotApplicable},
 		{"cnpg-invalid-definition", "1.29.2", diagnose.CheckNotApplicable},
 		{"cnpg-lease-preempted", "1.29.2", diagnose.CheckNotApplicable},
 		{"cnpg-unrecoverable", "1.27.5", diagnose.CheckNotApplicable},
@@ -134,7 +133,7 @@ func TestSpansApplyPerRelease(t *testing.T) {
 // both the operator's condition and the version fact the pin rests on.
 func TestArchivingFailureFiresAcrossVerifiedReleases(t *testing.T) {
 	t.Parallel()
-	for _, version := range []string{"1.28.4", "1.29.2", "1.30.0"} {
+	for _, version := range []string{"1.29.2", "1.30.0"} {
 		in := inputOn(version)
 		in.Cluster.Cluster.Conditions = []observe.Condition{{
 			Type: "ContinuousArchiving", Status: "False", Reason: "ContinuousArchivingFailing",
@@ -156,7 +155,7 @@ func TestArchivingFailureFiresAcrossVerifiedReleases(t *testing.T) {
 // cause is written.
 func TestStuckPhaseProducesTheFinding(t *testing.T) {
 	t.Parallel()
-	in := inputOn("1.28.4")
+	in := inputOn("1.29.2")
 	in.Cluster.Cluster.Phase = "Cluster is unrecoverable and needs manual intervention"
 	in.Cluster.Cluster.PhaseReason = "Instance creation failed for the following jobs: orders-2-join"
 

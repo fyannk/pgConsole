@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/fyannk/pgConsole/internal/observe"
+	"time"
 )
 
 // TestSatisfiesPinsTheConstraintGrammar covers each operator, the
@@ -187,5 +188,34 @@ func TestCNPGVersionFallsBackToTheBootstrapJob(t *testing.T) {
 	if cnpg := versionFacts(in)[ComponentCNPG]; cnpg.Version != "1.30.1" ||
 		!strings.Contains(cnpg.Object, "Pod/") {
 		t.Errorf("instance pod did not take precedence: %+v", cnpg)
+	}
+}
+
+// TestCNPGVersionOutlivesThePods proves the version of last resort: with
+// no pod and no bootstrap Job — a hibernated cluster — the image the
+// pod store retained from the last instance pod still names the
+// operator version, labelled as retained rather than observed now.
+func TestCNPGVersionOutlivesThePods(t *testing.T) {
+	t.Parallel()
+	seen := now.Add(-time.Hour)
+	in := Input{Now: now, HasPods: true, Pods: observe.PodsSnapshot{
+		LastOperatorImage: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0", LastOperatorImagePod: "orders-1",
+		LastOperatorImageSeenAt: seen, LastOperatorImageOwner: "uid-orders"},
+		HasCluster: true, Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{Present: true, UID: "uid-orders"}}}
+	cnpg, ok := versionFacts(in)[ComponentCNPG]
+	if !ok || cnpg.Version != "1.30.0" {
+		t.Fatalf("CloudNativePG version = %+v, want 1.30.0 retained from the last pod", cnpg)
+	}
+	if !strings.Contains(cnpg.Origin, "retained") || !strings.Contains(cnpg.Detail, "no instance pod carries it now") {
+		t.Errorf("provenance does not say the image is retained: %+v", cnpg)
+	}
+	in.Cluster.Cluster.UID = "uid-recreated"
+	if _, ok := versionFacts(in)[ComponentCNPG]; ok {
+		t.Error("a recreated Cluster inherited the previous one's retained image")
+	}
+	in.Cluster.Cluster.UID = "uid-orders"
+	in.Pods.LastOperatorImage = ""
+	if _, ok := versionFacts(in)[ComponentCNPG]; ok {
+		t.Error("a version was invented with nothing to read it from")
 	}
 }

@@ -57,6 +57,9 @@ type PodFacts struct {
 	Started *time.Time
 	// Image is the PostgreSQL container image.
 	Image string
+	// OwnerUID is the UID of the Cluster that controls this pod, from
+	// its owner reference; empty when the pod carries none.
+	OwnerUID string
 	// Deleting reports a set deletion timestamp.
 	Deleting bool
 	// Containers is every container the pod declares, init containers
@@ -157,7 +160,24 @@ type PodsSnapshot struct {
 	Truncated bool
 	// Pods is sorted by name and bounded by MaxPods.
 	Pods []PodFacts
+	// LastOperatorImage is the operator's own image as last seen on an
+	// instance pod's bootstrap-controller init container, with the pod
+	// and the observation it was seen in. It survives the pods' absence
+	// on purpose: a hibernated or wholly failed cluster has no pod to
+	// read the operator version from, and that is precisely when the
+	// version-pinned checks matter. Empty until a pod has carried it.
+	LastOperatorImage       string
+	LastOperatorImagePod    string
+	LastOperatorImageSeenAt time.Time
+	// LastOperatorImageOwner is the UID of the Cluster that owned the
+	// pod the image was seen on, so a recreated Cluster of the same
+	// name never inherits it.
+	LastOperatorImageOwner string
 }
+
+// BootstrapControllerContainer is the init container the operator
+// injects into every instance pod, running the operator's own image.
+const BootstrapControllerContainer = "bootstrap-controller"
 
 // PodStore holds the current pods snapshot for concurrent readers.
 type PodStore struct {
@@ -185,12 +205,25 @@ func (s *PodStore) publish(pods []PodFacts, observedAt time.Time) {
 	sorted, truncated := bounded(pods, lessPodName, MaxPods)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.snap = PodsSnapshot{
-		Generation: s.snap.Generation + 1,
-		ObservedAt: observedAt,
-		Truncated:  truncated,
-		Pods:       sorted,
+	next := PodsSnapshot{
+		Generation:              s.snap.Generation + 1,
+		ObservedAt:              observedAt,
+		Truncated:               truncated,
+		Pods:                    sorted,
+		LastOperatorImage:       s.snap.LastOperatorImage,
+		LastOperatorImagePod:    s.snap.LastOperatorImagePod,
+		LastOperatorImageSeenAt: s.snap.LastOperatorImageSeenAt,
+		LastOperatorImageOwner:  s.snap.LastOperatorImageOwner,
 	}
+	for _, pod := range sorted {
+		for _, container := range pod.Containers {
+			if container.Init && container.Name == BootstrapControllerContainer && container.Image != "" {
+				next.LastOperatorImage, next.LastOperatorImagePod = container.Image, pod.Name
+				next.LastOperatorImageSeenAt, next.LastOperatorImageOwner = observedAt, pod.OwnerUID
+			}
+		}
+	}
+	s.snap = next
 	s.has = true
 }
 

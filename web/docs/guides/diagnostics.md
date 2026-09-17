@@ -135,6 +135,50 @@ stops being re-read: its stream replays the whole log from the beginning
 on every reconnect, which would keep a finding's last-seen instant fresh
 forever and let a line from hours ago read as current.
 
+## Triage: starting from the symptom
+
+The diagnostics screen is signal-driven: it lists what matched. An
+operator whose cluster refuses connections still has to find, among
+the findings, the one that explains it — or notice that none does. The
+**triage** screen (`/triage`, same flag and same level) reads the same
+run in the other direction. It carries one **playbook** per symptom an
+operator arrives with:
+
+| Playbook | Symptom |
+|---|---|
+| `cannot-connect` | Clients cannot connect |
+| `writes-refused` | Writes are refused or hang |
+| `backups-not-happening` | Backups are not happening |
+| `will-not-come-up` | The cluster will not come up |
+| `replica-behind` | A replica is behind or not replicating |
+| `operation-stuck` | A switchover, failover or upgrade is stuck |
+| `operator-silent` | The operator seems to be doing nothing |
+
+A playbook is an ordered list of questions, in the order the upstream
+troubleshooting guide asks them: the platform first, then the
+operator, then the database, then the paths out of it. Each question
+is answered by the checks that already ran, named on the step — never
+by a check of its own. A playbook adds no observation and no
+judgement; it is a reading order over the catalog, written as data,
+and the tests refuse a step that names a check the catalog does not
+declare, and a playbook with no golden scenario landing on the step it
+was built for.
+
+Every step is answered, and the first found one is where to start:
+
+| Step outcome | Meaning |
+|---|---|
+| found | A check behind the step matched; its findings are linked to their cards on the diagnostics screen. A few steps also ask a **fact** the catalog has no rule for — no primary named, no ready pod, no read-write Service, no schedule — answered from the snapshots directly, with the evidence quoted. |
+| ruled out | Every check behind the step ran and found nothing — which rules out exactly what those checks describe. |
+| could not be judged | A check behind the step could not run, and none matched. The step rules nothing out, and says which check and why. |
+| needs a switched-off source, does not apply | Every check behind the step was switched off, or pinned to other versions. |
+| not observable here | Nothing the console observes answers the step. It hands the reader the guide's own command instead — the operator's own pod, a NetworkPolicy. |
+
+The honesty rules of the catalog carry through unchanged: a step is
+never ruled out on a check that could not run, and a playbook that
+found nothing says how many of its steps could not be judged rather
+than reading as reassurance.
+
 ## The count in the sidebar
 
 The console runs the catalog on every page render and carries the result
@@ -307,10 +351,11 @@ releases, so catalog rules carry version pins, and the pins state what
 was actually verified. The current spans:
 
 - **CloudNativePG** rules are pinned to the releases whose source the
-  rule strings were read from verbatim: **1.28.4, 1.29.2 and 1.30.0**.
-  Most rules span all three; machinery that first appears in 1.30 (the
-  primary lease, the invalid-definition phase) is pinned 1.30-only. On
-  an unverified release the rules answer "does not apply".
+  rule strings were read from verbatim: **1.29.2 and 1.30.0**, the two
+  minors this console supports. Most rules span both; machinery that
+  first appears in 1.30 (the primary lease, the invalid-definition
+  phase, the pooler phases) is pinned 1.30-only. On any other release,
+  older or newer, the rules answer "does not apply".
 - **PostgreSQL** and **Kubernetes** each carry an end-of-life rule
   whose pin *is* the diagnostic, plus threshold rules (transaction-id
   wraparound) built on console-pinned knowledge that is stated as such.
@@ -319,7 +364,7 @@ The versions themselves are **observed, never configured**:
 
 | Component | Source |
 |---|---|
-| CloudNativePG | The `bootstrap-controller` init container the operator injects into every instance pod runs the operator's own image; its tag is parsed. |
+| CloudNativePG | The `bootstrap-controller` init container the operator injects into every instance pod runs the operator's own image; its tag is parsed. With no pod, the bootstrap Job's is read; with neither — a hibernated cluster, or one whose instances are all gone — the image the pod store retained from the last instance pod it saw is used, labelled as retained rather than observed now. A console started while the cluster has no pod has nothing to retain, and its pinned checks report that they could not run until a pod appears. |
 | PostgreSQL | The operator-reported major version in the `Cluster` status. |
 | Barman Cloud plugin | The plugin sidecar's image tag. |
 | Kubernetes | The API server's own `/version` endpoint, polled every five minutes — the console's only poll against the API server, a non-resource URL every authenticated principal may read. No Role change is involved. |
@@ -336,6 +381,17 @@ tests fail once that date passes, naming what to go and read. A console
 that kept telling operators a supported version is unsupported — or
 said nothing about one that no longer is — would be worse than a red
 build.
+
+The pins are verified in both directions. The **coverage** half runs
+first: every phase, condition reason, backup and pooler phase, and
+Warning event reason the verified releases' source can write must be
+either listened for by a rule or declined by name, with its reason, in
+the catalog's declined list (rendered on the
+[checks reference](../reference/checks.md)). A release that adds a
+signal the catalog has never heard of fails the build there, so
+ignoring one is a decision on record rather than an omission; a
+declined signal upstream no longer says, or that a rule has since
+started listening for, fails it too.
 
 The pins are **verified, not merely recorded**: `make verify-pins`
 (run in CI beside the other repository checks) fetches each verified
@@ -361,6 +417,7 @@ adding the release to the verified list and letting that check pass.
 | Container states | The pod collectors (always on). |
 | Log messages | `LOG_STREAM_ENABLED`, which defaults to on wherever it is read — diagnostics enabled and `ALLOW_LOGS=true` — and can be switched off explicitly. With following off, every log-backed check reports that it needs a source that is switched off. They are the largest group in the catalog and mostly critical — the checks that quote the server's own words rather than inferring a fault from a phase — so turning following off is a real reduction in what the screen can tell you. What it buys back: a line that matches a rule is retained verbatim as that finding's evidence, and a PostgreSQL error record can carry statement text with literal values. |
 | Metric flags and thresholds, including the WAL archive backlog, the archiver's failure rate, deadlocks, waiting backends and extension updates | Metrics scraping enabled. |
+| The instance managers' own status reports: pending restarts, paused replay, the manager's doubt about its own PostgreSQL, pg_stat_archiver's last failure, WAL segments waiting by the instance's count, inactive replication slots, instance-manager version drift | `INSTANCE_STATUS_ENABLED` (on by default). The report is read from each instance pod's status port on a sweep, and judged per instance against the sweep cadence exactly as a scraped metric is: a report older than three sweeps is refused, and an instance the sweep could not read is named. |
 | Pooler instance counts and pooler pod states | The pooler collectors (always on). |
 | Pooler queue depth | Metrics scraping enabled; the PgBouncer exporter's window. |
 | Failover quorum | The failover-quorum collector (always on). Absence of the resource is a clear result: the cluster runs no quorum. |

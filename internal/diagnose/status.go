@@ -621,13 +621,11 @@ func (PrimaryLeaseHolderMismatch) evaluate(_ string, in Input) ([]conditionMatch
 	}}, ""
 }
 
-// leaseName is the Lease's name for the evidence: the operator names
-// it after the cluster, and the console watches one cluster, so the
-// cluster's own name is the honest label even when the status does not
-// repeat it.
+// leaseName is the observed Lease's own name for the evidence, with a
+// plain fallback for a fixture that carries none.
 func leaseName(in Input) string {
-	if in.Cluster.Cluster.CurrentPrimary == "" {
-		return "primary"
+	if name := in.PrimaryLease.Lease.Name; name != "" {
+		return name
 	}
-	return "primary (named after the Cluster)"
+	return "primary"
 }

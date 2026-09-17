@@ -117,6 +117,17 @@ const (
 	EnvMetricsInterval = "METRICS_INTERVAL"
 	// EnvMetricsRetention is how long the rollup tier is kept.
 	EnvMetricsRetention = "METRICS_RETENTION"
+	// EnvInstanceStatusEnabled reads each instance manager's own status
+	// report from the instance pods' status port on a sweep, the way the
+	// metrics exporter is read.
+	EnvInstanceStatusEnabled = "INSTANCE_STATUS_ENABLED"
+	// EnvInstanceStatusInterval is the sweep cadence.
+	EnvInstanceStatusInterval = "INSTANCE_STATUS_INTERVAL"
+	// EnvInstanceStatusCAFile is the PEM file holding the cluster CA the
+	// status port's certificate is verified against — the CA Secret's
+	// ca.crt, mounted by the deployer. Empty means the certificate is
+	// checked for naming this cluster's Services only.
+	EnvInstanceStatusCAFile = "INSTANCE_STATUS_CA_FILE"
 	// EnvMetricsPath is the snapshot file the metrics window is
 	// periodically written to so it survives restarts. Empty keeps the
 	// window in memory only — the default, which preserves the
@@ -257,6 +268,11 @@ const (
 	DefaultHistoryCoalesceWindow = time.Minute
 	// DefaultMetricsInterval is applied when METRICS_INTERVAL is unset.
 	DefaultMetricsInterval = 10 * time.Second
+	// DefaultInstanceStatusInterval is applied when
+	// INSTANCE_STATUS_INTERVAL is unset. The report is recomputed by the
+	// instance manager on every request, so the sweep is deliberately
+	// slower than the metrics one.
+	DefaultInstanceStatusInterval = 15 * time.Second
 	// DefaultMetricsRetention is applied when METRICS_RETENTION is unset.
 	DefaultMetricsRetention = 7 * 24 * time.Hour
 )
@@ -335,6 +351,13 @@ type Config struct {
 	MetricsInterval time.Duration
 	// MetricsRetention is how long the rollup tier is kept.
 	MetricsRetention time.Duration
+	// InstanceStatusEnabled reads the instance managers' status reports.
+	InstanceStatusEnabled bool
+	// InstanceStatusInterval is that sweep's cadence.
+	InstanceStatusInterval time.Duration
+	// InstanceStatusCAFile is the cluster CA file the status port's
+	// certificate is verified against; empty verifies the name only.
+	InstanceStatusCAFile string
 	// MetricsPath is the snapshot file; empty keeps the window in
 	// memory only.
 	MetricsPath string
@@ -421,6 +444,8 @@ func Load(lookup Lookup) (Config, error) {
 		MetricsEnabled:            true,
 		MetricsInterval:           DefaultMetricsInterval,
 		MetricsRetention:          DefaultMetricsRetention,
+		InstanceStatusEnabled:     true,
+		InstanceStatusInterval:    DefaultInstanceStatusInterval,
 	}
 
 	cfg.ClusterName = requiredLabel(lookup, EnvClusterName, fail)
@@ -528,6 +553,18 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.MetricsEnabled = boolVar(lookup, EnvMetricsEnabled, true, fail)
 	cfg.MetricsInterval = durationVar(lookup, EnvMetricsInterval, DefaultMetricsInterval, MinMetricsInterval, MaxMetricsInterval, fail)
 	cfg.MetricsRetention = durationVar(lookup, EnvMetricsRetention, DefaultMetricsRetention, MinMetricsRetention, MaxMetricsRetention, fail)
+	cfg.InstanceStatusEnabled = boolVar(lookup, EnvInstanceStatusEnabled, true, fail)
+	cfg.InstanceStatusInterval = durationVar(lookup, EnvInstanceStatusInterval, DefaultInstanceStatusInterval, MinMetricsInterval, MaxMetricsInterval, fail)
+	if raw, ok := lookup(EnvInstanceStatusCAFile); ok && raw != "" {
+		switch {
+		case !strings.HasPrefix(raw, "/") || len(raw) < 2 || strings.ContainsAny(raw, "\x00\r\n"):
+			fail(EnvInstanceStatusCAFile, "must be an absolute file path")
+		case !cfg.InstanceStatusEnabled:
+			fail(EnvInstanceStatusCAFile, "requires "+EnvInstanceStatusEnabled+"=true")
+		default:
+			cfg.InstanceStatusCAFile = raw
+		}
+	}
 	if raw, ok := lookup(EnvMetricsPath); ok && raw != "" {
 		switch {
 		case !strings.HasPrefix(raw, "/") || len(raw) < 2 || strings.ContainsAny(raw, "\x00\r\n"):

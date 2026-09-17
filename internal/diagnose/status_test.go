@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
@@ -365,5 +366,104 @@ func TestPrimaryLeaseHolderMismatchIsTwoWritersDisagreeing(t *testing.T) {
 	}
 	if check, _ := evaluateOnce(t, PrimaryLeaseHolderMismatch{}, leaseInput(held, "orders-2", "orders-2")); check.Outcome != CheckClear {
 		t.Errorf("holder is the primary: %v, want clear", check.Outcome)
+	}
+}
+
+type staticStatus struct {
+	snap  instancestatus.Snapshot
+	swept bool
+}
+
+func (s staticStatus) CurrentInstanceStatus() (instancestatus.Snapshot, bool) { return s.snap, s.swept }
+
+func statusInput(readings ...instancestatus.Reading) Input {
+	snap := instancestatus.Snapshot{Interval: 10 * time.Second, SweptAt: now, Readings: map[string]instancestatus.Reading{}, Failing: map[string]string{}}
+	for _, r := range readings {
+		if r.ObservedAt.IsZero() {
+			r.ObservedAt = now
+		}
+		snap.Readings[r.Instance] = r
+	}
+	return Input{Now: now, InstanceStatus: staticStatus{snap: snap, swept: true}}
+}
+
+// TestInstanceStatusIsJudgedPerInstance proves the sweep's honesty
+// rules: a report older than three sweeps is refused rather than read,
+// an instance the sweep could not read withholds a clear, a match on a
+// fresh report stands whatever else went unread, and a switched-off or
+// unswept source says so.
+func TestInstanceStatusIsJudgedPerInstance(t *testing.T) {
+	t.Parallel()
+	fresh := instancestatus.Reading{Instance: "orders-1", IsPrimary: true, PendingRestart: true}
+	stale := instancestatus.Reading{Instance: "orders-2", ObservedAt: now.Add(-5 * time.Minute), PendingRestart: true}
+	in := statusInput(fresh, stale)
+	when := InstanceFlagSet{Flag: FlagPendingRestart}
+	check, findings := evaluateOnce(t, when, in)
+	if check.Outcome != CheckMatched || len(findings) != 1 || findings[0].Subject.Name != "orders-1" {
+		t.Fatalf("fresh match beside a stale report: %v %+v", check.Outcome, findings)
+	}
+	if findings[0].Evidence[0].Origin != statusOrigin || !strings.Contains(findings[0].Evidence[0].Detail, "pendingRestart true") {
+		t.Errorf("evidence = %+v", findings[0].Evidence)
+	}
+
+	only := statusInput(stale)
+	if check, _ := evaluateOnce(t, when, only); check.Outcome != CheckUnavailable || !strings.Contains(check.Because, "refused") {
+		t.Errorf("stale-only: %v %q, want could not run naming the refusal", check.Outcome, check.Because)
+	}
+	failing := statusInput(instancestatus.Reading{Instance: "orders-1"})
+	failing.InstanceStatus.(staticStatus).snap.Failing["orders-3"] = "unavailable"
+	if check, _ := evaluateOnce(t, when, failing); check.Outcome != CheckUnavailable || !strings.Contains(check.Because, "orders-3") {
+		t.Errorf("an unread instance did not withhold the clear: %v %q", check.Outcome, check.Because)
+	}
+	if check, _ := evaluateOnce(t, when, Input{Now: now}); check.Outcome != CheckUnavailable || !check.SourceOff {
+		t.Errorf("switched off: %v off=%v", check.Outcome, check.SourceOff)
+	}
+	unswept := Input{Now: now, InstanceStatus: staticStatus{}}
+	if check, _ := evaluateOnce(t, when, unswept); check.Outcome != CheckUnavailable || check.SourceOff || !strings.Contains(check.Because, "not been swept") {
+		t.Errorf("unswept: %v %q off=%v", check.Outcome, check.Because, check.SourceOff)
+	}
+	if check, _ := evaluateOnce(t, InstanceFlagSet{Flag: FlagPendingRestart, ReplicaOnly: true}, statusInput(fresh)); check.Outcome != CheckClear {
+		t.Errorf("a primary matched a replica-only flag: %v", check.Outcome)
+	}
+}
+
+// TestInstanceStatusConditionsReadTheReport covers the archiver
+// comparison, the WAL backlog, the unmanaged inactive slot, and the
+// manager-version drift.
+func TestInstanceStatusConditionsReadTheReport(t *testing.T) {
+	t.Parallel()
+	earlier, later := now.Add(-2*time.Hour), now.Add(-time.Hour)
+	primary := instancestatus.Reading{Instance: "orders-1", IsPrimary: true, IsArchivingWAL: true,
+		LastArchivedWAL: "0005", LastArchivedWALTime: &earlier, LastFailedWAL: "0006", LastFailedWALTime: &later,
+		ReadyWALFiles: 40, InstanceManagerVersion: "1.30.0",
+		Slots: []instancestatus.Slot{{Name: "_cnpg_orders_2", Active: false}, {Name: "debezium", Type: "logical", Plugin: "pgoutput", Active: false}}}
+	replica := instancestatus.Reading{Instance: "orders-2", InstanceManagerVersion: "1.29.2", ReadyWALFiles: 0}
+	in := statusInput(primary, replica)
+
+	_, archive := evaluateOnce(t, InstanceArchiveFailing{}, in)
+	if len(archive) != 1 || archive[0].Subject.Name != "orders-1" || !archive[0].At.Equal(later) {
+		t.Errorf("archive = %+v", archive)
+	}
+	healthy := primary
+	healthy.LastFailedWALTime = &earlier
+	healthy.LastArchivedWALTime = &later
+	if check, _ := evaluateOnce(t, InstanceArchiveFailing{}, statusInput(healthy)); check.Outcome != CheckClear {
+		t.Errorf("success after failure: %v, want clear", check.Outcome)
+	}
+	_, backlog := evaluateOnce(t, InstanceReadyWAL{Threshold: 32}, in)
+	if len(backlog) != 1 || !strings.Contains(backlog[0].Summary, "40 WAL segments") {
+		t.Errorf("backlog = %+v", backlog)
+	}
+	_, slots := evaluateOnce(t, InstanceSlotInactive{}, in)
+	if len(slots) != 1 || !strings.Contains(slots[0].Summary, `"debezium"`) || slots[0].ID != "held/orders-1/debezium" {
+		t.Errorf("slots = %+v (the operator's own slot must be left out)", slots)
+	}
+	_, drift := evaluateOnce(t, InstanceManagerDrift{}, in)
+	if len(drift) != 1 || drift[0].Subject != clusterSubject || len(drift[0].Evidence) != 2 {
+		t.Errorf("drift = %+v", drift)
+	}
+	replica.InstanceManagerVersion = "1.30.0"
+	if check, _ := evaluateOnce(t, InstanceManagerDrift{}, statusInput(primary, replica)); check.Outcome != CheckClear {
+		t.Errorf("same version everywhere: %v, want clear", check.Outcome)
 	}
 }

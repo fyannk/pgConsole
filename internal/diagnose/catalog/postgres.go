@@ -69,7 +69,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a server log record with FATAL severity",
 			Summary:   "PostgreSQL logged a FATAL-severity record.",
@@ -104,7 +104,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a server log record with PANIC severity",
 			Summary:   "PostgreSQL panicked, which ends the whole server process.",
@@ -132,7 +132,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Pinned:    []string{"xid_age"},
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a database's transaction-id age near wraparound",
@@ -155,7 +155,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Pinned:    []string{"mxid_age"},
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a database's multixact-id age near wraparound",
@@ -209,7 +209,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Pinned:    []string{"max_tx_duration_seconds"},
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an instance with a transaction open past the threshold",
@@ -235,7 +235,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Severity:  diagnose.SeverityWarning,
 			Describes: "deadlocks at a rate of one a minute or more, held for a quarter of an hour",
 			Summary:   "PostgreSQL has been breaking deadlocks continuously for a quarter of an hour.",
@@ -252,7 +252,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Severity:  diagnose.SeverityWarning,
 			Describes: "at least 300 backends waiting on a lock, held for five minutes",
 			Summary:   "Hundreds of backends have been waiting on locks for five minutes: something holds a lock everything else needs.",
@@ -273,7 +273,7 @@ func postgresRules() []diagnose.Rule {
 			Component: diagnose.ComponentPostgreSQL,
 			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
-				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.29 <1.31"}},
 			Severity:  diagnose.SeverityNote,
 			Describes: "an installed extension older than the version its image ships",
 			Summary:   "An installed extension is older than the version the image ships, and has not been updated.",

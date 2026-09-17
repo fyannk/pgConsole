@@ -32,7 +32,7 @@ func databaseRules() []diagnose.Rule {
 			ID:        "cnpg-declared-object-failed",
 			Component: diagnose.ComponentCNPG,
 			Layer:     diagnose.LayerDeclared,
-			Requires:  pin(since128),
+			Requires:  pin(supported),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a declared database object the operator cannot apply",
 			Summary:   "A declared database object cannot be applied.",

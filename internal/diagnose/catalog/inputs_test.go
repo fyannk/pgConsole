@@ -25,6 +25,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -130,6 +131,12 @@ func everythingObserved() diagnose.Input {
 		HasInfrastructure: true,
 		Infrastructure: observe.InfrastructureSnapshot{Volumes: []observe.VolumeFacts{{
 			Name: "orders-2", Phase: "Pending"}}},
+		InstanceStatus: staticStatus{instancestatus.Snapshot{Interval: 10 * time.Second, Readings: map[string]instancestatus.Reading{
+			"orders-1": {Instance: "orders-1", ObservedAt: now, IsPrimary: true, PendingRestart: true, ReadyWALFiles: 40,
+				LastFailedWALTime: &staleRenew, InstanceManagerVersion: "1.30.0",
+				Slots: []instancestatus.Slot{{Name: "debezium", Type: "logical"}}},
+			"orders-2": {Instance: "orders-2", ObservedAt: now, ReplayPaused: true, MightBeUnavailable: true, InstanceManagerVersion: "1.29.2"},
+		}}},
 		HasPrimaryLease: true,
 		PrimaryLease: observe.PrimaryLeaseSnapshot{Lease: observe.PrimaryLeaseFacts{
 			Present: true, Holder: "orders-2", RenewedAt: &staleRenew, DurationSeconds: &fifteen}},
@@ -272,3 +279,8 @@ func summarize(result diagnose.Result) string {
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
 }
+
+// staticStatus is an instance-status source with fixed readings.
+type staticStatus struct{ snap instancestatus.Snapshot }
+
+func (s staticStatus) CurrentInstanceStatus() (instancestatus.Snapshot, bool) { return s.snap, true }

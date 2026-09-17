@@ -31,6 +31,9 @@ type PrimaryLeaseFacts struct {
 	// False is a successful observation of absence: an operator before
 	// 1.30 keeps none.
 	Present bool
+	// Name is the Lease's own name — the cluster's — so evidence can
+	// name the object that was actually observed.
+	Name string
 	// Holder is the instance holding the lease, empty when released.
 	Holder string
 	// AcquiredAt and RenewedAt are the holder's own stamps; nil when
