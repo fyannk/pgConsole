@@ -123,6 +123,11 @@ const (
 	EnvInstanceStatusEnabled = "INSTANCE_STATUS_ENABLED"
 	// EnvInstanceStatusInterval is the sweep cadence.
 	EnvInstanceStatusInterval = "INSTANCE_STATUS_INTERVAL"
+	// EnvInstanceStatusCAFile is the PEM file holding the cluster CA the
+	// status port's certificate is verified against — the CA Secret's
+	// ca.crt, mounted by the deployer. Empty means the certificate is
+	// checked for naming this cluster's Services only.
+	EnvInstanceStatusCAFile = "INSTANCE_STATUS_CA_FILE"
 	// EnvMetricsPath is the snapshot file the metrics window is
 	// periodically written to so it survives restarts. Empty keeps the
 	// window in memory only — the default, which preserves the
@@ -350,6 +355,9 @@ type Config struct {
 	InstanceStatusEnabled bool
 	// InstanceStatusInterval is that sweep's cadence.
 	InstanceStatusInterval time.Duration
+	// InstanceStatusCAFile is the cluster CA file the status port's
+	// certificate is verified against; empty verifies the name only.
+	InstanceStatusCAFile string
 	// MetricsPath is the snapshot file; empty keeps the window in
 	// memory only.
 	MetricsPath string
@@ -547,6 +555,16 @@ func Load(lookup Lookup) (Config, error) {
 	cfg.MetricsRetention = durationVar(lookup, EnvMetricsRetention, DefaultMetricsRetention, MinMetricsRetention, MaxMetricsRetention, fail)
 	cfg.InstanceStatusEnabled = boolVar(lookup, EnvInstanceStatusEnabled, true, fail)
 	cfg.InstanceStatusInterval = durationVar(lookup, EnvInstanceStatusInterval, DefaultInstanceStatusInterval, MinMetricsInterval, MaxMetricsInterval, fail)
+	if raw, ok := lookup(EnvInstanceStatusCAFile); ok && raw != "" {
+		switch {
+		case !strings.HasPrefix(raw, "/") || len(raw) < 2 || strings.ContainsAny(raw, "\x00\r\n"):
+			fail(EnvInstanceStatusCAFile, "must be an absolute file path")
+		case !cfg.InstanceStatusEnabled:
+			fail(EnvInstanceStatusCAFile, "requires "+EnvInstanceStatusEnabled+"=true")
+		default:
+			cfg.InstanceStatusCAFile = raw
+		}
+	}
 	if raw, ok := lookup(EnvMetricsPath); ok && raw != "" {
 		switch {
 		case !strings.HasPrefix(raw, "/") || len(raw) < 2 || strings.ContainsAny(raw, "\x00\r\n"):

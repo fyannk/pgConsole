@@ -33,6 +33,7 @@ package instancestatus
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -246,8 +247,9 @@ type Collector struct {
 }
 
 // New wires a roster to a store. The port is the status port, fixed to
-// the CloudNativePG default and overridden only by tests.
-func New(source PodsSource, store *Store, port string, clock observe.Clock, logger *slog.Logger) *Collector {
+// the CloudNativePG default and overridden only by tests; the TLS
+// configuration is TLSConfig's.
+func New(source PodsSource, store *Store, port string, tlsConfig *tls.Config, clock observe.Clock, logger *slog.Logger) *Collector {
 	if port == "" {
 		port = Port
 	}
@@ -257,13 +259,65 @@ func New(source PodsSource, store *Store, port string, clock observe.Clock, logg
 		clock:    clock,
 		logger:   logger,
 		interval: store.Interval(),
-		client: &http.Client{Timeout: requestTimeout, Transport: &http.Transport{
-			// See readOne: the CA is in a Secret the console never reads.
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // identity rests on the API-server-reported pod IP, as for metrics
-		}},
-		port:    port,
-		failing: map[string]bool{},
+		client:   &http.Client{Timeout: requestTimeout, Transport: &http.Transport{TLSClientConfig: tlsConfig}},
+		port:     port,
+		failing:  map[string]bool{},
 	}
+}
+
+// TLSConfig is how the status port's certificate is judged. The
+// certificate is the cluster's own server certificate, issued for the
+// cluster's Services, and signed by a CA that lives in a Secret this
+// console never reads through the API. Two levels are possible:
+//
+//   - With the CA's PEM — a deployer may mount the CA Secret's ca.crt
+//     and name it in INSTANCE_STATUS_CA_FILE — the chain is verified
+//     against it and the certificate must name the cluster's read-write
+//     Service, which is full verification.
+//   - Without it, the certificate must still name the cluster's
+//     read-write Service. That is not a signature check and says so in
+//     the reference: it ties the presented certificate to this cluster
+//     rather than any cluster, and the identity of the endpoint rests,
+//     as it does for the metrics sweep over plain HTTP, on the pod IP the
+//     API server reported.
+//
+// The standard verification is replaced rather than skipped: the
+// cluster's certificate names Services, not pod IPs, so the default
+// host check can never pass against a pod IP, and the check that can is
+// the one written here.
+func TLSConfig(clusterName string, caPEM []byte) (*tls.Config, error) {
+	serviceName := clusterName + "-rw"
+	var roots *x509.CertPool
+	if len(caPEM) > 0 {
+		roots = x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(caPEM) {
+			return nil, redact.NewError("instance status CA", redact.CategoryInternal,
+				fmt.Errorf("no certificate found in the CA file"))
+		}
+	}
+	verify := func(state tls.ConnectionState) error {
+		if len(state.PeerCertificates) == 0 {
+			return fmt.Errorf("the status port presented no certificate")
+		}
+		leaf := state.PeerCertificates[0]
+		if err := leaf.VerifyHostname(serviceName); err != nil {
+			return fmt.Errorf("the status port's certificate does not name %s: %w", serviceName, err)
+		}
+		if roots == nil {
+			return nil
+		}
+		intermediates := x509.NewCertPool()
+		for _, cert := range state.PeerCertificates[1:] {
+			intermediates.AddCert(cert)
+		}
+		_, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, DNSName: serviceName})
+		return err
+	}
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, //nolint:gosec // the default host check cannot apply to a pod IP; VerifyConnection below is the verification
+		VerifyConnection:   verify,
+	}, nil
 }
 
 // Run sweeps until ctx is done.
@@ -317,11 +371,8 @@ func (c *Collector) sweep(ctx context.Context) {
 
 // readOne fetches and converts one instance's report. The status port
 // serves TLS from CloudNativePG 1.30 and plain HTTP before, so TLS is
-// tried first and plain HTTP when TLS is refused. The certificate is
-// the cluster's own, signed by a CA that lives in a Secret this console
-// never reads, so it is not verified: the trust rests on the pod IP the
-// API server reported, exactly as the metrics sweep's does, and TLS
-// here adds confidentiality on the wire, not identity.
+// tried first and plain HTTP when TLS is refused; the certificate is
+// judged as TLSConfig says.
 func (c *Collector) readOne(ctx context.Context, ip string) (Reading, error) {
 	var last error
 	for _, scheme := range []string{"https", "http"} {

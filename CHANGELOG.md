@@ -124,7 +124,10 @@ period. Pin an exact image tag and read the notes before upgrading.
   inactive replication slot the operator does not manage, and
   instance-manager version drift across the instances. Reports are
   judged per instance against the sweep cadence, as scraped metrics
-  are.
+  are. The status port serves TLS from 1.30 with the cluster's own
+  certificate; it is checked for naming this cluster's read-write
+  Service, and verified against the cluster CA when the deployer
+  mounts it and names it in `INSTANCE_STATUS_CA_FILE`.
 
 - **Five faults in the operator journey.** The end-to-end test injects
   a suspended backup schedule, a declared Database whose owner does

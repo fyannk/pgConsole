@@ -17,8 +17,16 @@ package instancestatus
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -128,7 +136,7 @@ func TestCollectorKeepsTheLastReportBesideAFailure(t *testing.T) {
 	}}}
 	store := NewStore(10 * time.Second)
 	var logs bytes.Buffer
-	c := New(source, store, port, &sweepClock{sweeps: 2, now: time.Unix(1700000000, 0)}, slog.New(slog.NewJSONHandler(&logs, nil)))
+	c := New(source, store, port, nil, &sweepClock{sweeps: 2, now: time.Unix(1700000000, 0)}, slog.New(slog.NewJSONHandler(&logs, nil)))
 	c.client.Timeout = 500 * time.Millisecond
 	if err := c.Run(context.Background()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run: %v", err)
@@ -161,22 +169,82 @@ func TestCollectorKeepsTheLastReportBesideAFailure(t *testing.T) {
 	}
 }
 
-// TestCollectorReadsTLSFirstAndFallsBackToPlainHTTP proves the 1.30
-// status port, which serves TLS with a certificate the console cannot
-// verify, is read, and that a plain-HTTP port is read too.
-func TestCollectorReadsTLSFirstAndFallsBackToPlainHTTP(t *testing.T) {
+// clusterCertificate issues a certificate the way the operator does —
+// naming the cluster's Services — signed by a fresh CA, and returns the
+// leaf as a TLS certificate with the CA's PEM.
+func clusterCertificate(t *testing.T, clusterName string) (tls.Certificate, []byte) {
+	t.Helper()
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caTemplate := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: clusterName + " CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true,
+		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true}
+	caDER, _ := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	caCert, _ := x509.ParseCertificate(caDER)
+	leafKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	leafTemplate := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: clusterName + "-rw"},
+		DNSNames:  []string{clusterName + "-rw", clusterName + "-r", clusterName + "-ro"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	leafDER, _ := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
+	keyDER, _ := x509.MarshalECPrivateKey(leafKey)
+	leaf, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+	if err != nil {
+		t.Fatalf("key pair: %v", err)
+	}
+	return leaf, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+}
+
+// TestTLSConfigJudgesTheClustersCertificate proves the two levels: with
+// the CA, the chain is verified and another CA's certificate is
+// refused; without it, a certificate naming this cluster's Service is
+// accepted and one naming another cluster's is not. Plain HTTP is read
+// when TLS is refused.
+func TestTLSConfigJudgesTheClustersCertificate(t *testing.T) {
 	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(sampleReport)) })
-	for name, srv := range map[string]*httptest.Server{"tls": httptest.NewTLSServer(handler), "plain": httptest.NewServer(handler)} {
-		host, port, _ := net.SplitHostPort(strings.TrimPrefix(strings.TrimPrefix(srv.URL, "https://"), "http://"))
+	ordersLeaf, ordersCA := clusterCertificate(t, "orders")
+	billingLeaf, _ := clusterCertificate(t, "billing")
+	serve := func(leaf tls.Certificate) *httptest.Server {
+		srv := httptest.NewUnstartedServer(handler)
+		srv.TLS = &tls.Config{Certificates: []tls.Certificate{leaf}, MinVersion: tls.VersionTLS12}
+		srv.StartTLS()
+		return srv
+	}
+	plain := httptest.NewServer(handler)
+	defer plain.Close()
+	for name, tc := range map[string]struct {
+		srv  *httptest.Server
+		ca   []byte
+		want bool
+	}{
+		"own cluster, CA verified":       {serve(ordersLeaf), ordersCA, true},
+		"own cluster, no CA":             {serve(ordersLeaf), nil, true},
+		"other cluster's certificate":    {serve(billingLeaf), nil, false},
+		"own name, wrong CA":             {serve(billingLeaf), ordersCA, false},
+		"plain HTTP when TLS is refused": {plain, ordersCA, true},
+	} {
+		host, port, _ := net.SplitHostPort(strings.TrimPrefix(strings.TrimPrefix(tc.srv.URL, "https://"), "http://"))
+		tlsConfig, err := TLSConfig("orders", tc.ca)
+		if err != nil {
+			t.Fatalf("%s: TLSConfig: %v", name, err)
+		}
 		store := NewStore(10 * time.Second)
 		c := New(&staticPods{snap: observe.PodsSnapshot{Pods: []observe.PodFacts{{Name: "orders-1", IP: host}}}},
-			store, port, &sweepClock{sweeps: 1, now: time.Unix(1700000000, 0)}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+			store, port, tlsConfig, &sweepClock{sweeps: 1, now: time.Unix(1700000000, 0)}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+		c.client.Timeout = 2 * time.Second
 		_ = c.Run(context.Background())
 		snap, _ := store.CurrentInstanceStatus()
-		if reading, ok := snap.Readings["orders-1"]; !ok || !reading.IsPrimary {
-			t.Errorf("%s: no report read: %+v", name, snap)
+		_, read := snap.Readings["orders-1"]
+		if read != tc.want {
+			t.Errorf("%s: read=%v, want %v (failing: %v)", name, read, tc.want, snap.Failing)
 		}
-		srv.Close()
+		if tc.srv != plain {
+			tc.srv.Close()
+		}
+	}
+	if _, err := TLSConfig("orders", []byte("not a certificate")); err == nil {
+		t.Error("a CA file with no certificate was accepted")
 	}
 }

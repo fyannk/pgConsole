@@ -167,7 +167,20 @@ func build(lookup config.Lookup, logOut io.Writer) (*application.App, error) {
 	// rewritten periodically. An unusable snapshot path fails before
 	// listen; an unreadable snapshot merely starts the window empty.
 	if cfg.InstanceStatusEnabled {
+		var caPEM []byte
+		if cfg.InstanceStatusCAFile != "" {
+			pemBytes, err := os.ReadFile(cfg.InstanceStatusCAFile)
+			if err != nil {
+				return nil, redact.NewError("instance status CA file", redact.CategoryInternal, err)
+			}
+			caPEM = pemBytes
+		}
+		tlsConfig, err := instancestatus.TLSConfig(cfg.ClusterName, caPEM)
+		if err != nil {
+			return nil, err
+		}
 		deps.InstanceStatus = instancestatus.NewStore(cfg.InstanceStatusInterval)
+		deps.InstanceStatusTLS = tlsConfig
 	}
 	if cfg.MetricsEnabled {
 		limits := metrics.Limits{

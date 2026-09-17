@@ -21,6 +21,7 @@ package application
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net"
@@ -125,6 +126,9 @@ type Deps struct {
 	// InstanceStatus is the store the instance managers' status reports
 	// are swept into. Nil leaves the source switched off.
 	InstanceStatus *instancestatus.Store
+	// InstanceStatusTLS is how the status port's certificate is judged;
+	// see instancestatus.TLSConfig.
+	InstanceStatusTLS *tls.Config
 	// PoolerMetrics is the same window over the PgBouncer exporter's
 	// surface, filled from the pooler pods. Nil means no pooler metrics
 	// screen; it needs PoolerPodSource for the same reason Metrics
@@ -195,7 +199,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		}
 		if deps.InstanceStatus != nil {
 			sources.InstanceStatus = deps.InstanceStatus
-			runners = append(runners, instancestatus.New(podStore, deps.InstanceStatus, instancestatus.Port, deps.Clock, logger).Run)
+			runners = append(runners, instancestatus.New(podStore, deps.InstanceStatus, instancestatus.Port, deps.InstanceStatusTLS, deps.Clock, logger).Run)
 		}
 	}
 	if deps.EventSource != nil {
