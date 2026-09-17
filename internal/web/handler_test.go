@@ -51,6 +51,8 @@ type staticSnapshots struct {
 	poolerPodsOK  bool
 	quorum        observe.FailoverQuorumSnapshot
 	quorumOK      bool
+	lease         observe.PrimaryLeaseSnapshot
+	leaseOK       bool
 	catalogs      observe.ImageCatalogsSnapshot
 	catalogsOK    bool
 	declared      observe.DatabaseObjectsSnapshot
@@ -97,6 +99,10 @@ func (s staticSnapshots) CurrentPoolerPods() (observe.PodsSnapshot, bool) {
 
 func (s staticSnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
 	return s.quorum, s.quorumOK
+}
+
+func (s staticSnapshots) CurrentPrimaryLease() (observe.PrimaryLeaseSnapshot, bool) {
+	return s.lease, s.leaseOK
 }
 
 func (s staticSnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {

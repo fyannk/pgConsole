@@ -277,3 +277,39 @@ func TestProberReadinessMeaning(t *testing.T) {
 		})
 	}
 }
+
+// TestConvertPrimaryLeaseReadsTheSpecVerbatim proves the Lease fields
+// convert one for one and that an absent field stays nil.
+func TestConvertPrimaryLeaseReadsTheSpecVerbatim(t *testing.T) {
+	t.Parallel()
+	facts, err := convertPrimaryLease(map[string]any{
+		"apiVersion": "coordination.k8s.io/v1", "kind": "Lease",
+		"metadata": map[string]any{"name": "orders", "namespace": "payments"},
+		"spec": map[string]any{
+			"holderIdentity":       "orders-1",
+			"leaseDurationSeconds": int64(15),
+			"acquireTime":          "2026-09-17T08:00:00.000000Z",
+			"renewTime":            "2026-09-17T08:05:00.000000Z",
+			"leaseTransitions":     int64(3),
+		},
+	})
+	if err != nil {
+		t.Fatalf("convertPrimaryLease: %v", err)
+	}
+	if !facts.Present || facts.Holder != "orders-1" || facts.DurationSeconds == nil || *facts.DurationSeconds != 15 ||
+		facts.Transitions == nil || *facts.Transitions != 3 {
+		t.Errorf("facts = %+v", facts)
+	}
+	if facts.RenewedAt == nil || !facts.RenewedAt.Equal(time.Date(2026, 9, 17, 8, 5, 0, 0, time.UTC)) ||
+		facts.AcquiredAt == nil || !facts.AcquiredAt.Equal(time.Date(2026, 9, 17, 8, 0, 0, 0, time.UTC)) {
+		t.Errorf("instants = %v %v", facts.AcquiredAt, facts.RenewedAt)
+	}
+	released, err := convertPrimaryLease(map[string]any{
+		"apiVersion": "coordination.k8s.io/v1", "kind": "Lease",
+		"metadata": map[string]any{"name": "orders", "namespace": "payments"},
+		"spec":     map[string]any{"leaseDurationSeconds": int64(1)},
+	})
+	if err != nil || released.Holder != "" || released.RenewedAt != nil || released.Transitions != nil {
+		t.Errorf("released lease = %+v, %v", released, err)
+	}
+}

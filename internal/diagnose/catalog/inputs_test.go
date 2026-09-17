@@ -87,7 +87,8 @@ func (l fixtureLogs) Unread() []logstream.Unread { return nil }
 // at a time.
 func everythingObserved() diagnose.Input {
 	major, desired, ready, timeline := 17, 3, 2, 4
-	two := int32(2)
+	two, fifteen := int32(2), int32(15)
+	staleRenew := now.Add(-time.Hour)
 	applied := false
 	cluster := observe.ClusterFacts{
 		Present: true, PostgresMajorVersion: &major, DesiredInstances: &desired, ReadyInstances: &ready,
@@ -129,6 +130,9 @@ func everythingObserved() diagnose.Input {
 		HasInfrastructure: true,
 		Infrastructure: observe.InfrastructureSnapshot{Volumes: []observe.VolumeFacts{{
 			Name: "orders-2", Phase: "Pending"}}},
+		HasPrimaryLease: true,
+		PrimaryLease: observe.PrimaryLeaseSnapshot{Lease: observe.PrimaryLeaseFacts{
+			Present: true, Holder: "orders-2", RenewedAt: &staleRenew, DurationSeconds: &fifteen}},
 		HasKubeVersion: true,
 		KubeVersion:    observe.KubeVersionSnapshot{GitVersion: "v1.33.2"},
 		HasQuotas:      true,

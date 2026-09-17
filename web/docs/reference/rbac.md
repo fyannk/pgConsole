@@ -23,6 +23,7 @@ The default authority. Namespace-scoped, no mutating verb.
 | Poolers | `postgresql.cnpg.io` | `poolers` | `get`, `list`, `watch` |
 | Declared database objects | `postgresql.cnpg.io` | `databases`, `databaseroles`, `publications`, `subscriptions` | `get`, `list`, `watch` |
 | Failover quorum | `postgresql.cnpg.io` | `failoverquorums` | `get` (pinned by `resourceNames`) and `watch` |
+| Primary lease (CloudNativePG 1.30+) | `coordination.k8s.io` | `leases` | `get` (pinned by `resourceNames`) and `watch` |
 | Image catalogs (namespaced) | `postgresql.cnpg.io` | `imagecatalogs` | `get`, `list`, `watch` |
 | Instance pods | `""` | `pods` | `get`, `list`, `watch` |
 | Services | `""` | `services` | `get`, `list`, `watch` |

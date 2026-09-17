@@ -64,9 +64,20 @@ period. Pin an exact image tag and read the notes before upgrading.
   Pooler the operator reports as `failed` or `inactive` is a finding,
   pinned 1.30-only.
 
+- **The primary lease.** CloudNativePG 1.30 keeps a Kubernetes Lease
+  named after the cluster as its primary-election gate: the promoted
+  instance acquires it and renews it every few seconds. The console
+  now observes it under a new optional grant (`coordination.k8s.io`
+  `leases`, `get` pinned by name and `watch`, in the example Role),
+  and two 1.30-only rules read it: a lease unrenewed a minute past its
+  duration or released while the operator still names a primary, and
+  a lease held by an instance other than the operator's current
+  primary. The Lease is kept out of the object timeline on purpose;
+  recorded, its heartbeat would evict everything else.
+
 ### Changed
 
-- **The catalog grew from 86 to 125 rules, 131 checks with the six
+- **The catalog grew from 86 to 127 rules, 133 checks with the six
   hand-written detectors.** The additions are related where the
   evidence supports it: a stuck bootstrap nests under the bootstrap log
   line that explains it, a failed backup phase under the Backup's own

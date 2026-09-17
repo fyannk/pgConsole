@@ -140,6 +140,9 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 	}, now.Add(-time.Hour))
 	poolers := Input{Now: now, HasPoolers: true, Poolers: observe.PoolersSnapshot{
 		Poolers: []observe.PoolerFacts{{Name: "orders-rw", Phase: "failed"}}}}
+	fifteen := int32(15)
+	lease := leaseInput(observe.PrimaryLeaseFacts{Present: true, Holder: "orders-2", RenewedAt: &moved, DurationSeconds: &fifteen},
+		"orders-1", "orders-1")
 	for name, tc := range map[string]struct {
 		when    Condition
 		in      Input
@@ -167,6 +170,8 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 		"role":            {RoleUnreconcilable{}, held, EntityRef{Kind: "ManagedRole", Name: "app"}, time.Time{}},
 		"tablespace":      {TablespaceError{}, held, EntityRef{Kind: "Tablespace", Name: "fast"}, time.Time{}},
 		"pooler-phase":    {PoolerPhase{AnyOf: []string{"failed"}}, poolers, EntityRef{Kind: "Pooler", Name: "orders-rw"}, time.Time{}},
+		"lease-expired":   {PrimaryLeaseExpired{Grace: time.Minute}, lease, EntityRef{Kind: "Pod", Name: "orders-2"}, moved},
+		"lease-holder":    {PrimaryLeaseHolderMismatch{}, lease, EntityRef{Kind: "Pod", Name: "orders-2"}, time.Time{}},
 	} {
 		rule := Rule{ID: "subject", Summary: "Subject.", When: tc.when}
 		check, findings := evaluateRule(rule, tc.in)

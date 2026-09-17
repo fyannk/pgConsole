@@ -63,8 +63,8 @@ func PodSubjectOf(when Condition) PodSubject {
 	case InstantNonZero, InstantZero, InstantShortfall, SeriesAbove, PrimaryDisagreement:
 		// The instance the exporter reported for.
 		return PodSubjectAlways
-	case PrimaryFailing, TimelineDivergence:
-		// The instance the operator's status names.
+	case PrimaryFailing, TimelineDivergence, PrimaryLeaseExpired, PrimaryLeaseHolderMismatch:
+		// The instance the operator's status or the lease names.
 		return PodSubjectAlways
 	case StatusListed:
 		// The failed-instances list names pods; the claim lists name

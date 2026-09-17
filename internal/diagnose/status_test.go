@@ -296,3 +296,74 @@ func TestEventMatchAttributesSecondaryKindsThroughTheirCatalog(t *testing.T) {
 		t.Errorf("a Pooler-scoped event rule classified as %v, want never naming a pod", got)
 	}
 }
+
+func leaseInput(lease observe.PrimaryLeaseFacts, current, target string) Input {
+	return Input{Now: now,
+		HasCluster: true, Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{
+			Present: true, CurrentPrimary: current, TargetPrimary: target}},
+		HasPrimaryLease: true, PrimaryLease: observe.PrimaryLeaseSnapshot{Lease: lease}}
+}
+
+// TestPrimaryLeaseExpiryReadsTheLeasesOwnClock proves the lease is
+// judged by its renewal time and duration, that a released lease is a
+// finding only with a primary named and no move in flight, and that
+// absence and a move in flight both read as clear.
+func TestPrimaryLeaseExpiryReadsTheLeasesOwnClock(t *testing.T) {
+	t.Parallel()
+	fifteen := int32(15)
+	fresh, stale := now.Add(-5*time.Second), now.Add(-5*time.Minute)
+	when := PrimaryLeaseExpired{Grace: time.Minute}
+
+	held := observe.PrimaryLeaseFacts{Present: true, Holder: "orders-1", RenewedAt: &fresh, DurationSeconds: &fifteen}
+	if check, _ := evaluateOnce(t, when, leaseInput(held, "orders-1", "orders-1")); check.Outcome != CheckClear {
+		t.Errorf("freshly renewed: %v %q, want clear", check.Outcome, check.Because)
+	}
+	held.RenewedAt = &stale
+	check, findings := evaluateOnce(t, when, leaseInput(held, "orders-1", "orders-1"))
+	if check.Outcome != CheckMatched || findings[0].Subject != (EntityRef{Kind: "Pod", Name: "orders-1"}) || !findings[0].At.Equal(stale) {
+		t.Fatalf("stale renewal: %v %+v", check.Outcome, findings)
+	}
+	held.DurationSeconds = nil
+	if check, _ := evaluateOnce(t, when, leaseInput(held, "orders-1", "orders-1")); check.Outcome != CheckUnavailable {
+		t.Errorf("no duration: %v, want could not run", check.Outcome)
+	}
+
+	released := observe.PrimaryLeaseFacts{Present: true, RenewedAt: &stale}
+	check, findings = evaluateOnce(t, when, leaseInput(released, "orders-1", "orders-1"))
+	if check.Outcome != CheckMatched || !strings.Contains(findings[0].Summary, "released while the operator names orders-1") {
+		t.Fatalf("released with a primary named: %v %+v", check.Outcome, findings)
+	}
+	if check, _ := evaluateOnce(t, when, leaseInput(released, "orders-1", "orders-2")); check.Outcome != CheckClear {
+		t.Errorf("released during a move: %v, want clear", check.Outcome)
+	}
+	if check, _ := evaluateOnce(t, when, leaseInput(released, "", "")); check.Outcome != CheckClear {
+		t.Errorf("released with no primary: %v, want clear", check.Outcome)
+	}
+	if check, _ := evaluateOnce(t, when, leaseInput(observe.PrimaryLeaseFacts{Present: false}, "orders-1", "orders-1")); check.Outcome != CheckClear {
+		t.Errorf("no lease at all: %v, want clear", check.Outcome)
+	}
+	in := leaseInput(held, "orders-1", "orders-1")
+	in.HasPrimaryLease = false
+	if check, _ := evaluateOnce(t, when, in); check.Outcome != CheckUnavailable {
+		t.Errorf("lease unobserved: %v, want could not run", check.Outcome)
+	}
+}
+
+// TestPrimaryLeaseHolderMismatchIsTwoWritersDisagreeing proves the
+// finding names the holder, quotes both claims, and stays clear during
+// a primary move.
+func TestPrimaryLeaseHolderMismatchIsTwoWritersDisagreeing(t *testing.T) {
+	t.Parallel()
+	held := observe.PrimaryLeaseFacts{Present: true, Holder: "orders-2"}
+	check, findings := evaluateOnce(t, PrimaryLeaseHolderMismatch{}, leaseInput(held, "orders-1", "orders-1"))
+	if check.Outcome != CheckMatched || findings[0].Subject != (EntityRef{Kind: "Pod", Name: "orders-2"}) ||
+		len(findings[0].Evidence) != 2 || findings[0].Evidence[1].Origin != "operator-reported" {
+		t.Fatalf("mismatch: %v %+v", check.Outcome, findings)
+	}
+	if check, _ := evaluateOnce(t, PrimaryLeaseHolderMismatch{}, leaseInput(held, "orders-1", "orders-2")); check.Outcome != CheckClear {
+		t.Errorf("during a move: %v, want clear", check.Outcome)
+	}
+	if check, _ := evaluateOnce(t, PrimaryLeaseHolderMismatch{}, leaseInput(held, "orders-2", "orders-2")); check.Outcome != CheckClear {
+		t.Errorf("holder is the primary: %v, want clear", check.Outcome)
+	}
+}

@@ -79,6 +79,11 @@ const (
 	// be ready. A rollout is short one instance for the length of a
 	// restart; ten minutes is a member that has not returned.
 	instancesShortHeld = 10 * time.Minute
+	// leaseGrace is how far past its own duration the primary lease
+	// may go unrenewed. The default duration is fifteen seconds and the
+	// holder renews every two; a minute past expiry is a holder that
+	// has stopped, not a slow API server.
+	leaseGrace = time.Minute
 )
 
 // statusRules cover the parts of the Cluster status that are neither a
@@ -322,6 +327,54 @@ func statusRules() []diagnose.Rule {
 			},
 			Link:      "/cluster/overview",
 			LinkLabel: "Cluster overview",
+		},
+		{
+			// The lease is 1.30 machinery: the instance promoted to primary
+			// acquires the Lease named after the cluster and renews it as
+			// long as it runs. The strings pinned are the operator's
+			// reconciler that creates it and the field the holder writes.
+			ID:        "cnpg-primary-lease-expired",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(only130),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "the primary lease unrenewed for a minute past its duration, or released with a primary named",
+			Summary:   "The primary lease is not being renewed: the instance holding the primary role has stopped keeping it.",
+			Detail: "The primary's instance manager renews the lease every few " +
+				"seconds for as long as it runs and releases it on shutdown. A " +
+				"lease past its duration is a primary whose manager has stopped or " +
+				"cannot reach the API server; a released lease while the operator " +
+				"still names a primary is a primary that shut down without the " +
+				"operator noticing yet. Either way no failover can complete until " +
+				"the lease is acquired again.",
+			When:   diagnose.PrimaryLeaseExpired{Grace: leaseGrace},
+			Pinned: []string{"reconcilePrimaryLease", "HolderIdentity"},
+			NextSteps: "Read the primary pod's state and log: a stopped instance " +
+				"manager, a liveness failure or an API-server timeout is written " +
+				"there. Do not delete the lease by hand; the next promotion acquires it.",
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
+		{
+			ID:        "cnpg-primary-lease-holder-mismatch",
+			Component: diagnose.ComponentCNPG,
+			Requires:  pin(only130),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "the primary lease held by an instance other than the operator's current primary",
+			Summary:   "The instance holding the primary lease is not the one the operator names as primary.",
+			Detail: "The lease is what stops two instances from both being promoted, " +
+				"and the holder is the instance that last won it. The operator's " +
+				"currentPrimary naming another instance, with no primary move in " +
+				"flight, is two writers disagreeing about who the primary is. The " +
+				"lease holder is the one PostgreSQL will let accept writes; the " +
+				"services follow the operator's label.",
+			When:   diagnose.PrimaryLeaseHolderMismatch{},
+			Pinned: []string{"reconcilePrimaryLease", "HolderIdentity"},
+			NextSteps: "Read both instances' logs before touching anything. Fence " +
+				"nothing until the operator's next reconcile has either moved " +
+				"the primary or corrected the status.",
+			ConsequenceOf: []diagnose.Relation{{Cause: "cnpg-primary-disagreement", Strength: diagnose.StrengthPlausible}},
+			Link:          "/cluster/overview",
+			LinkLabel:     "Cluster overview",
 		},
 	}
 }

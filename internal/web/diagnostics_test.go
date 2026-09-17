@@ -65,7 +65,7 @@ func newDiagnosticsHandlerFull(t *testing.T, allow bool, snapshots staticSnapsho
 		AllowLogs: true, LevelHeader: "X-PgToolBox-Level", AllowDiagnostics: allow,
 	},
 		Sources{Cluster: snapshots, Pods: snapshots, Events: snapshots, Backups: snapshots,
-			Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots,
+			Poolers: snapshots, PoolerPods: snapshots, FailoverQuorum: snapshots, PrimaryLease: snapshots,
 			ImageCatalogs: snapshots, DatabaseObjects: snapshots, Infrastructure: snapshots,
 			KubeVersion: snapshots, Quotas: snapshots, History: history, Evidence: ev},
 		kube.UnavailableProber{}, nil, Auth{Extractor: identity.NewExtractor("X-Forwarded-User")},
@@ -197,7 +197,7 @@ func TestDiagnosticsInputReachesEveryPublishedSource(t *testing.T) {
 	t.Parallel()
 	all := staticSnapshots{
 		ok: true, podsOK: true, eventsOK: true, backupsOK: true,
-		poolersOK: true, poolerPodsOK: true, quorumOK: true,
+		poolersOK: true, poolerPodsOK: true, quorumOK: true, leaseOK: true,
 		catalogsOK: true, declaredOK: true, infraOK: true, kubeVersionOK: true,
 		quotasOK: true,
 	}

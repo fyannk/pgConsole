@@ -502,3 +502,132 @@ func (c PoolerPhase) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	}
 	return matches, ""
 }
+
+// PrimaryLeaseExpired matches the primary lease when its last renewal
+// is older than its own duration by at least Grace, or when it is
+// released while the operator names a current primary and no move is
+// in flight. The instance holding the primary role renews the lease
+// every few seconds for as long as it runs; a lease nobody renews is a
+// primary whose instance manager has stopped, or a primary that cannot
+// reach the API server — the lease is the one thing it must keep
+// writing.
+type PrimaryLeaseExpired struct {
+	// Grace is how far past its duration the lease must be. The
+	// operator's own renewal deadline is shorter than the duration, so
+	// a lease past its duration is already one the holder failed to
+	// renew in time; the grace keeps a slow API server out of it.
+	Grace time.Duration
+}
+
+func (c PrimaryLeaseExpired) describe() string {
+	return fmt.Sprintf("the primary lease unrenewed for %s past its duration, or released with a primary named", c.Grace)
+}
+
+func (c PrimaryLeaseExpired) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if reason := leaseUnavailable(in); reason != "" {
+		return nil, reason
+	}
+	if reason := clusterUnavailable(in); reason != "" {
+		return nil, reason
+	}
+	lease := in.PrimaryLease.Lease
+	cluster := in.Cluster.Cluster
+	if !lease.Present {
+		return nil, ""
+	}
+	moving := cluster.TargetPrimary != "" && cluster.TargetPrimary != cluster.CurrentPrimary
+	if lease.Holder == "" {
+		if cluster.CurrentPrimary == "" || moving {
+			return nil, ""
+		}
+		if lease.RenewedAt != nil && in.Now.Sub(*lease.RenewedAt) < c.Grace {
+			return nil, ""
+		}
+		detail := "holderIdentity empty"
+		if lease.RenewedAt != nil {
+			detail += ", released " + lease.RenewedAt.UTC().Format(time.RFC3339)
+		}
+		return []conditionMatch{{
+			idSuffix: "/" + cluster.CurrentPrimary,
+			subject:  EntityRef{Kind: "Pod", Name: cluster.CurrentPrimary},
+			summary:  fmt.Sprintf("The primary lease is released while the operator names %s as the current primary.", cluster.CurrentPrimary),
+			evidence: []Evidence{
+				{Origin: "Kubernetes-observed", Object: "Lease/" + leaseName(in), Detail: detail},
+				{Origin: "operator-reported", Object: "Cluster status", Detail: "currentPrimary " + cluster.CurrentPrimary},
+			},
+		}}, ""
+	}
+	if lease.RenewedAt == nil || lease.DurationSeconds == nil {
+		return nil, "the primary lease carries no renewal time or duration, so its validity cannot be judged"
+	}
+	expiry := lease.RenewedAt.Add(time.Duration(*lease.DurationSeconds) * time.Second)
+	if in.Now.Sub(expiry) < c.Grace {
+		return nil, ""
+	}
+	return []conditionMatch{{
+		idSuffix: "/" + lease.Holder,
+		subject:  EntityRef{Kind: "Pod", Name: lease.Holder},
+		at:       *lease.RenewedAt,
+		summary: fmt.Sprintf("The primary lease held by %s has not been renewed since %s, %s past its duration.",
+			lease.Holder, lease.RenewedAt.UTC().Format("15:04:05Z"), in.Now.Sub(expiry).Round(time.Second)),
+		evidence: []Evidence{{
+			Origin: "Kubernetes-observed",
+			Object: "Lease/" + leaseName(in),
+			Detail: fmt.Sprintf("holderIdentity %s, renewTime %s, leaseDurationSeconds %d",
+				lease.Holder, lease.RenewedAt.UTC().Format(time.RFC3339), *lease.DurationSeconds),
+		}},
+	}}, ""
+}
+
+// PrimaryLeaseHolderMismatch matches a lease held by an instance other
+// than the one the operator names as current primary, with no primary
+// move in flight to explain the difference. The two claims come from
+// two writers — the instance holds the lease, the operator writes the
+// status — and the finding is their disagreement.
+type PrimaryLeaseHolderMismatch struct{}
+
+func (PrimaryLeaseHolderMismatch) describe() string {
+	return "the primary lease held by an instance other than the operator's current primary"
+}
+
+func (PrimaryLeaseHolderMismatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
+	if reason := leaseUnavailable(in); reason != "" {
+		return nil, reason
+	}
+	if reason := clusterUnavailable(in); reason != "" {
+		return nil, reason
+	}
+	lease := in.PrimaryLease.Lease
+	cluster := in.Cluster.Cluster
+	if !lease.Present || lease.Holder == "" || cluster.CurrentPrimary == "" {
+		return nil, ""
+	}
+	if cluster.TargetPrimary != "" && cluster.TargetPrimary != cluster.CurrentPrimary {
+		return nil, ""
+	}
+	if lease.Holder == cluster.CurrentPrimary {
+		return nil, ""
+	}
+	return []conditionMatch{{
+		idSuffix: "/" + lease.Holder,
+		subject:  EntityRef{Kind: "Pod", Name: lease.Holder},
+		summary: fmt.Sprintf("The primary lease is held by %s while the operator names %s as the current primary.",
+			lease.Holder, cluster.CurrentPrimary),
+		evidence: []Evidence{
+			{Origin: "Kubernetes-observed", Object: "Lease/" + leaseName(in), Detail: "holderIdentity " + lease.Holder},
+			{Origin: "operator-reported", Object: "Cluster status",
+				Detail: "currentPrimary " + cluster.CurrentPrimary + ", targetPrimary " + cluster.TargetPrimary},
+		},
+	}}, ""
+}
+
+// leaseName is the Lease's name for the evidence: the operator names
+// it after the cluster, and the console watches one cluster, so the
+// cluster's own name is the honest label even when the status does not
+// repeat it.
+func leaseName(in Input) string {
+	if in.Cluster.Cluster.CurrentPrimary == "" {
+		return "primary"
+	}
+	return "primary (named after the Cluster)"
+}

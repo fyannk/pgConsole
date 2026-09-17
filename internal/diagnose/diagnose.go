@@ -389,6 +389,10 @@ type Input struct {
 	// could proceed.
 	FailoverQuorum    observe.FailoverQuorumSnapshot
 	HasFailoverQuorum bool
+	// PrimaryLease is the Lease the instances use as their
+	// primary-election gate from CloudNativePG 1.30.
+	PrimaryLease    observe.PrimaryLeaseSnapshot
+	HasPrimaryLease bool
 	// ImageCatalogs are the catalogs the Cluster draws its image from.
 	ImageCatalogs    observe.ImageCatalogsSnapshot
 	HasImageCatalogs bool

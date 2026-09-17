@@ -199,6 +199,7 @@ func build(lookup config.Lookup, logOut io.Writer) (*application.App, error) {
 		deps.PoolerSource = client
 		deps.PoolerPodSource = client
 		deps.FailoverQuorumSource = client
+		deps.PrimaryLeaseSource = client
 		deps.ImageCatalogSource = client
 		deps.DatabaseObjectsSource = client
 		deps.InfrastructureSource = client

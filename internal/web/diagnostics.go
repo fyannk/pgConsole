@@ -199,6 +199,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	if h.sources.FailoverQuorum != nil {
 		in.FailoverQuorum, in.HasFailoverQuorum = h.sources.FailoverQuorum.CurrentFailoverQuorum()
 	}
+	if h.sources.PrimaryLease != nil {
+		in.PrimaryLease, in.HasPrimaryLease = h.sources.PrimaryLease.CurrentPrimaryLease()
+	}
 	if h.sources.ImageCatalogs != nil {
 		in.ImageCatalogs, in.HasImageCatalogs = h.sources.ImageCatalogs.CurrentImageCatalogs()
 	}
