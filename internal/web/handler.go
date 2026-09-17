@@ -426,6 +426,10 @@ func (h *Handler) Routes() http.Handler {
 	if h.cfg.AllowDiagnostics {
 		mux.HandleFunc("GET /diagnostics", h.requireLevel(authz.TierPowerUser,
 			"diagnostics requires the poweruser level", h.handleDiagnostics))
+		// Triage is the same run read in the other direction, so it
+		// exists exactly where diagnostics does and sits at the same gate.
+		mux.HandleFunc("GET /triage", h.requireLevel(authz.TierPowerUser,
+			"triage requires the poweruser level", h.handleTriage))
 	}
 	mux.Handle("GET /static/", http.FileServerFS(assets))
 	return securityHeaders(mux)

@@ -135,6 +135,50 @@ stops being re-read: its stream replays the whole log from the beginning
 on every reconnect, which would keep a finding's last-seen instant fresh
 forever and let a line from hours ago read as current.
 
+## Triage: starting from the symptom
+
+The diagnostics screen is signal-driven: it lists what matched. An
+operator whose cluster refuses connections still has to find, among
+the findings, the one that explains it — or notice that none does. The
+**triage** screen (`/triage`, same flag and same level) reads the same
+run in the other direction. It carries one **playbook** per symptom an
+operator arrives with:
+
+| Playbook | Symptom |
+|---|---|
+| `cannot-connect` | Clients cannot connect |
+| `writes-refused` | Writes are refused or hang |
+| `backups-not-happening` | Backups are not happening |
+| `will-not-come-up` | The cluster will not come up |
+| `replica-behind` | A replica is behind or not replicating |
+| `operation-stuck` | A switchover, failover or upgrade is stuck |
+| `operator-silent` | The operator seems to be doing nothing |
+
+A playbook is an ordered list of questions, in the order the upstream
+troubleshooting guide asks them: the platform first, then the
+operator, then the database, then the paths out of it. Each question
+is answered by the checks that already ran, named on the step — never
+by a check of its own. A playbook adds no observation and no
+judgement; it is a reading order over the catalog, written as data,
+and the tests refuse a step that names a check the catalog does not
+declare, and a playbook with no golden scenario landing on the step it
+was built for.
+
+Every step is answered, and the first found one is where to start:
+
+| Step outcome | Meaning |
+|---|---|
+| found | A check behind the step matched; its findings are linked to their cards on the diagnostics screen. A few steps also ask a **fact** the catalog has no rule for — no primary named, no ready pod, no read-write Service, no schedule — answered from the snapshots directly, with the evidence quoted. |
+| ruled out | Every check behind the step ran and found nothing — which rules out exactly what those checks describe. |
+| could not be judged | A check behind the step could not run, and none matched. The step rules nothing out, and says which check and why. |
+| needs a switched-off source, does not apply | Every check behind the step was switched off, or pinned to other versions. |
+| not observable here | Nothing the console observes answers the step. It hands the reader the guide's own command instead — the operator's own pod, a NetworkPolicy. |
+
+The honesty rules of the catalog carry through unchanged: a step is
+never ruled out on a check that could not run, and a playbook that
+found nothing says how many of its steps could not be judged rather
+than reading as reassurance.
+
 ## The count in the sidebar
 
 The console runs the catalog on every page render and carries the result
