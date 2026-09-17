@@ -111,6 +111,21 @@ period. Pin an exact image tag and read the notes before upgrading.
   relations; the declined signals; every playbook step with the checks
   behind it — and a test keeps the file equal to the code.
 
+- **The instance managers' own status reports.** A new sweep reads
+  `/pg/status` from every instance pod's status port — the report the
+  operator reads before deciding and `kubectl cnpg status` prints — on
+  by default like the metrics sweep (`INSTANCE_STATUS_ENABLED`,
+  `INSTANCE_STATUS_INTERVAL`). The pods screen shows each instance's
+  report, attributed as the instance's own claim, and seven rules read
+  it: a configuration change waiting for a restart, a replica with
+  replay paused, an instance manager doubting its own PostgreSQL is
+  reachable, pg_stat_archiver's last failure newer than its last
+  success, WAL segments waiting by the instance's own count, an
+  inactive replication slot the operator does not manage, and
+  instance-manager version drift across the instances. Reports are
+  judged per instance against the sweep cadence, as scraped metrics
+  are.
+
 - **Five faults in the operator journey.** The end-to-end test injects
   a suspended backup schedule, a declared Database whose owner does
   not exist, hibernation, a supervised strategy parking a restart on a

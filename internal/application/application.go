@@ -32,6 +32,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -121,6 +122,9 @@ type Deps struct {
 	// route exists. The scraper needs the pod roster, so it only runs
 	// when PodSource is also wired.
 	Metrics *metrics.Store
+	// InstanceStatus is the store the instance managers' status reports
+	// are swept into. Nil leaves the source switched off.
+	InstanceStatus *instancestatus.Store
 	// PoolerMetrics is the same window over the PgBouncer exporter's
 	// surface, filled from the pooler pods. Nil means no pooler metrics
 	// screen; it needs PoolerPodSource for the same reason Metrics
@@ -188,6 +192,10 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 			sources.Metrics = deps.Metrics
 			runners = append(runners, scrape.New(podStore, deps.Metrics, scrape.InstancePort,
 				deps.Metrics.Interval(), deps.Clock, logger).Run)
+		}
+		if deps.InstanceStatus != nil {
+			sources.InstanceStatus = deps.InstanceStatus
+			runners = append(runners, instancestatus.New(podStore, deps.InstanceStatus, instancestatus.Port, deps.Clock, logger).Run)
 		}
 	}
 	if deps.EventSource != nil {

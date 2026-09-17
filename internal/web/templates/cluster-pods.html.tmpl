@@ -54,6 +54,36 @@
       <p class="origin">source: kubernetes-observed</p>
     </section>
     {{- end}}
+    {{- with .InstanceStatus}}
+    <section class="panel sectioned" data-panel="instance-status">
+      <div class="panel-head">
+        <h2>Instance status</h2>
+      </div>
+      <div class="panel-body">
+      <p class="state">What each instance manager reports about its own PostgreSQL, read from the status port: the report the operator reads before deciding and <code>kubectl cnpg status</code> prints.</p>
+      {{- if not .Swept}}
+      <div class="empty"><strong>No sweep yet</strong>The status ports have not been read since the console started.</div>
+      {{- else if .Rows}}
+      <div class="table-scroll">
+      <table class="instance-status">
+        <thead><tr><th>Instance</th><th>Role</th><th>Timeline</th><th>Current LSN</th><th>WAL archiving</th><th>WAL waiting</th><th>Pending restart</th><th>Manager</th><th>Read</th></tr></thead>
+        <tbody>
+          {{- range .Rows}}
+          <tr{{if .Stale}} data-state="stale"{{end}}><td>{{.Instance}}</td><td>{{.Role}}</td><td>{{.Timeline}}</td><td>{{.CurrentLSN}}</td><td>{{.Archiving}}</td><td>{{.ReadyWAL}}</td><td>{{.PendingRestart}}</td><td>{{.Manager}}</td><td>{{.Age}} ago{{if .Stale}} — stale{{end}}</td></tr>
+          {{- end}}
+        </tbody>
+      </table>
+      </div>
+      {{- else}}
+      <p class="state">no instance answered the last sweep</p>
+      {{- end}}
+      {{- range .Failing}}
+      <p class="state">could not read: {{.}}</p>
+      {{- end}}
+      <p class="origin">source: instance-reported — swept from each instance pod's status port{{if .Swept}}, last sweep {{.SweptAt}}{{end}}</p>
+      </div>
+    </section>
+    {{- end}}
     {{- if .PodHistory}}
     <section class="panel sectioned">
       <div class="panel-head">

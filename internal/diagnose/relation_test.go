@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
 
@@ -140,6 +141,10 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 	}, now.Add(-time.Hour))
 	poolers := Input{Now: now, HasPoolers: true, Poolers: observe.PoolersSnapshot{
 		Poolers: []observe.PoolerFacts{{Name: "orders-rw", Phase: "failed"}}}}
+	status := statusInput(
+		instancestatus.Reading{Instance: "orders-1", IsPrimary: true, PendingRestart: true, LastFailedWALTime: &moved,
+			ReadyWALFiles: 40, InstanceManagerVersion: "1.30.0", Slots: []instancestatus.Slot{{Name: "debezium"}}},
+		instancestatus.Reading{Instance: "orders-2", InstanceManagerVersion: "1.29.2"})
 	fifteen := int32(15)
 	lease := leaseInput(observe.PrimaryLeaseFacts{Present: true, Holder: "orders-2", RenewedAt: &moved, DurationSeconds: &fifteen},
 		"orders-1", "orders-1")
@@ -172,6 +177,11 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 		"pooler-phase":    {PoolerPhase{AnyOf: []string{"failed"}}, poolers, EntityRef{Kind: "Pooler", Name: "orders-rw"}, time.Time{}},
 		"lease-expired":   {PrimaryLeaseExpired{Grace: time.Minute}, lease, EntityRef{Kind: "Pod", Name: "orders-2"}, moved},
 		"lease-holder":    {PrimaryLeaseHolderMismatch{}, lease, EntityRef{Kind: "Pod", Name: "orders-2"}, time.Time{}},
+		"status-flag":     {InstanceFlagSet{Flag: FlagPendingRestart}, status, EntityRef{Kind: "Pod", Name: "orders-1"}, now},
+		"status-archive":  {InstanceArchiveFailing{}, status, EntityRef{Kind: "Pod", Name: "orders-1"}, moved},
+		"status-wal":      {InstanceReadyWAL{Threshold: 32}, status, EntityRef{Kind: "Pod", Name: "orders-1"}, now},
+		"status-slot":     {InstanceSlotInactive{}, status, EntityRef{Kind: "Pod", Name: "orders-1"}, now},
+		"status-drift":    {InstanceManagerDrift{}, status, clusterSubject, time.Time{}},
 	} {
 		rule := Rule{ID: "subject", Summary: "Subject.", When: tc.when}
 		check, findings := evaluateRule(rule, tc.in)

@@ -41,6 +41,7 @@ import (
 
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
 )
@@ -430,11 +431,22 @@ type Input struct {
 	// detector reaches the API server or the exporters.
 	Metrics       MetricsWindow
 	PoolerMetrics MetricsWindow
+	// InstanceStatus is the instance managers' own status reports, swept
+	// from the status port. Nil when the sweep is switched off; a source
+	// that has not swept yet answers so.
+	InstanceStatus InstanceStatusSource
 	// Logs is the continuous matcher's read side, nil when log following
 	// is off. It is the one input that is not a snapshot: a stream is
 	// best effort, so a detector reading it may report what was seen but
 	// never how much there was.
 	Logs LogObservations
+}
+
+// InstanceStatusSource is the read side of the instance-status sweep.
+type InstanceStatusSource interface {
+	// CurrentInstanceStatus returns the snapshot and whether a sweep
+	// has published one.
+	CurrentInstanceStatus() (instancestatus.Snapshot, bool)
 }
 
 // MetricsWindow is the read side of a scraped metrics window, narrowed

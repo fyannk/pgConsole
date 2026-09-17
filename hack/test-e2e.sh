@@ -205,6 +205,11 @@ wait_page_contains "Cluster in healthy state" 120 baseline.html
 # the Backup is created, and the overview intentionally summarizes rather than
 # repeating the section tables.
 wait_path_contains "/cluster/pods" "orders-1" 120 baseline-pods.html
+# The instance managers' own reports are swept from the status port; the
+# roster carries the primary's report with its manager version.
+wait_path_contains "/cluster/pods" "<td>orders-1</td><td>primary</td>" 120 baseline-status.html || {
+  log "the instance status sweep never reported the primary"; exit 1; }
+grep -qF "source: instance-reported" "$OUT/baseline-status.html" || { log "instance status misses its attribution"; exit 1; }
 wait_path_contains "/backups/objects" "manual-1" 120 baseline-backups.html
 # The overview absorbed the conditions table the separate status screen
 # used to carry, and the Events screen was removed outright, so both are

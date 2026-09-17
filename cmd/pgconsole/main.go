@@ -31,6 +31,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/history/bolt"
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/kube"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -165,6 +166,9 @@ func build(lookup config.Lookup, logOut io.Writer) (*application.App, error) {
 	// and with a snapshot path configured it is primed from the file and
 	// rewritten periodically. An unusable snapshot path fails before
 	// listen; an unreadable snapshot merely starts the window empty.
+	if cfg.InstanceStatusEnabled {
+		deps.InstanceStatus = instancestatus.NewStore(cfg.InstanceStatusInterval)
+	}
 	if cfg.MetricsEnabled {
 		limits := metrics.Limits{
 			Interval:  cfg.MetricsInterval,
