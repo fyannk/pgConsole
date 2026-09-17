@@ -25,6 +25,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-primary-status-check",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a Ready primary whose status check the operator cannot pass",
@@ -41,6 +42,7 @@ func eventRules() []diagnose.Rule {
 			// arbitrate the primary through status alone.
 			ID:        "cnpg-primary-lease-conflict",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a primary lease owned by something else",
@@ -54,6 +56,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-scale-down-refused",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a scale-down the operator reverted",
@@ -67,6 +70,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-ca-secret-unusable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a referenced CA secret that is missing or unparseable",
@@ -78,6 +82,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-ca-expiring",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a user-supplied CA approaching expiry",
@@ -93,6 +98,7 @@ func eventRules() []diagnose.Rule {
 			// reconcile without recording it.
 			ID:        "cnpg-service-account-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since129),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a specified ServiceAccount that does not exist",
@@ -104,6 +110,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-bootstrap-backup-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a bootstrap recovery pointing at a Backup that does not exist",
@@ -115,6 +122,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-manager-upgrade-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an in-place instance-manager upgrade that failed",
@@ -126,6 +134,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-retention-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a backup retention policy that failed to prune",
@@ -142,6 +151,7 @@ func eventRules() []diagnose.Rule {
 			// catalog lists as this cluster's.
 			ID:        "cnpg-backup-target-unhealthy",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the operator refusing to run a backup on an unhealthy target instance",
@@ -157,6 +167,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-waiting-for-target",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a backup waiting because its target instance is not ready",
@@ -171,6 +182,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-error",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a backup the operator recorded as exiting with an error",
@@ -185,6 +197,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-manager-restarted",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a backup the operator failed because the instance manager restarted under it",
@@ -200,6 +213,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-schedule-cluster-unhealthy",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a schedule the operator holds back because the cluster is not healthy",
@@ -214,6 +228,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-schedule-invalid",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a schedule expression no time satisfies",
@@ -229,6 +244,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-schedule-adoption-refused",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a schedule skipping a run because a Backup of that name is not its own",
@@ -243,6 +259,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-schedule-creation-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a schedule the operator could not create a Backup object for",
@@ -257,6 +274,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pooler-image-catalog-error",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a Pooler whose image the operator cannot resolve from its catalog",

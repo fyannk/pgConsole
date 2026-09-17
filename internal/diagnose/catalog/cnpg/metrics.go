@@ -46,6 +46,7 @@ func metricRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-instance-fenced",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an instance the operator has fenced",
@@ -61,6 +62,7 @@ func metricRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-switchover-required",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an instance reporting that a manual switchover is required",
@@ -83,6 +85,7 @@ func metricRules() []diagnose.Rule {
 			// roles are changing.
 			ID:        "cnpg-primary-disagreement",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "an instance whose own recovery state contradicts the operator's current primary",
@@ -109,6 +112,7 @@ func metricRules() []diagnose.Rule {
 			// manager publishes the count under the pinned collector.
 			ID:        "cnpg-wal-archive-backlog",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "WAL segments waiting to be archived, at least 32 of them, held for a quarter of an hour",
@@ -131,6 +135,7 @@ func metricRules() []diagnose.Rule {
 			// than the instance manager's.
 			ID:        "cnpg-archiver-failing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "PostgreSQL counting archive failures continuously for a quarter of an hour",

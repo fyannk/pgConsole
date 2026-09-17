@@ -45,6 +45,9 @@ type Rule struct {
 	// the catalog files and prefixes nothing: applicability comes only
 	// from Requires.
 	Component Component
+	// Layer is where in the stack the rule looks, for the screen's
+	// per-layer summary. See Layer.
+	Layer Layer
 	// Requires are the version pins, all of which must hold. Empty means
 	// the rule applies to every version the console encounters — a claim
 	// the author makes by leaving it empty, not a default.
@@ -1268,7 +1271,7 @@ func (DeclaredObjectFailed) evaluate(_ string, in Input) ([]conditionMatch, stri
 //     when the rule is pinned, the version facts that made it apply,
 //   - otherwise → clear, scoped by the pins the check row states.
 func evaluateRule(rule Rule, in Input) (Check, []Finding) {
-	check := Check{Name: rule.ID, Describes: ruleDescribes(rule)}
+	check := Check{Name: rule.ID, Layer: rule.Layer, Describes: ruleDescribes(rule)}
 	facts := versionFacts(in)
 
 	var pins []Evidence

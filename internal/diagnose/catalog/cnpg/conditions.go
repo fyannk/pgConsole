@@ -29,6 +29,7 @@ func conditionRules() []diagnose.Rule {
 			// PostgreSQL (the cnpg-wal-disk-space-phase rule).
 			ID:        "cnpg-wal-archiving-failing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the instance manager reporting continuous archiving as failing",
@@ -59,6 +60,7 @@ func conditionRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-last-backup-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the last backup having failed",
@@ -73,6 +75,7 @@ func conditionRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-system-id-mismatch",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "instances reporting different PostgreSQL system identifiers",
@@ -89,6 +92,7 @@ func conditionRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-hibernation-blocked",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a requested hibernation waiting on cluster health",
@@ -103,6 +107,7 @@ func conditionRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-demotion-fencing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "every instance fenced for a replica-cluster transition",
@@ -120,6 +125,7 @@ func conditionRules() []diagnose.Rule {
 			// time is the clock.
 			ID:        "cnpg-not-ready",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the operator reporting the cluster not ready for ten minutes",
@@ -138,6 +144,7 @@ func conditionRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-no-system-id",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "no instance reporting a system identifier for a quarter of an hour",
@@ -156,6 +163,7 @@ func conditionRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-hibernation-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "hibernation waiting on pod deletion for a quarter of an hour",
@@ -175,6 +183,7 @@ func conditionRules() []diagnose.Rule {
 			// deliberately down rather than left to find it out.
 			ID:        "cnpg-hibernated",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityNote,
 			Describes: "the operator reporting the cluster as hibernated",

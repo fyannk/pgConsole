@@ -96,6 +96,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-instance-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an instance the operator lists as failed",
@@ -112,6 +113,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pvc-unusable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a volume claim the operator lists as unusable",
@@ -132,6 +134,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pvc-dangling",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a volume claim with no pod, listed by the operator for a quarter of an hour",
@@ -149,6 +152,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pvc-resizing-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a volume claim carrying the resize condition for half an hour",
@@ -170,6 +174,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pvc-initializing-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a volume claim whose creating job has produced no pod in half an hour",
@@ -186,6 +191,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-primary-failing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator reporting the current primary as failing for over a minute",
@@ -207,6 +213,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-timeline-divergence",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "an instance reporting a PostgreSQL timeline other than the cluster's for ten minutes",
@@ -227,6 +234,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-certificate-expired",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a certificate the operator reports as already expired",
@@ -247,6 +255,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-certificate-expiring",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a certificate the operator reports as expiring within three days",
@@ -262,6 +271,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-managed-role-unreconcilable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a managed role the operator reports it cannot reconcile",
@@ -278,6 +288,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-tablespace-error",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a declared tablespace the operator reports an error for",
@@ -290,6 +301,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-replica-switch-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a switch to replica cluster in progress for a quarter of an hour",
@@ -306,6 +318,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-instances-short",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "fewer ready instances than declared, by the operator's own count, for ten minutes",
@@ -335,6 +348,7 @@ func statusRules() []diagnose.Rule {
 			// reconciler that creates it and the field the holder writes.
 			ID:        "cnpg-primary-lease-expired",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the primary lease unrenewed for a minute past its duration, or released with a primary named",
@@ -357,6 +371,7 @@ func statusRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-primary-lease-holder-mismatch",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the primary lease held by an instance other than the operator's current primary",

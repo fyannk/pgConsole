@@ -54,6 +54,8 @@ type backupCadenceDetector struct{}
 
 func (backupCadenceDetector) Name() string { return "backup-cadence" }
 
+func (backupCadenceDetector) Layer() Layer { return LayerBackups }
+
 func (backupCadenceDetector) Describes() string {
 	return "a backup schedule that runs far more often than its author is likely to have intended"
 }

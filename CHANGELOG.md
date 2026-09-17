@@ -75,6 +75,16 @@ period. Pin an exact image tag and read the notes before upgrading.
   primary. The Lease is kept out of the object timeline on purpose;
   recorded, its heartbeat would evict everything else.
 
+- **Where, and since when.** The diagnostics screen opens with one
+  line per layer of the stack — Kubernetes, operator, PostgreSQL,
+  replication, backups and archive, poolers, declared objects — each
+  folding its checks' outcomes into a count and a state, so a reader
+  is told which side the trouble is on before what it is. Every check
+  now declares its layer, and the catalog's tests refuse one that does
+  not. Each incident card with two or more dated observations lists
+  them in the order they were made, with the cluster's own clocks
+  beside them; a state with no instant is never given one.
+
 ### Changed
 
 - **The catalog grew from 86 to 127 rules, 133 checks with the six

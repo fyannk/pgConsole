@@ -27,15 +27,33 @@ import (
 // IDs unique across the catalog and the hand-written detectors, every
 // rule able to state what it looks for, and every log rule carrying the
 // substrings the matcher will be given.
+// knownLayer reports whether the layer is in the closed set the screen
+// folds checks into. A rule declaring none, or one the screen does not
+// know, would vanish from the layer strip.
+func knownLayer(layer diagnose.Layer) bool {
+	for _, known := range diagnose.Layers() {
+		if layer == known {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCatalogDeclarationsAreComplete(t *testing.T) {
 	t.Parallel()
 	seen := map[string]bool{}
 	for _, detector := range diagnose.Detectors() {
 		seen[detector.Name()] = true
+		if !knownLayer(detector.Layer()) {
+			t.Errorf("detector %q declares layer %q, which is not one the screen knows", detector.Name(), detector.Layer())
+		}
 	}
 	for _, rule := range Rules() {
 		if rule.ID == "" || rule.Summary == "" || rule.Component == "" {
 			t.Errorf("rule is missing its identity: %+v", rule)
+		}
+		if !knownLayer(rule.Layer) {
+			t.Errorf("rule %q declares layer %q, which is not one the screen knows", rule.ID, rule.Layer)
 		}
 		if seen[rule.ID] {
 			t.Errorf("duplicate check name %q", rule.ID)

@@ -16,7 +16,15 @@ Three panels carry the screen:
 - **Cluster state** — the operator's own account first: phase and
   reason, instances ready against declared, the current primary. A
   reader asking "what is wrong" gets "what state is it in" answered
-  before any finding.
+  before any finding. Beneath it, **where**: one line per layer of the
+  stack — Kubernetes, operator, PostgreSQL, replication, backups and
+  archive, poolers, declared objects — folding the run into which side
+  the trouble is on before what it is. Every check declares its layer,
+  so the strip is a count of outcomes, not a guess from names. A layer
+  reads clear only when every check that could run there found
+  nothing; a layer holding a check that could not run says so and
+  rules nothing out; a layer whose checks were all switched off or
+  inapplicable has nothing to say, and says that too.
 - **Findings, grouped into incidents** — what matched, most severe
   first. A finding whose declared cause also matched nests inside that
   cause's card, so a chain like *archiving failed → WAL filled the
@@ -29,6 +37,14 @@ Three panels carry the screen:
   console's guidance, labeled as guidance and rendered apart from the
   evidence, because advice is the one thing on this screen no source
   reported.
+  An incident with two or more dated observations also carries
+  **"Since when"**: those observations in the order they were made,
+  each the instant its own source reported — a log line's last match,
+  an event's last occurrence, a backup's creation — with the cluster's
+  own clocks beside them where they bear on it: how long the current
+  phase has held, when the primary was detected failing, when the
+  current primary move was requested. A finding built on a state that
+  carries no instant is not placed; a time is never invented for it.
 - **What was checked** — every check that ran, with its outcome. This
   is what keeps an empty screen honest: no findings means "none of
   these checks matched", never "the cluster is healthy".

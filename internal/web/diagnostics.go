@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/fyannk/pgConsole/internal/diagnose"
 	"github.com/fyannk/pgConsole/internal/diagnose/catalog"
@@ -40,6 +41,11 @@ type DiagnosticsView struct {
 	// any finding: a reader asking "what is wrong" needs "what state is
 	// it in" answered first.
 	State ClusterStateView
+	// Layers is the run folded into one line per layer of the stack,
+	// in reading order from the platform up: which side the trouble is
+	// on, before what it is. Every check declares its layer, so this is
+	// a count, not a guess.
+	Layers []LayerView
 	// Findings are most severe first. A finding whose declared cause
 	// also matched, on a finding that satisfies the relation's scope and
 	// window, is nested inside that cause's card rather than listed
@@ -73,6 +79,41 @@ type CheckGroupView struct {
 	Checks []CheckView
 }
 
+// LayerView is one layer's line in the strip: what matched there, what
+// could not be judged there, and what was ruled out there. The state
+// token reads worst first — a match makes the layer degraded, a check
+// that could not run makes it unknown, and only a layer whose every
+// runnable check came back clear reads current. A layer whose checks
+// were all switched off or inapplicable has nothing to say and reads
+// na rather than clear: nothing was ruled out.
+type LayerView struct {
+	Name string
+	// State is the stylesheet token.
+	State string
+	// Worst is the most severe matched finding's severity, empty when
+	// none matched.
+	Worst string
+	// Matched, CouldNotRun, Off, NotApplicable and Clear count the
+	// layer's checks by outcome.
+	Matched, CouldNotRun, Off, NotApplicable, Clear int
+	// Summary is the counts in words, for the strip.
+	Summary string
+}
+
+// SequenceView is one dated observation inside an incident, in the
+// order it was made.
+type SequenceView struct {
+	// At is the observation's instant as the source reported it.
+	At Stamp
+	// Severity and Summary are the finding's, so the entry reads as the
+	// finding it stands for. Severity is empty for a cluster clock — a
+	// phase since, a primary move — which is context, not a finding.
+	Severity string
+	Summary  string
+	// Origin names whose instant this is.
+	Origin string
+}
+
 // ClusterStateView is the header strip: the operator-reported state of
 // the cluster, or an explicit unknown.
 type ClusterStateView struct {
@@ -96,10 +137,17 @@ type ClusterStateView struct {
 // FindingView is one finding as rendered.
 type FindingView struct {
 	ID       string
+	Layer    string
 	Severity string
 	Summary  string
 	Detail   string
 	Evidence []EvidenceView
+	// Sequence is the incident's dated observations in time order — the
+	// findings of this card and its consequences that carry an instant,
+	// plus the cluster's own clocks that bear on it. Empty when fewer
+	// than two are dated: one instant is not a sequence. Only a root
+	// card carries one.
+	Sequence []SequenceView
 	// NextSteps is the console's guidance, rendered apart from the
 	// quoted evidence and labeled as guidance: it is the one thing on
 	// the screen no source reported.
@@ -236,10 +284,16 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 		ClusterName: h.cfg.ClusterName,
 		State:       clusterStateView(in),
 	}
+	view.Layers = layerViews(result)
+	layerOf := map[string]diagnose.Layer{}
+	for _, check := range result.Checks {
+		layerOf[check.Name] = check.Layer
+	}
 	rendered := make([]FindingView, 0, len(result.Findings))
 	for _, finding := range result.Findings {
 		one := FindingView{
 			ID:        finding.ID,
+			Layer:     string(layerOf[finding.Check]),
 			Severity:  finding.Severity.String(),
 			Summary:   boundMessage(finding.Summary),
 			Detail:    boundMessage(finding.Detail),
@@ -257,6 +311,9 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 		rendered = append(rendered, one)
 	}
 	view.Findings = groupIncidents(result.Findings, rendered)
+	for i := range view.Findings {
+		view.Findings[i].Sequence = incidentSequence(view.Findings[i], result.Findings, in)
+	}
 	// Bucket the checks by outcome, keeping catalog order inside each
 	// group. The states are the console's shared vocabulary: a match is
 	// degraded, an unrunnable check is unknown, an inapplicable one is
@@ -323,6 +380,140 @@ func (h *Handler) buildDiagnosticsView(r *http.Request, in diagnose.Input, resul
 		})
 	}
 	return view
+}
+
+// layerViews folds the run into one line per layer, in the catalog's
+// layer order. A layer no check declares is omitted rather than shown
+// empty.
+func layerViews(result diagnose.Result) []LayerView {
+	byLayer := map[diagnose.Layer]*LayerView{}
+	worst := map[diagnose.Layer]diagnose.Severity{}
+	for _, check := range result.Checks {
+		layer := byLayer[check.Layer]
+		if layer == nil {
+			layer = &LayerView{Name: string(check.Layer)}
+			byLayer[check.Layer] = layer
+		}
+		switch {
+		case check.Outcome == diagnose.CheckMatched:
+			layer.Matched++
+		case check.Outcome == diagnose.CheckUnavailable && check.SourceOff:
+			layer.Off++
+		case check.Outcome == diagnose.CheckUnavailable:
+			layer.CouldNotRun++
+		case check.Outcome == diagnose.CheckNotApplicable:
+			layer.NotApplicable++
+		default:
+			layer.Clear++
+		}
+	}
+	checkLayer := map[string]diagnose.Layer{}
+	for _, check := range result.Checks {
+		checkLayer[check.Name] = check.Layer
+	}
+	for _, finding := range result.Findings {
+		layer := checkLayer[finding.Check]
+		if finding.Severity > worst[layer] {
+			worst[layer] = finding.Severity
+		}
+	}
+	var views []LayerView
+	for _, name := range diagnose.Layers() {
+		layer := byLayer[name]
+		if layer == nil {
+			continue
+		}
+		var parts []string
+		switch {
+		case layer.Matched > 0:
+			layer.State = "degraded"
+			layer.Worst = worst[name].String()
+			if worst[name] == diagnose.SeverityNote {
+				layer.State = "stale"
+			}
+			parts = append(parts, fmt.Sprintf("%d matched", layer.Matched))
+		case layer.CouldNotRun > 0:
+			layer.State = unknown
+		case layer.Clear > 0:
+			layer.State = "current"
+		default:
+			layer.State = "na"
+		}
+		if layer.CouldNotRun > 0 {
+			parts = append(parts, fmt.Sprintf("%d could not run", layer.CouldNotRun))
+		}
+		if layer.Clear > 0 {
+			parts = append(parts, fmt.Sprintf("%d clear", layer.Clear))
+		}
+		if layer.Off > 0 {
+			parts = append(parts, fmt.Sprintf("%d switched off", layer.Off))
+		}
+		if layer.NotApplicable > 0 {
+			parts = append(parts, fmt.Sprintf("%d do not apply", layer.NotApplicable))
+		}
+		layer.Summary = strings.Join(parts, " · ")
+		views = append(views, *layer)
+	}
+	return views
+}
+
+// incidentSequence orders the incident's dated observations. The
+// findings' own instants come first-class — each is the instant its
+// source reported — and the cluster's clocks that bear on any incident
+// are added as context: how long the current phase has held, when the
+// primary was detected failing, when the current primary move was
+// requested. A finding with no instant is not placed: a state is not
+// an event, and inventing a time for it would be the one thing the
+// sequence must not do.
+func incidentSequence(card FindingView, findings []diagnose.Finding, in diagnose.Input) []SequenceView {
+	byID := map[string]diagnose.Finding{}
+	for _, finding := range findings {
+		byID[finding.ID] = finding
+	}
+	var entries []SequenceView
+	add := func(view FindingView) {
+		finding, ok := byID[view.ID]
+		if !ok || finding.At.IsZero() {
+			return
+		}
+		origin := "console-derived"
+		if len(finding.Evidence) > 0 {
+			origin = finding.Evidence[0].Origin
+		}
+		entries = append(entries, SequenceView{
+			At: stampOf(&finding.At), Severity: view.Severity, Summary: view.Summary, Origin: origin,
+		})
+	}
+	add(card)
+	for _, consequence := range card.Consequences {
+		add(consequence)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if in.HasCluster && in.Cluster.Cluster.Present {
+		cluster := in.Cluster.Cluster
+		if cluster.Phase != "" && cluster.Phase != "Cluster in healthy state" {
+			if since, ok := cluster.Since("phase=" + cluster.Phase); ok {
+				entries = append(entries, SequenceView{At: stampOf(&since), Origin: "console-observed",
+					Summary: "Phase " + cluster.Phase + " first seen (the console's clock; a floor)"})
+			}
+		}
+		if at := cluster.PrimaryFailingSince; at != nil {
+			entries = append(entries, SequenceView{At: stampOf(at), Origin: "operator-reported",
+				Summary: "Primary " + cluster.CurrentPrimary + " detected failing"})
+		}
+		if at := cluster.TargetPrimaryTimestamp; at != nil && cluster.TargetPrimary != "" &&
+			cluster.TargetPrimary != cluster.CurrentPrimary {
+			entries = append(entries, SequenceView{At: stampOf(at), Origin: "operator-reported",
+				Summary: "Primary move to " + cluster.TargetPrimary + " requested"})
+		}
+	}
+	if len(entries) < 2 {
+		return nil
+	}
+	sort.SliceStable(entries, func(a, b int) bool { return entries[a].At.ISO < entries[b].At.ISO })
+	return entries
 }
 
 // checkBucket is how the screen groups one check: by outcome, and — for

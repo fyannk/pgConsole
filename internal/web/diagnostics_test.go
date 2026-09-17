@@ -520,6 +520,62 @@ func TestDiagnosticsRendersTheWALChainAsOneIncident(t *testing.T) {
 	if !namesDisk {
 		t.Errorf("near misses do not name the disk-full finding on the other pod: %+v", decoy.Related)
 	}
+
+	// Where: the incident's root is a backup-path finding, and the
+	// layers it touched read degraded; a layer no finding touched and
+	// whose checks all read, reads clear. The strip is in stack order.
+	if root.Layer != "Backups and archive" {
+		t.Errorf("root layer = %q", root.Layer)
+	}
+	layers := map[string]LayerView{}
+	var order []string
+	for _, layer := range view.Layers {
+		layers[layer.Name] = layer
+		order = append(order, layer.Name)
+	}
+	if len(order) < 2 || order[0] != "Kubernetes" || order[1] != "Operator" {
+		t.Errorf("layers are not in stack order: %v", order)
+	}
+	for _, name := range []string{"Backups and archive", "PostgreSQL", "Kubernetes"} {
+		if layer := layers[name]; layer.State != "degraded" || layer.Matched == 0 || layer.Worst != "critical" {
+			t.Errorf("layer %s = %+v, want degraded with a critical match", name, layer)
+		}
+	}
+	if layer := layers["Declared objects"]; layer.State != unknown || layer.CouldNotRun == 0 {
+		t.Errorf("declared objects, never observed here, should read unknown: %+v", layer)
+	}
+
+	// Since when: the four log observations carry instants, the
+	// condition carries none, and the sequence lists the four in the
+	// order they were made and leaves the condition out.
+	if len(root.Sequence) != 4 {
+		t.Fatalf("sequence = %+v, want the four dated observations", root.Sequence)
+	}
+	for i, want := range []string{"11:30:00Z", "11:40:00Z", "11:50:00Z", "11:51:00Z"} {
+		if !strings.HasSuffix(root.Sequence[i].At.Text, want) {
+			t.Errorf("sequence[%d] at %q, want %s", i, root.Sequence[i].At.Text, want)
+		}
+	}
+	if root.Sequence[0].Origin == "" || !strings.Contains(root.Sequence[0].Summary, "refused") && !strings.Contains(root.Sequence[0].Summary, "credentials") {
+		t.Errorf("sequence[0] = %+v, want the object store's refusal first", root.Sequence[0])
+	}
+	if len(decoy.Sequence) != 0 {
+		t.Errorf("a card with one dated observation carries a sequence: %+v", decoy.Sequence)
+	}
+
+	// The template renders both: the strip under the state panel and
+	// the sequence inside the root card.
+	rec := httptest.NewRecorder()
+	h.renderDiagnostics(rec, view)
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<li class="layer" data-state="degraded">`, "Backups and archive", "1 matched",
+		"Since when", `<time datetime="2026-08-09T11:30:00Z">`, "console-observed", "plugin-barman-cloud",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered diagnostics misses %q", want)
+		}
+	}
 }
 
 // TestSwitchedOffChecksGroupApartFromFailingOnes is the reason this

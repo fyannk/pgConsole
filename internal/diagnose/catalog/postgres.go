@@ -67,6 +67,7 @@ func postgresRules() []diagnose.Rule {
 			// declares, unchanged across the verified releases.
 			ID:        "postgres-fatal",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Severity:  diagnose.SeverityWarning,
@@ -101,6 +102,7 @@ func postgresRules() []diagnose.Rule {
 		{
 			ID:        "postgres-panic",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Severity:  diagnose.SeverityCritical,
@@ -128,6 +130,7 @@ func postgresRules() []diagnose.Rule {
 			// CloudNativePG exporter's, hence the operator pin.
 			ID:        "postgres-xid-wraparound",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Pinned:    []string{"xid_age"},
@@ -150,6 +153,7 @@ func postgresRules() []diagnose.Rule {
 		{
 			ID:        "postgres-mxid-wraparound",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Pinned:    []string{"mxid_age"},
@@ -174,6 +178,7 @@ func postgresRules() []diagnose.Rule {
 			// own claim rather than smuggled in as an observation.
 			ID:        "postgres-eol",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentPostgreSQL, Constraint: "<14"}},
 			// PostgreSQL 14 was released on 2021-09-30 and leaves the
@@ -202,6 +207,7 @@ func postgresRules() []diagnose.Rule {
 			// a forgotten session. What it no longer is, is invisible.
 			ID:        "postgres-long-transaction",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Pinned:    []string{"max_tx_duration_seconds"},
@@ -227,6 +233,7 @@ func postgresRules() []diagnose.Rule {
 			// as a rate.
 			ID:        "postgres-deadlocks-ongoing",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Severity:  diagnose.SeverityWarning,
@@ -243,6 +250,7 @@ func postgresRules() []diagnose.Rule {
 		{
 			ID:        "postgres-backends-waiting",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Severity:  diagnose.SeverityWarning,
@@ -263,6 +271,7 @@ func postgresRules() []diagnose.Rule {
 			// each installed extension against the version the image ships.
 			ID:        "postgres-extension-update-available",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Severity:  diagnose.SeverityNote,

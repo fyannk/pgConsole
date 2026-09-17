@@ -40,6 +40,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "wal-archive-not-empty",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the archiver refusing a WAL archive that is not empty",
 			Summary: "The configured WAL archive is not empty, so the operator " +
@@ -54,6 +55,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "backup-destination-conflict",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a backup destination already holding another cluster's data",
 			Summary: "The backup destination already holds data for this server " +
@@ -64,6 +66,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "object-store-denied",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the object store refusing the configured credentials",
 			Summary: "The object store refused the operator's credentials for the " +
@@ -81,6 +84,7 @@ func barmanRules() []diagnose.Rule {
 			// Forbidden" — and one substring cannot cover both.
 			ID:        "object-store-forbidden",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the object store answering 403 Forbidden",
 			Summary: "The object store answered 403 Forbidden, so the configured " +
@@ -93,6 +97,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "object-store-unreachable",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "an unreachable object store endpoint",
 			Summary: "The operator could not reach the configured object store " +
@@ -110,6 +115,7 @@ func barmanRules() []diagnose.Rule {
 			// declared in its own module rather than the operator's.
 			ID:        "barman-last-backup-failed",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the barman-cloud plugin reporting the last backup as failed",
 			Summary:   "The barman-cloud plugin reports this cluster's most recent backup as failed.",
@@ -124,6 +130,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "barman-no-successful-backup",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the barman-cloud plugin reporting no successful backup for a cluster scheduled for a day",
 			Summary:   "The object store holds no successful backup of this cluster, though a backup schedule has existed for a day.",

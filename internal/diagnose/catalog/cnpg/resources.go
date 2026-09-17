@@ -26,6 +26,7 @@ func resourceRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pooler-short",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
 			Requires:  pin(since128),
 			Pinned:    []string{"PoolerStatus", `json:"readyInstances,omitempty"`},
 			Severity:  diagnose.SeverityWarning,
@@ -51,6 +52,7 @@ func resourceRules() []diagnose.Rule {
 			// database by then.
 			ID:        "cnpg-pooler-clients-waiting",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
 			Requires:  pin(since128),
 			Pinned:    []string{"maxwait"},
 			Severity:  diagnose.SeverityWarning,
@@ -73,6 +75,7 @@ func resourceRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-quorum-standbys-short",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Pinned:    []string{`json:"standbyNumber`, `json:"standbyNames`},
 			Severity:  diagnose.SeverityCritical,
@@ -94,6 +97,7 @@ func resourceRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-image-catalog-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Pinned:    []string{"ImageCatalogRef", `json:"imageCatalogRef`},
 			Severity:  diagnose.SeverityCritical,
@@ -114,6 +118,7 @@ func resourceRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-image-catalog-lacks-major",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Pinned:    []string{"ImageCatalogRef", `json:"imageCatalogRef`},
 			Severity:  diagnose.SeverityCritical,
@@ -134,6 +139,7 @@ func resourceRules() []diagnose.Rule {
 			// phase to report.
 			ID:        "cnpg-pooler-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a Pooler the operator reports as failed",
@@ -151,6 +157,7 @@ func resourceRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pooler-inactive",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a Pooler the operator reports as inactive",

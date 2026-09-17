@@ -29,6 +29,7 @@ func backupRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a Backup object reporting the failed phase",
@@ -43,6 +44,7 @@ func backupRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-stuck-pending",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a Backup pending for over half an hour",
@@ -58,6 +60,7 @@ func backupRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-wal-archiving",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a Backup blocked by failing WAL archiving",
@@ -70,6 +73,7 @@ func backupRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-schedule-suspended",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a suspended backup schedule",
@@ -89,6 +93,7 @@ func backupRules() []diagnose.Rule {
 			// next-run field is what the console can honestly read.
 			ID:        "cnpg-schedule-not-firing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a backup schedule that has stopped firing",

@@ -30,6 +30,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-unrecoverable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator declaring the cluster unrecoverable",
@@ -52,6 +53,7 @@ func phaseRules() []diagnose.Rule {
 			// definition at admission instead of parking it in a phase.
 			ID:        "cnpg-invalid-definition",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a cluster definition the operator's validation rejected",
@@ -65,6 +67,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-cannot-create-objects",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator failing to create the cluster's auxiliary objects",
@@ -78,6 +81,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-unknown-plugin",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a required CNPG-I plugin the operator cannot find",
@@ -95,6 +99,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-plugin-failure",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a CNPG-I plugin interaction failing during reconciliation",
@@ -107,6 +112,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-image-catalog-unusable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "an image catalog the operator cannot resolve an image from",
@@ -125,6 +131,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-arch-binary-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an online instance-manager upgrade blocked by a missing architecture binary",
@@ -137,6 +144,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-waiting-for-user",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the operator waiting for a supervised switchover",
@@ -152,6 +160,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-upgrade-delayed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityNote,
 			Describes: "an upgrade the operator is configured to delay",
@@ -163,6 +172,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-wal-disk-space-phase",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator refusing to run PostgreSQL for lack of WAL disk space",
@@ -186,6 +196,7 @@ func phaseRules() []diagnose.Rule {
 			// than the console's guess.
 			ID:        "cnpg-primary-move-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a switchover or failover still unfinished after ten minutes",
@@ -203,6 +214,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-status-unreachable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator unable to reach any ready instance's status endpoint",
@@ -223,6 +235,7 @@ func phaseRules() []diagnose.Rule {
 			// console's own record of how long the phase has held.
 			ID:        "cnpg-bootstrap-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator creating the primary or a replica for half an hour",
@@ -251,6 +264,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-rollout-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a rollout or configuration phase held for half an hour",
@@ -279,6 +293,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-major-upgrade-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a PostgreSQL major upgrade running for two hours",
@@ -298,6 +313,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-promotion-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a replica cluster's promotion running for a quarter of an hour",
