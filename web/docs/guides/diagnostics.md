@@ -351,10 +351,11 @@ releases, so catalog rules carry version pins, and the pins state what
 was actually verified. The current spans:
 
 - **CloudNativePG** rules are pinned to the releases whose source the
-  rule strings were read from verbatim: **1.28.4, 1.29.2 and 1.30.0**.
-  Most rules span all three; machinery that first appears in 1.30 (the
-  primary lease, the invalid-definition phase) is pinned 1.30-only. On
-  an unverified release the rules answer "does not apply".
+  rule strings were read from verbatim: **1.29.2 and 1.30.0**, the two
+  minors this console supports. Most rules span both; machinery that
+  first appears in 1.30 (the primary lease, the invalid-definition
+  phase, the pooler phases) is pinned 1.30-only. On any other release,
+  older or newer, the rules answer "does not apply".
 - **PostgreSQL** and **Kubernetes** each carry an end-of-life rule
   whose pin *is* the diagnostic, plus threshold rules (transaction-id
   wraparound) built on console-pinned knowledge that is stated as such.

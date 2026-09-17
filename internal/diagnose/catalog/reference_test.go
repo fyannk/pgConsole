@@ -159,7 +159,7 @@ func pins(rule diagnose.Rule) string {
 	for _, requirement := range rule.Requires {
 		parts = append(parts, requirement.String())
 	}
-	return cell(strings.Join(parts, "; "))
+	return "`" + strings.Join(parts, "`, `") + "`"
 }
 
 func relations(rule diagnose.Rule) string {
