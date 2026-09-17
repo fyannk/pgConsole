@@ -57,6 +57,10 @@ func TestConvertEventCandidateSelection(t *testing.T) {
 		{"prefix-matched stranger pod is still a candidate", rawEvent("e5", "Pod", "v1", "orders-api-1"), true},
 		{"unrelated pod", rawEvent("e6", "Pod", "v1", "billing-1"), false},
 		{"unrelated kind", rawEvent("e7", "Deployment", "apps/v1", "orders"), false},
+		{"backup of the operator's group", rawEvent("e9", "Backup", "postgresql.cnpg.io/v1", "orders-20260917"), true},
+		{"scheduled backup of the operator's group", rawEvent("e10", "ScheduledBackup", "postgresql.cnpg.io/v1", "nightly"), true},
+		{"pooler of the operator's group", rawEvent("e11", "Pooler", "postgresql.cnpg.io/v1", "orders-rw"), true},
+		{"backup kind of another group", rawEvent("e12", "Backup", "velero.io/v1", "orders"), false},
 		{"other namespace object", func() map[string]any {
 			e := rawEvent("e8", "Pod", "v1", "orders-1")
 			e["involvedObject"].(map[string]any)["namespace"] = "elsewhere"

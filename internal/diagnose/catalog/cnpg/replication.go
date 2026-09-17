@@ -63,6 +63,7 @@ func replicationRules() []diagnose.Rule {
 			// stopped streaming and is not catching up either.
 			ID:        "cnpg-replica-not-receiving",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Pinned:    []string{"in_recovery", "is_wal_receiver_up", "END AS lag,"},
 			Severity:  diagnose.SeverityCritical,
@@ -89,6 +90,7 @@ func replicationRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-replication-lag-high",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Pinned:    []string{"END AS lag,", "Replication lag behind primary in seconds"},
 			Severity:  diagnose.SeverityWarning,
@@ -112,6 +114,7 @@ func replicationRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-sync-replicas-short",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Pinned:    []string{"sync_replicas"},
 			Severity:  diagnose.SeverityCritical,
@@ -134,6 +137,7 @@ func replicationRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-slot-retaining-wal",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Pinned:    []string{"pg_wal_lsn_diff"},
 			Severity:  diagnose.SeverityWarning,

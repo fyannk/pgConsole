@@ -35,6 +35,7 @@ func repositoryRules() []diagnose.Rule {
 		{
 			ID:        "repository-wal-unhealthy",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the repository-evidence sidecar reporting WAL continuity as unhealthy",
 			Summary:   "The repository-evidence sidecar reports the archived WAL sequence as unhealthy.",
@@ -52,6 +53,7 @@ func repositoryRules() []diagnose.Rule {
 		{
 			ID:        "repository-coverage-unhealthy",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the repository-evidence sidecar reporting recovery coverage as unhealthy",
 			Summary:   "The repository-evidence sidecar reports the observed recovery coverage as unhealthy.",
@@ -67,6 +69,7 @@ func repositoryRules() []diagnose.Rule {
 		{
 			ID:        "repository-retention-unhealthy",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the repository-evidence sidecar reporting retention as unhealthy",
 			Summary:   "The repository-evidence sidecar reports retention as unhealthy against the configured expectation.",

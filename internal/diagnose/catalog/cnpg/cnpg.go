@@ -45,6 +45,7 @@ func Rules() []diagnose.Rule {
 	rules = append(rules, logRules()...)
 	rules = append(rules, resourceRules()...)
 	rules = append(rules, replicationRules()...)
+	rules = append(rules, statusRules()...)
 	return rules
 }
 

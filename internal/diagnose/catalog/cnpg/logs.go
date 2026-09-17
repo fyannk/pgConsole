@@ -37,6 +37,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-wal-archive-command-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the archive_command wrapper failing",
@@ -49,6 +50,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-wal-archive-plugin-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a WAL-archive plugin whose socket is absent from the pod",
@@ -62,6 +64,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-wal-restore-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the restore_command wrapper failing for reasons other than a missing WAL",
@@ -83,6 +86,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pg-rewind-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "pg_rewind failing on a demoted primary",
@@ -95,6 +99,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-pg-control-lost",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a zero-length pg_control with no surviving backup copy",
@@ -108,6 +113,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-join-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a new replica failing to join the cluster",
@@ -122,6 +128,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-initdb-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "initdb bootstrap failing",
@@ -132,6 +139,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-restore-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a recovery bootstrap failing",
@@ -143,6 +151,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-recovery-target-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a recovery target matching no backup in the catalog",
@@ -156,6 +165,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-wal-disk-full",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the instance manager refusing to start PostgreSQL for lack of WAL space",
@@ -176,6 +186,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-postgres-start-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the postmaster failing to launch",
@@ -187,6 +198,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-postgres-exited",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the postmaster exiting with errors",
@@ -211,6 +223,7 @@ func logRules() []diagnose.Rule {
 			// exist in earlier releases.
 			ID:        "cnpg-lease-preempted",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a primary shut down because another instance took its lease",
@@ -222,6 +235,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-lease-not-acquired",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a promotion stalled waiting for the primary lease",
@@ -233,6 +247,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-replica-not-streaming",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the streaming readiness probe finding no replication connection",
@@ -245,6 +260,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-replica-lagging",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a replica exceeding the configured maximum lag",
@@ -255,6 +271,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-slot-sync-failing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "replication slot synchronization failing on a replica",
@@ -267,6 +284,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-liveness-isolation",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "an instance concluding it is network-isolated",
@@ -280,6 +298,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-plugin-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a backup targeting a plugin absent from the pod",
@@ -291,6 +310,7 @@ func logRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-stop-blocked",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "pg_backup_stop failing at the end of a physical backup",

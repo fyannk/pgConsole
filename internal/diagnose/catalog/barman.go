@@ -14,7 +14,16 @@
 
 package catalog
 
-import "github.com/fyannk/pgConsole/internal/diagnose"
+import (
+	"time"
+
+	"github.com/fyannk/pgConsole/internal/diagnose"
+)
+
+// noBackupAfter is how old a schedule must be before the absence of any
+// successful backup is a finding: a day, which every schedule that
+// fires at all has fired within.
+const noBackupAfter = 24 * time.Hour
 
 // barmanRules are the claims about backup and archiving through the
 // Barman Cloud tooling — messages the barman-cloud commands themselves
@@ -31,6 +40,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "wal-archive-not-empty",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the archiver refusing a WAL archive that is not empty",
 			Summary: "The configured WAL archive is not empty, so the operator " +
@@ -45,6 +55,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "backup-destination-conflict",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a backup destination already holding another cluster's data",
 			Summary: "The backup destination already holds data for this server " +
@@ -55,6 +66,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "object-store-denied",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the object store refusing the configured credentials",
 			Summary: "The object store refused the operator's credentials for the " +
@@ -72,6 +84,7 @@ func barmanRules() []diagnose.Rule {
 			// Forbidden" — and one substring cannot cover both.
 			ID:        "object-store-forbidden",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the object store answering 403 Forbidden",
 			Summary: "The object store answered 403 Forbidden, so the configured " +
@@ -84,6 +97,7 @@ func barmanRules() []diagnose.Rule {
 		{
 			ID:        "object-store-unreachable",
 			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "an unreachable object store endpoint",
 			Summary: "The operator could not reach the configured object store " +
@@ -92,6 +106,43 @@ func barmanRules() []diagnose.Rule {
 			When:   diagnose.LogContains{Substrings: []string{"could not connect to", "endpoint"}},
 			NextSteps: "Check the endpoint URL, DNS from inside the namespace, and any " +
 				"NetworkPolicy between the instance pods and the store.",
+		},
+		{
+			// The two rules below read the plugin's own summary of the
+			// store rather than a log line, and so are the plugin's
+			// account rather than the archiver's. Unpinned like the rest
+			// of this file: the ObjectStore status is the plugin's API,
+			// declared in its own module rather than the operator's.
+			ID:        "barman-last-backup-failed",
+			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
+			Severity:  diagnose.SeverityWarning,
+			Describes: "the barman-cloud plugin reporting the last backup as failed",
+			Summary:   "The barman-cloud plugin reports this cluster's most recent backup as failed.",
+			Detail: "The plugin summarises each server's backups in its ObjectStore " +
+				"status. A failure more recent than the last success means the " +
+				"recovery window has stopped growing; the Backup object and its " +
+				"events carry the error.",
+			When:      diagnose.StoreBackupFailed{},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "barman-no-successful-backup",
+			Component: diagnose.ComponentBarman,
+			Layer:     diagnose.LayerBackups,
+			Severity:  diagnose.SeverityCritical,
+			Describes: "the barman-cloud plugin reporting no successful backup for a cluster scheduled for a day",
+			Summary:   "The object store holds no successful backup of this cluster, though a backup schedule has existed for a day.",
+			Detail: "A schedule a day old has had its first run, and the plugin " +
+				"reports no successful backup for this cluster's server. There is " +
+				"no recovery point: nothing in the store can restore this cluster.",
+			When: diagnose.StoreNoBackup{Since: noBackupAfter},
+			NextSteps: "Look at the Backup objects the schedule created and their " +
+				"events: each failed one quotes why. Until one succeeds, the " +
+				"cluster has no backup at all.",
+			Link:      "/backups",
+			LinkLabel: "Backups",
 		},
 	}
 }

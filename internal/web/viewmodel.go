@@ -227,6 +227,62 @@ type EventsView struct {
 	// PodEventsWithheld reports that pod events exist but membership is
 	// unknown, so they are withheld rather than guessed.
 	PodEventsWithheld bool
+	// ObjectEventsWithheld reports that events on Backup, ScheduledBackup
+	// or Pooler objects exist but the catalog that would attribute them
+	// to this cluster is unavailable, so they are withheld likewise.
+	ObjectEventsWithheld bool
+}
+
+// eventMembership is what admits an event to the cluster's list: the
+// objects each catalog lists as this cluster's, by kind, and whether
+// each catalog was readable at all. An unreadable catalog withholds
+// its kind rather than guessing.
+type eventMembership struct {
+	pods, backups, schedules, poolers         map[string]bool
+	podsOK, backupsOK, schedulesOK, poolersOK bool
+}
+
+// membershipOf builds the admission sets from the snapshots.
+func membershipOf(s snapshots) eventMembership {
+	m := eventMembership{
+		pods: map[string]bool{}, backups: map[string]bool{}, schedules: map[string]bool{}, poolers: map[string]bool{},
+		podsOK: s.podsOK, backupsOK: s.backupsOK, schedulesOK: s.backupsOK, poolersOK: s.poolersOK,
+	}
+	if s.podsOK {
+		for _, p := range s.pods.Pods {
+			m.pods[p.Name] = true
+		}
+	}
+	if s.backupsOK {
+		for _, b := range s.backups.Backups {
+			m.backups[b.Name] = true
+		}
+		for _, sb := range s.backups.ScheduledBackups {
+			m.schedules[sb.Name] = true
+		}
+	}
+	if s.poolersOK {
+		for _, p := range s.poolers.Poolers {
+			m.poolers[p.Name] = true
+		}
+	}
+	return m
+}
+
+// admits decides one event: admitted, or withheld because its catalog
+// is unreadable (the second result), or simply not this cluster's.
+func (m eventMembership) admits(kind, name string) (admitted, withheld bool) {
+	switch kind {
+	case "Pod":
+		return m.podsOK && m.pods[name], !m.podsOK
+	case "Backup":
+		return m.backupsOK && m.backups[name], !m.backupsOK
+	case "ScheduledBackup":
+		return m.schedulesOK && m.schedules[name], !m.schedulesOK
+	case "Pooler":
+		return m.poolersOK && m.poolers[name], !m.poolersOK
+	}
+	return true, false
 }
 
 // BackupRowView is one operator-reported Backup. A completed phase remains an
@@ -1002,7 +1058,7 @@ func buildPage(ctx context.Context, clusterName, namespace string, s snapshots, 
 			Panel{Title: "Poolers", Origin: OriginOperator, State: unknown, Detail: noSnapshot})
 	}
 	if s.eventsOK {
-		page.Events = buildEventsView(s.events, s.pods, s.podsOK, s.window, now)
+		page.Events = buildEventsView(s.events, membershipOf(s), s.window, now)
 	} else {
 		page.Panels = append([]Panel{{
 			Title: "Events", Origin: OriginKubernetes, State: unknown, Detail: noSnapshot,
@@ -1147,6 +1203,17 @@ type ObjectStoreDetailView struct {
 	Destination string
 	Endpoint    string
 	Retention   string
+	// ServerName is the name this cluster's backups are filed under.
+	ServerName string
+	// FirstRecoverabilityPoint, LastSuccessfulBackup and LastFailedBackup
+	// are the plugin's own per-server summary, each "unknown" when the
+	// plugin reports none.
+	FirstRecoverabilityPoint string
+	LastSuccessfulBackup     string
+	LastFailedBackup         string
+	// WindowReported is whether the plugin reported a window for this
+	// server at all.
+	WindowReported bool
 	// Observed reports that the store itself was read, not merely
 	// referenced.
 	Observed bool
@@ -1291,14 +1358,25 @@ func buildObjectStoreDetail(ref observe.ObjectStoreReference) *ObjectStoreDetail
 	if ref.Name == "" {
 		return nil
 	}
-	return &ObjectStoreDetailView{
-		Origin:      OriginKubernetes,
-		Name:        ref.Name,
-		Destination: ref.Destination,
-		Endpoint:    ref.Endpoint,
-		Retention:   ref.RetentionPolicy,
-		Observed:    ref.State == observe.ObjectStorePresent,
+	view := &ObjectStoreDetailView{
+		Origin:                   OriginKubernetes,
+		Name:                     ref.Name,
+		Destination:              ref.Destination,
+		Endpoint:                 ref.Endpoint,
+		Retention:                ref.RetentionPolicy,
+		ServerName:               ref.ServerName,
+		Observed:                 ref.State == observe.ObjectStorePresent,
+		FirstRecoverabilityPoint: unknown,
+		LastSuccessfulBackup:     unknown,
+		LastFailedBackup:         unknown,
 	}
+	if window := ref.RecoveryWindow; window != nil {
+		view.WindowReported = true
+		view.FirstRecoverabilityPoint = formatTime(window.FirstRecoverabilityPoint)
+		view.LastSuccessfulBackup = formatTime(window.LastSuccessfulBackup)
+		view.LastFailedBackup = formatTime(window.LastFailedBackup)
+	}
+	return view
 }
 
 // ClusterOverviewView is the power-user screen: the Cluster resource
@@ -2099,35 +2177,33 @@ func formatTimeAge(preferred *time.Time, fallback time.Time, now time.Time) stri
 }
 
 // buildEventsView converts the event snapshot into display rows. The
-// age window is re-applied against the rendering instant, and Pod-kind
-// events are admitted only for verified members: without a pods
-// snapshot they are withheld rather than guessed.
-func buildEventsView(snap observe.EventsSnapshot, pods observe.PodsSnapshot, podsOK bool, window time.Duration, now time.Time) *EventsView {
+// age window is re-applied against the rendering instant, and events on
+// pods, backups, schedules and poolers are admitted only for verified
+// members: without the catalog that would verify them they are
+// withheld rather than guessed.
+func buildEventsView(snap observe.EventsSnapshot, members eventMembership, window time.Duration, now time.Time) *EventsView {
 	view := &EventsView{
 		Origin:    OriginKubernetes,
 		Meta:      buildMeta(snap.Generation, snap.ObservedAt, snap.Stale, now),
 		Window:    window.String(),
 		Truncated: snap.Truncated,
 	}
-	members := make(map[string]bool, len(pods.Pods))
-	if podsOK {
-		for _, p := range pods.Pods {
-			members[p.Name] = true
-		}
-	}
 	cutoff := now.Add(-window)
 	for _, e := range snap.Events {
 		if e.LastSeen.Before(cutoff) {
 			continue
 		}
-		if e.Kind == "Pod" {
-			if !podsOK {
+		admitted, withheld := members.admits(e.Kind, e.Object)
+		if withheld {
+			if e.Kind == "Pod" {
 				view.PodEventsWithheld = true
-				continue
+			} else {
+				view.ObjectEventsWithheld = true
 			}
-			if !members[e.Object] {
-				continue
-			}
+			continue
+		}
+		if !admitted {
+			continue
 		}
 		view.Rows = append(view.Rows, EventRowView{
 			Type:    orUnknown(e.Type),

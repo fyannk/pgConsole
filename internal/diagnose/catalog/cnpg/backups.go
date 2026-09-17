@@ -29,6 +29,7 @@ func backupRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-backup-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a Backup object reporting the failed phase",
@@ -36,10 +37,14 @@ func backupRules() []diagnose.Rule {
 			Detail: "A failed Backup object stays failed: only a new backup — scheduled or " +
 				"manual — produces the next recovery point.",
 			When: diagnose.BackupPhase{AnyOf: []string{"failed"}},
+			// The Backup's own events carry the error the phase summarises.
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-backup-error"}, {Cause: "cnpg-backup-manager-restarted"}},
 		},
 		{
 			ID:        "cnpg-backup-stuck-pending",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a Backup pending for over half an hour",
@@ -49,10 +54,13 @@ func backupRules() []diagnose.Rule {
 				"not healthy enough to back up — including being hibernated. It stays " +
 				"pending until the blocker clears.",
 			When: diagnose.BackupPhase{AnyOf: []string{"pending"}, MinAge: 30 * time.Minute},
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-backup-waiting-for-target"}, {Cause: "cnpg-backup-target-unhealthy"}},
 		},
 		{
 			ID:        "cnpg-backup-wal-archiving",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a Backup blocked by failing WAL archiving",
@@ -65,6 +73,7 @@ func backupRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-schedule-suspended",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a suspended backup schedule",
@@ -84,6 +93,7 @@ func backupRules() []diagnose.Rule {
 			// next-run field is what the console can honestly read.
 			ID:        "cnpg-schedule-not-firing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a backup schedule that has stopped firing",

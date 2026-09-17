@@ -149,6 +149,20 @@ func quorumUnavailable(in Input) string {
 	return ""
 }
 
+// leaseUnavailable is the reason the primary lease cannot be read,
+// empty when it can. Absence of the Lease is readable: an operator
+// before 1.30 keeps none, and the version pins on the lease checks are
+// what say whether one is expected.
+func leaseUnavailable(in Input) string {
+	switch {
+	case !in.HasPrimaryLease:
+		return "the primary lease has not been observed yet"
+	case in.PrimaryLease.Stale:
+		return "the primary lease snapshot is stale, so the current holder is unknown"
+	}
+	return ""
+}
+
 // imageCatalogsUnavailable is the reason the image catalogs cannot be
 // read, empty when they can.
 func imageCatalogsUnavailable(in Input) string {

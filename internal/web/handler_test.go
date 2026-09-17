@@ -51,6 +51,8 @@ type staticSnapshots struct {
 	poolerPodsOK  bool
 	quorum        observe.FailoverQuorumSnapshot
 	quorumOK      bool
+	lease         observe.PrimaryLeaseSnapshot
+	leaseOK       bool
 	catalogs      observe.ImageCatalogsSnapshot
 	catalogsOK    bool
 	declared      observe.DatabaseObjectsSnapshot
@@ -97,6 +99,10 @@ func (s staticSnapshots) CurrentPoolerPods() (observe.PodsSnapshot, bool) {
 
 func (s staticSnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
 	return s.quorum, s.quorumOK
+}
+
+func (s staticSnapshots) CurrentPrimaryLease() (observe.PrimaryLeaseSnapshot, bool) {
+	return s.lease, s.leaseOK
 }
 
 func (s staticSnapshots) CurrentImageCatalogs() (observe.ImageCatalogsSnapshot, bool) {
@@ -1651,5 +1657,38 @@ func TestTheSidebarNeverSaysAllClear(t *testing.T) {
 	}
 	if badge := findingsBadge([]diagnose.Finding{}); badge != nil {
 		t.Fatalf("a run with no findings produced a badge: %+v", badge)
+	}
+}
+
+// TestHandlerOverviewRendersThePluginsRecoveryWindow proves the
+// barman-cloud plugin's per-server summary reaches the overview under
+// its own attribution, and that a store observed without a window for
+// this server says so rather than showing nothing.
+func TestHandlerOverviewRendersThePluginsRecoveryWindow(t *testing.T) {
+	t.Parallel()
+	first := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	last := time.Date(2026, 9, 16, 2, 0, 0, 0, time.UTC)
+	snap := observe.Snapshot{Generation: 7, ObservedAt: testNow.Add(-3 * time.Second), Cluster: healthyFacts()}
+	src := staticSnapshots{snap: snap, ok: true, backupsOK: true, backups: observe.BackupsSnapshot{
+		ObjectStore: observe.ObjectStoreReference{Name: "orders-store", ServerName: "orders", State: observe.ObjectStorePresent,
+			RecoveryWindow: &observe.RecoveryWindow{FirstRecoverabilityPoint: &first, LastSuccessfulBackup: &last}},
+	}}
+	h, _ := newTestHandler(t, src, kube.FakeProber{}, Links{})
+	body := get(t, h, http.MethodGet, "/cluster/overview").Body.String()
+	for _, want := range []string{
+		"First recoverability point", "2026-09-01 00:00:00Z",
+		"Last successful backup", "2026-09-16 02:00:00Z",
+		"Last failed backup</dt><dd>unknown", "plugin-reported",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("overview misses %q", want)
+		}
+	}
+
+	src.backups.ObjectStore.RecoveryWindow = nil
+	h, _ = newTestHandler(t, src, kube.FakeProber{}, Links{})
+	body = get(t, h, http.MethodGet, "/cluster/overview").Body.String()
+	if !strings.Contains(body, "not reported for server orders") {
+		t.Error("a store without a window for this server is not said to be so")
 	}
 }

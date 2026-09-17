@@ -126,6 +126,23 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 	metric := Input{Now: now, Metrics: staticWindow{"orders-2": {"fencing-on": {At: swept.Unix(), Value: 1}}}}
 	objects := Input{Now: now, HasDatabaseObjects: true, DatabaseObjects: observe.DatabaseObjectsSnapshot{
 		Databases: []observe.DatabaseFacts{{Name: "app", Declared: observe.Declared{Applied: boolPtr(false)}}}}}
+	failing := clusterInput(17)
+	failing.Cluster.Cluster.CurrentPrimary = "orders-1"
+	failing.Cluster.Cluster.PrimaryFailingSince = &moved
+	four := 4
+	held := heldInput(observe.ClusterFacts{
+		Phase: "Creating a new replica", FailedInstances: []string{"orders-4"}, DanglingPVCs: []string{"orders-4"},
+		TimelineID: &four, InstanceTimelines: []observe.InstanceTimeline{{Instance: "orders-2", TimelineID: 3}},
+		CertificateExpirations: []observe.CertificateExpiry{{Secret: "orders-ca", ExpiresAt: now.Add(-time.Hour)}},
+		UnreconcilableRoles:    []observe.RoleProblem{{Role: "app"}},
+		Tablespaces:            []observe.TablespaceFacts{{Name: "fast", Error: "disk missing"}},
+		Conditions:             []observe.Condition{{Type: "Ready", Status: "False", LastTransition: &moved}},
+	}, now.Add(-time.Hour))
+	poolers := Input{Now: now, HasPoolers: true, Poolers: observe.PoolersSnapshot{
+		Poolers: []observe.PoolerFacts{{Name: "orders-rw", Phase: "failed"}}}}
+	fifteen := int32(15)
+	lease := leaseInput(observe.PrimaryLeaseFacts{Present: true, Holder: "orders-2", RenewedAt: &moved, DurationSeconds: &fifteen},
+		"orders-1", "orders-1")
 	for name, tc := range map[string]struct {
 		when    Condition
 		in      Input
@@ -140,6 +157,21 @@ func TestConditionsNameTheirSubjectAndTime(t *testing.T) {
 		"container": {ContainerState{Reasons: []string{"OOMKilled"}}, pods, EntityRef{Kind: "Pod", Name: "orders-3"}, time.Time{}},
 		"metric":    {InstantNonZero{Key: "fencing-on"}, metric, EntityRef{Kind: "Pod", Name: "orders-2"}, swept},
 		"declared":  {DeclaredObjectFailed{}, objects, EntityRef{Kind: "Database", Name: "app"}, time.Time{}},
+		"held-phase": {ClusterPhaseHeld{AnyOf: []string{"Creating a new replica"}, MinAge: time.Minute},
+			held, clusterSubject, time.Time{}},
+		"held-condition": {ClusterCondition{Type: "Ready", Status: "False", MinAge: time.Minute},
+			held, clusterSubject, time.Time{}},
+		"failed-instance": {StatusListed{List: ListFailedInstances}, held, EntityRef{Kind: "Pod", Name: "orders-4"}, time.Time{}},
+		"dangling-pvc": {StatusListed{List: ListDanglingPVC, MinAge: time.Minute},
+			held, EntityRef{Kind: "PersistentVolumeClaim", Name: "orders-4"}, time.Time{}},
+		"primary-failing": {PrimaryFailing{MinAge: time.Minute}, failing, EntityRef{Kind: "Pod", Name: "orders-1"}, moved},
+		"timeline":        {TimelineDivergence{MinAge: time.Minute}, held, EntityRef{Kind: "Pod", Name: "orders-2"}, time.Time{}},
+		"certificate":     {CertificateExpiring{}, held, EntityRef{Kind: "Secret", Name: "orders-ca"}, time.Time{}},
+		"role":            {RoleUnreconcilable{}, held, EntityRef{Kind: "ManagedRole", Name: "app"}, time.Time{}},
+		"tablespace":      {TablespaceError{}, held, EntityRef{Kind: "Tablespace", Name: "fast"}, time.Time{}},
+		"pooler-phase":    {PoolerPhase{AnyOf: []string{"failed"}}, poolers, EntityRef{Kind: "Pooler", Name: "orders-rw"}, time.Time{}},
+		"lease-expired":   {PrimaryLeaseExpired{Grace: time.Minute}, lease, EntityRef{Kind: "Pod", Name: "orders-2"}, moved},
+		"lease-holder":    {PrimaryLeaseHolderMismatch{}, lease, EntityRef{Kind: "Pod", Name: "orders-2"}, time.Time{}},
 	} {
 		rule := Rule{ID: "subject", Summary: "Subject.", When: tc.when}
 		check, findings := evaluateRule(rule, tc.in)

@@ -23,6 +23,7 @@ The default authority. Namespace-scoped, no mutating verb.
 | Poolers | `postgresql.cnpg.io` | `poolers` | `get`, `list`, `watch` |
 | Declared database objects | `postgresql.cnpg.io` | `databases`, `databaseroles`, `publications`, `subscriptions` | `get`, `list`, `watch` |
 | Failover quorum | `postgresql.cnpg.io` | `failoverquorums` | `get` (pinned by `resourceNames`) and `watch` |
+| Primary lease (CloudNativePG 1.30+) | `coordination.k8s.io` | `leases` | `get` (pinned by `resourceNames`) and `watch` |
 | Image catalogs (namespaced) | `postgresql.cnpg.io` | `imagecatalogs` | `get`, `list`, `watch` |
 | Instance pods | `""` | `pods` | `get`, `list`, `watch` |
 | Services | `""` | `services` | `get`, `list`, `watch` |
@@ -35,7 +36,7 @@ The default authority. Namespace-scoped, no mutating verb.
 | Disruption budgets | `policy` | `poddisruptionbudgets` | `get`, `list`, `watch` |
 | RBAC inventory | `rbac.authorization.k8s.io` | `roles`, `rolebindings` | `get`, `list`, `watch` |
 | Jobs | `batch` | `jobs` | `get`, `list`, `watch` |
-| Repository reference (optional) | `barmancloud.cnpg.io` | `objectstores` | `get` |
+| Repository reference and recovery window (optional) | `barmancloud.cnpg.io` | `objectstores` | `get` |
 
 RBAC cannot pin `list`/`watch` by `resourceNames`, so the namespace plus
 application-side selection is the honest scope for listing; the cluster

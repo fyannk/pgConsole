@@ -78,6 +78,8 @@ type quotaDetector struct{}
 
 func (quotaDetector) Name() string { return "resource-quota" }
 
+func (quotaDetector) Layer() Layer { return LayerKubernetes }
+
 func (quotaDetector) Describes() string {
 	return "an object the API server refused to create against a namespace quota"
 }
@@ -151,6 +153,8 @@ type schedulingDetector struct{}
 
 func (schedulingDetector) Name() string { return "pod-scheduling" }
 
+func (schedulingDetector) Layer() Layer { return LayerKubernetes }
+
 func (schedulingDetector) Describes() string {
 	return "a pod the scheduler cannot place on any node"
 }
@@ -209,6 +213,8 @@ type imagePullDetector struct{}
 
 func (imagePullDetector) Name() string { return "image-pull" }
 
+func (imagePullDetector) Layer() Layer { return LayerKubernetes }
+
 func (imagePullDetector) Describes() string {
 	return "a container whose image the kubelet cannot pull"
 }
@@ -263,6 +269,8 @@ func isImagePullReason(reason string) bool {
 type volumeDetector struct{}
 
 func (volumeDetector) Name() string { return "volume-binding" }
+
+func (volumeDetector) Layer() Layer { return LayerKubernetes }
 
 func (volumeDetector) Describes() string {
 	return "a persistent volume claim that has not bound"

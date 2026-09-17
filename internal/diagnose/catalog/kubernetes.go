@@ -49,6 +49,7 @@ func kubernetesRules() []diagnose.Rule {
 		{
 			ID:        "k8s-volume-mount-failed",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a pod that cannot mount or attach one of its volumes",
 			Summary:   "A member pod cannot mount or attach a volume, so it cannot start.",
@@ -63,6 +64,7 @@ func kubernetesRules() []diagnose.Rule {
 		{
 			ID:        "k8s-pod-evicted",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a member pod evicted from its node",
 			Summary:   "A member pod was evicted from its node.",
@@ -77,6 +79,7 @@ func kubernetesRules() []diagnose.Rule {
 		{
 			ID:        "k8s-container-crashloop",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a container in CrashLoopBackOff",
 			Summary:   "A container is crash-looping: it keeps exiting and the kubelet is backing off restarting it.",
@@ -100,6 +103,7 @@ func kubernetesRules() []diagnose.Rule {
 		{
 			ID:        "k8s-container-oom",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a container the kernel killed for exceeding its memory limit",
 			Summary:   "A container was killed for exceeding its memory limit.",
@@ -117,6 +121,7 @@ func kubernetesRules() []diagnose.Rule {
 		{
 			ID:        "k8s-container-config-error",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a container the kubelet cannot construct",
 			Summary:   "A container cannot be created, so its pod is stuck before starting.",
@@ -139,6 +144,7 @@ func kubernetesRules() []diagnose.Rule {
 			// mean the same thing whichever operator owns the object.
 			ID:        "k8s-pod-replaced-repeatedly",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a pod replaced several times inside an hour",
 			Summary:   "A pod has been replaced several times in the last hour.",
@@ -158,6 +164,7 @@ func kubernetesRules() []diagnose.Rule {
 		{
 			ID:        "k8s-definition-rewritten-repeatedly",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an object whose definition is rewritten again and again inside an hour",
 			Summary:   "An object's definition is being rewritten again and again.",
@@ -185,6 +192,7 @@ func kubernetesRules() []diagnose.Rule {
 			// knowledge, current as of this console release.
 			ID:        "k8s-eol",
 			Component: diagnose.ComponentKubernetes,
+			Layer:     diagnose.LayerKubernetes,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentKubernetes, Constraint: "<1.34"}},
 			// Kubernetes ships a minor roughly every four months and

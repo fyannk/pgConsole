@@ -96,6 +96,12 @@ type FailoverQuorumSource interface {
 	CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool)
 }
 
+// PrimaryLeaseSource supplies the current primary-lease snapshot.
+type PrimaryLeaseSource interface {
+	// CurrentPrimaryLease returns the snapshot and whether one exists.
+	CurrentPrimaryLease() (observe.PrimaryLeaseSnapshot, bool)
+}
+
 // ImageCatalogsSource supplies the current ImageCatalog snapshot.
 type ImageCatalogsSource interface {
 	// CurrentImageCatalogs returns the snapshot and whether one exists.
@@ -163,6 +169,9 @@ type Sources struct {
 	PoolerPods PoolerPodsSource
 	// FailoverQuorum supplies the failover-quorum snapshot.
 	FailoverQuorum FailoverQuorumSource
+	// PrimaryLease supplies the primary-lease snapshot; nil when the
+	// deployment observes none.
+	PrimaryLease PrimaryLeaseSource
 	// ImageCatalogs supplies the ImageCatalog snapshot.
 	ImageCatalogs ImageCatalogsSource
 	// DatabaseObjects supplies the declarative-object snapshot.
@@ -1022,6 +1031,11 @@ func (EmptySnapshots) CurrentPoolerPods() (observe.PodsSnapshot, bool) {
 // CurrentFailoverQuorum reports no failover-quorum snapshot.
 func (EmptySnapshots) CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool) {
 	return observe.FailoverQuorumSnapshot{}, false
+}
+
+// CurrentPrimaryLease reports no primary-lease snapshot.
+func (EmptySnapshots) CurrentPrimaryLease() (observe.PrimaryLeaseSnapshot, bool) {
+	return observe.PrimaryLeaseSnapshot{}, false
 }
 
 // CurrentImageCatalogs reports no image-catalog snapshot.

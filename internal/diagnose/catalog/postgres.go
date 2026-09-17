@@ -36,6 +36,20 @@ const (
 	// longTransactionHeld is how long that age must hold. A report that
 	// finishes inside the window was work, not a leak.
 	longTransactionHeld = 30 * time.Minute
+	// deadlockRate is the rate of deadlocks, per second, that counts as
+	// continuous: one a minute. A deadlock is PostgreSQL killing one of
+	// two transactions so the other can finish; one a minute for a
+	// quarter of an hour is an application pattern, not an accident.
+	deadlockRate = 1.0 / 60
+	// deadlockHeld is how long that rate must hold.
+	deadlockHeld = 15 * time.Minute
+	// backendsWaiting is how many backends may wait on a lock at once.
+	// It is the number the operator's own sample alerting rule uses.
+	backendsWaiting = 300
+	// backendsWaitingHeld is how long that many must wait. The
+	// operator's sample rule holds for a minute; five is past the
+	// longest lock a migration takes in ordinary operation.
+	backendsWaitingHeld = 5 * time.Minute
 )
 
 // postgresRules are the claims about PostgreSQL itself.
@@ -53,6 +67,7 @@ func postgresRules() []diagnose.Rule {
 			// declares, unchanged across the verified releases.
 			ID:        "postgres-fatal",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Severity:  diagnose.SeverityWarning,
@@ -87,6 +102,7 @@ func postgresRules() []diagnose.Rule {
 		{
 			ID:        "postgres-panic",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Severity:  diagnose.SeverityCritical,
@@ -114,6 +130,7 @@ func postgresRules() []diagnose.Rule {
 			// CloudNativePG exporter's, hence the operator pin.
 			ID:        "postgres-xid-wraparound",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Pinned:    []string{"xid_age"},
@@ -136,6 +153,7 @@ func postgresRules() []diagnose.Rule {
 		{
 			ID:        "postgres-mxid-wraparound",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Pinned:    []string{"mxid_age"},
@@ -160,6 +178,7 @@ func postgresRules() []diagnose.Rule {
 			// own claim rather than smuggled in as an observation.
 			ID:        "postgres-eol",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentPostgreSQL, Constraint: "<14"}},
 			// PostgreSQL 14 was released on 2021-09-30 and leaves the
@@ -188,6 +207,7 @@ func postgresRules() []diagnose.Rule {
 			// a forgotten session. What it no longer is, is invisible.
 			ID:        "postgres-long-transaction",
 			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires: []diagnose.Requirement{
 				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
 			Pinned:    []string{"max_tx_duration_seconds"},
@@ -204,6 +224,65 @@ func postgresRules() []diagnose.Rule {
 			NextSteps: "Find the backend on the instance and decide whether it is work or a " +
 				"leak. An idle-in-transaction session is the usual leak, and it holds " +
 				"the horizon just as firmly as a running query does.",
+			Link:      "/cluster/metrics",
+			LinkLabel: "Metrics",
+		},
+		{
+			// PostgreSQL counts deadlocks per database; the exporter's
+			// default query publishes the count, and the console reads it
+			// as a rate.
+			ID:        "postgres-deadlocks-ongoing",
+			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Severity:  diagnose.SeverityWarning,
+			Describes: "deadlocks at a rate of one a minute or more, held for a quarter of an hour",
+			Summary:   "PostgreSQL has been breaking deadlocks continuously for a quarter of an hour.",
+			Detail: "Every deadlock is one transaction killed so another can finish. A " +
+				"rate that holds is two code paths taking locks in opposite orders, " +
+				"again and again; the server log names the statements each time.",
+			When:      diagnose.SeriesAbove{Key: "deadlocks", Threshold: deadlockRate, For: deadlockHeld},
+			Pinned:    []string{"pg_stat_database", "deadlocks"},
+			Link:      "/cluster/metrics",
+			LinkLabel: "Metrics",
+		},
+		{
+			ID:        "postgres-backends-waiting",
+			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Severity:  diagnose.SeverityWarning,
+			Describes: "at least 300 backends waiting on a lock, held for five minutes",
+			Summary:   "Hundreds of backends have been waiting on locks for five minutes: something holds a lock everything else needs.",
+			Detail: "Backends waiting are sessions blocked behind a lock another " +
+				"session holds — a long transaction, a migration, a vacuum that " +
+				"cannot finish. The lock holder is the finding; the waiters are " +
+				"its symptom.",
+			When:          diagnose.SeriesAbove{Key: "backends-waiting", Threshold: backendsWaiting, For: backendsWaitingHeld},
+			Pinned:        []string{"backends_waiting"},
+			ConsequenceOf: []diagnose.Relation{{Cause: "postgres-long-transaction", Strength: diagnose.StrengthPlausible}},
+			Link:          "/cluster/metrics",
+			LinkLabel:     "Metrics",
+		},
+		{
+			// A note, not a fault: the exporter's default query compares
+			// each installed extension against the version the image ships.
+			ID:        "postgres-extension-update-available",
+			Component: diagnose.ComponentPostgreSQL,
+			Layer:     diagnose.LayerPostgreSQL,
+			Requires: []diagnose.Requirement{
+				{Component: diagnose.ComponentCNPG, Constraint: ">=1.28 <1.31"}},
+			Severity:  diagnose.SeverityNote,
+			Describes: "an installed extension older than the version its image ships",
+			Summary:   "An installed extension is older than the version the image ships, and has not been updated.",
+			Detail: "A new image carries newer extension files, but the extension " +
+				"installed in each database stays at its version until ALTER " +
+				"EXTENSION UPDATE is run. Nothing breaks; the newer code is simply " +
+				"not in use.",
+			When:      diagnose.InstantNonZero{Key: "extensions-update"},
+			Pinned:    []string{"pg_extensions", "update_available"},
 			Link:      "/cluster/metrics",
 			LinkLabel: "Metrics",
 		},

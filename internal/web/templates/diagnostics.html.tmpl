@@ -50,6 +50,18 @@
     <p class="origin">The Cluster has not been observed yet; nothing below can be judged against its state.</p>
     {{- end}}
     {{- end}}
+    {{- if .Layers}}
+    <h3 class="layers-title">Where</h3>
+    <ol class="layers">
+      {{- range .Layers}}
+      <li class="layer" data-state="{{.State}}">
+        <span class="layer-name">{{.Name}}</span>
+        <span class="layer-summary">{{.Summary}}{{if .Worst}} <span class="sev" data-severity="{{.Worst}}">{{.Worst}}</span>{{end}}</span>
+      </li>
+      {{- end}}
+    </ol>
+    <p class="origin">One line per layer of the stack, from the platform up. A layer reads clear only when every check that could run there found nothing; a layer with a check that could not run says so, and rules nothing out.</p>
+    {{- end}}
   </section>
 
   <section class="panel">
@@ -60,6 +72,7 @@
       <div class="finding-head">
         <span class="sev">{{.Severity}}</span>
         <h3>{{.Summary}}</h3>
+        {{- if .Layer}}<span class="layer-tag">{{.Layer}}</span>{{end}}
       </div>
       {{- if .Detail}}
       <p class="finding-detail">{{.Detail}}</p>
@@ -74,6 +87,16 @@
       <div class="next-steps">
         <p class="next-steps-label">What to do <span class="origin-tag">console guidance</span></p>
         <p>{{.NextSteps}}</p>
+      </div>
+      {{- end}}
+      {{- if .Sequence}}
+      <div class="sequence">
+        <p class="chain-label">Since when — the dated observations in this incident, in the order they were made:</p>
+        <ol class="sequence-list">
+          {{- range .Sequence}}
+          <li><time datetime="{{.At.ISO}}">{{.At.Text}}</time> {{if .Severity}}<span class="sev" data-severity="{{.Severity}}">{{.Severity}}</span> {{end}}{{.Summary}} <span class="origin-tag">{{.Origin}}</span></li>
+          {{- end}}
+        </ol>
       </div>
       {{- end}}
       {{- if .Consequences}}

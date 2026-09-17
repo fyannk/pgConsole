@@ -23,6 +23,7 @@ package observe
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -37,6 +38,11 @@ type Condition struct {
 	// Message is the operator's human message, possibly empty. It is
 	// rendered as escaped, length-bounded text only.
 	Message string
+	// LastTransition is when the operator reports the condition last
+	// changed status; nil when unreported or unparseable. It is the
+	// operator's clock, not the console's, which is what lets a check
+	// say a condition has held for an hour without having watched it.
+	LastTransition *time.Time
 }
 
 // ClusterFacts is the operator-reported state of the one target
@@ -85,6 +91,135 @@ type ClusterFacts struct {
 	// Conditions are the operator-reported conditions, bounded by the
 	// source.
 	Conditions []Condition
+	// ReportedInstances is the operator's count of instances it knows
+	// of — PVC groups, which can exceed the pods that exist.
+	ReportedInstances *int
+	// FailedInstances are the instances the operator lists under its
+	// failed status: pods that will not be scheduled again.
+	FailedInstances []string
+	// UnusablePVCs, DanglingPVCs, ResizingPVCs and InitializingPVCs are
+	// the operator's own classification of the cluster's claims: part
+	// of an incomplete group, attached to no pod, carrying a resize
+	// condition, or created by a job that has not yet produced a pod.
+	UnusablePVCs     []string
+	DanglingPVCs     []string
+	ResizingPVCs     []string
+	InitializingPVCs []string
+	// CertificateExpirations are the expiry instants the operator
+	// reports for the certificates it manages, by Secret name.
+	CertificateExpirations []CertificateExpiry
+	// UnreconcilableRoles are the managed roles the operator reports it
+	// cannot reconcile, with its own bounded error text.
+	UnreconcilableRoles []RoleProblem
+	// Tablespaces are the declared tablespaces and their reconciliation
+	// state.
+	Tablespaces []TablespaceFacts
+	// PrimaryFailingSince is when the operator detected the current
+	// primary as unhealthy; nil while it is not.
+	PrimaryFailingSince *time.Time
+	// InstanceTimelines are the PostgreSQL timelines each instance
+	// reported to the operator, sorted by instance name.
+	InstanceTimelines []InstanceTimeline
+	// ReplicaSwitchInProgress reports the operator mid-way through
+	// turning this cluster into a replica cluster.
+	ReplicaSwitchInProgress bool
+	// ObservedSince records, for each of the states the console tracks
+	// across publications, when the console first saw the state it now
+	// sees. The operator reports no clock for its phase or its PVC
+	// lists, so this is the console's own: a floor, since the console
+	// may have started watching after the state began. Keys are the
+	// state's name and value, such as "phase=Creating a new replica";
+	// see HeldKeys. Nil until the store has published once.
+	ObservedSince map[string]time.Time
+}
+
+// CertificateExpiry is one certificate the operator manages and when it
+// reports the certificate expires.
+type CertificateExpiry struct {
+	// Secret is the Secret the certificate lives in. Only its name is
+	// retained.
+	Secret string
+	// ExpiresAt is the reported expiry instant.
+	ExpiresAt time.Time
+}
+
+// RoleProblem is a managed role the operator could not reconcile.
+type RoleProblem struct {
+	// Role is the PostgreSQL role name.
+	Role string
+	// Errors are the operator's bounded error messages, at most a few.
+	Errors []string
+}
+
+// TablespaceFacts is one declared tablespace and its reconciliation
+// state as the operator reports it.
+type TablespaceFacts struct {
+	// Name is the tablespace name.
+	Name string
+	// State is the operator's word: reconciled or pending.
+	State string
+	// Error is the reconciliation error, empty when none.
+	Error string
+}
+
+// InstanceTimeline is one instance's self-reported PostgreSQL timeline.
+type InstanceTimeline struct {
+	// Instance is the instance name.
+	Instance string
+	// TimelineID is the timeline the instance reported; zero when it
+	// reported none.
+	TimelineID int
+	// IsPrimary is the instance's own claim to the primary role.
+	IsPrimary bool
+}
+
+// HeldKeys names the states of these facts whose duration the store
+// tracks: one key per state and value currently present. A key that
+// stays present across publications keeps its first-seen instant; a
+// key that disappears is forgotten, so a state that recurs starts a
+// new clock. The set is closed and enumerated here so the store need
+// know nothing about what the fields mean.
+func (f ClusterFacts) HeldKeys() []string {
+	var keys []string
+	if f.Phase != "" {
+		keys = append(keys, "phase="+f.Phase)
+	}
+	for _, name := range f.FailedInstances {
+		keys = append(keys, "failedInstance="+name)
+	}
+	for _, name := range f.UnusablePVCs {
+		keys = append(keys, "unusablePVC="+name)
+	}
+	for _, name := range f.DanglingPVCs {
+		keys = append(keys, "danglingPVC="+name)
+	}
+	for _, name := range f.ResizingPVCs {
+		keys = append(keys, "resizingPVC="+name)
+	}
+	for _, name := range f.InitializingPVCs {
+		keys = append(keys, "initializingPVC="+name)
+	}
+	for _, timeline := range f.InstanceTimelines {
+		if timeline.TimelineID > 0 {
+			keys = append(keys, fmt.Sprintf("instanceTimeline=%s:%d", timeline.Instance, timeline.TimelineID))
+		}
+	}
+	if f.ReplicaSwitchInProgress {
+		keys = append(keys, "replicaSwitch=inProgress")
+	}
+	if f.DesiredInstances != nil && f.ReadyInstances != nil && *f.ReadyInstances < *f.DesiredInstances {
+		keys = append(keys, fmt.Sprintf("readyShort=%d/%d", *f.ReadyInstances, *f.DesiredInstances))
+	}
+	return keys
+}
+
+// Since reports when the console first saw the named state, and whether
+// it is being tracked at all. A state the store has not published is
+// not tracked, which a reader must distinguish from a state held since
+// the beginning of time.
+func (f ClusterFacts) Since(key string) (time.Time, bool) {
+	at, ok := f.ObservedSince[key]
+	return at, ok
 }
 
 // ClusterState is one complete observation delivered by a Source. An

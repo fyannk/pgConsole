@@ -144,10 +144,12 @@ func (c *Client) convertEvent(content map[string]any) (observe.EventFacts, bool)
 	}, true
 }
 
-// eventIsCandidate keeps events involving the cluster object itself, or
-// Pod-kind objects carrying the cluster name prefix. The prefix is
-// selection only; rendering admits pod events solely for verified
-// members.
+// eventIsCandidate keeps events involving the cluster object itself,
+// Pod-kind objects carrying the cluster name prefix, and the operator's
+// Backup, ScheduledBackup and Pooler objects. The prefix and the kinds
+// are selection only; rendering admits pod events solely for verified
+// members, and the secondary kinds solely for objects the respective
+// catalog lists as this cluster's.
 func (c *Client) eventIsCandidate(event *corev1.Event) bool {
 	involved := event.InvolvedObject
 	if involved.Namespace != "" && involved.Namespace != c.opts.Namespace {
@@ -156,6 +158,12 @@ func (c *Client) eventIsCandidate(event *corev1.Event) bool {
 	group, _, ok := splitAPIVersion(involved.APIVersion)
 	if involved.Kind == "Cluster" && ok && group == clusterGVR.Group {
 		return involved.Name == c.opts.ClusterName
+	}
+	if ok && group == clusterGVR.Group {
+		switch involved.Kind {
+		case "Backup", "ScheduledBackup", "Pooler":
+			return true
+		}
 	}
 	if involved.Kind == "Pod" {
 		return involved.Name == c.opts.ClusterName ||

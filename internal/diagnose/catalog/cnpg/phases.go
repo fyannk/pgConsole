@@ -30,6 +30,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-unrecoverable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator declaring the cluster unrecoverable",
@@ -52,6 +53,7 @@ func phaseRules() []diagnose.Rule {
 			// definition at admission instead of parking it in a phase.
 			ID:        "cnpg-invalid-definition",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a cluster definition the operator's validation rejected",
@@ -65,6 +67,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-cannot-create-objects",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator failing to create the cluster's auxiliary objects",
@@ -78,6 +81,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-unknown-plugin",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a required CNPG-I plugin the operator cannot find",
@@ -95,6 +99,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-plugin-failure",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a CNPG-I plugin interaction failing during reconciliation",
@@ -107,6 +112,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-image-catalog-unusable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "an image catalog the operator cannot resolve an image from",
@@ -125,6 +131,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-arch-binary-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an online instance-manager upgrade blocked by a missing architecture binary",
@@ -137,6 +144,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-waiting-for-user",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "the operator waiting for a supervised switchover",
@@ -152,6 +160,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-upgrade-delayed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityNote,
 			Describes: "an upgrade the operator is configured to delay",
@@ -163,6 +172,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-wal-disk-space-phase",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPostgreSQL,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator refusing to run PostgreSQL for lack of WAL disk space",
@@ -186,6 +196,7 @@ func phaseRules() []diagnose.Rule {
 			// than the console's guess.
 			ID:        "cnpg-primary-move-stuck",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a switchover or failover still unfinished after ten minutes",
@@ -203,6 +214,7 @@ func phaseRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-status-unreachable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "the operator unable to reach any ready instance's status endpoint",
@@ -215,6 +227,105 @@ func phaseRules() []diagnose.Rule {
 				"Instance Status Extraction Error: HTTP communication issue"}},
 			Link:      "/cluster/pods",
 			LinkLabel: "Pods",
+		},
+		{
+			// The phases below are the operator on its way somewhere,
+			// and a finding only when the way is blocked. The operator
+			// writes no clock beside a phase, so these read the
+			// console's own record of how long the phase has held.
+			ID:        "cnpg-bootstrap-stuck",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "the operator creating the primary or a replica for half an hour",
+			Summary:   "The operator has been creating an instance for half an hour, and the instance has not come up.",
+			Detail: "Setting up the primary runs initdb or a restore; creating a replica " +
+				"clones the primary. Both run as a job whose log carries the reason " +
+				"it has not finished, and the bootstrap log checks quote the common " +
+				"ones: a failing restore, an archive that was not empty, a clone the " +
+				"primary refused. A job that never started at all is usually a pod " +
+				"that cannot be scheduled or an image that cannot be pulled.",
+			When: diagnose.ClusterPhaseHeld{AnyOf: []string{"Setting up primary", "Creating a new replica"},
+				MinAge: bootstrapHeld},
+			NextSteps: "Read the bootstrap job's log first: it names the step that failed. " +
+				"If the job exists but its pod does not, the pod-level checks say why.",
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-initdb-failed"}, {Cause: "cnpg-restore-failed"}, {Cause: "cnpg-join-failed"},
+				{Cause: "wal-archive-not-empty"}, {Cause: "cnpg-recovery-target-missing"},
+				{Cause: "cnpg-bootstrap-backup-missing"}, {Cause: "cnpg-status-unreachable"},
+				{Cause: "pod-scheduling", Strength: diagnose.StrengthPlausible},
+				{Cause: "image-pull", Strength: diagnose.StrengthPlausible},
+				{Cause: "quota-exhausted", Strength: diagnose.StrengthPlausible},
+			},
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
+		{
+			ID:        "cnpg-rollout-stuck",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a rollout or configuration phase held for half an hour",
+			Summary:   "The operator has been rolling the cluster out for half an hour, and the rollout has not finished.",
+			Detail: "A rollout restarts one instance at a time and waits for each to " +
+				"be ready before the next; the primary goes last, through a " +
+				"switchover. The phase reason names the instance being waited on. A " +
+				"rollout that stops is that instance not becoming ready, and the " +
+				"pod-level and replication checks say why.",
+			When: diagnose.ClusterPhaseHeld{AnyOf: []string{
+				"Upgrading cluster", "Applying configuration", "Online upgrade in progress",
+				"Primary instance is being restarted in-place",
+				"Primary instance is being restarted without a switchover",
+				"Waiting for the instances to become active",
+			}, MinAge: rolloutHeld},
+			ConsequenceOf: []diagnose.Relation{
+				{Cause: "cnpg-postgres-start-failed"}, {Cause: "cnpg-postgres-exited"},
+				{Cause: "cnpg-replica-not-streaming"}, {Cause: "cnpg-instance-fenced"},
+				{Cause: "k8s-container-crashloop", Strength: diagnose.StrengthPlausible},
+				{Cause: "pod-scheduling", Strength: diagnose.StrengthPlausible},
+				{Cause: "image-pull", Strength: diagnose.StrengthPlausible},
+			},
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
+		{
+			ID:        "cnpg-major-upgrade-stuck",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a PostgreSQL major upgrade running for two hours",
+			Summary:   "A PostgreSQL major upgrade has been running for two hours.",
+			Detail: "The operator runs pg_upgrade in a job with no retries, so a failed " +
+				"upgrade is a job with a failed pod whose log carries pg_upgrade's " +
+				"own report, and the cluster stays in this phase until the image is " +
+				"reverted or the upgrade repeated. A large cluster legitimately takes " +
+				"a while; two hours is past most of them.",
+			When: diagnose.ClusterPhaseHeld{AnyOf: []string{"Upgrading Postgres major version"}, MinAge: majorUpgradeHeld},
+			NextSteps: "Find the upgrade job and read its pod's log. Reverting the " +
+				"cluster's image to the previous major makes the operator delete the " +
+				"failed job and resume on the old version.",
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
+		},
+		{
+			ID:        "cnpg-promotion-stuck",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerReplication,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "a replica cluster's promotion running for a quarter of an hour",
+			Summary:   "The cluster has been promoting itself from replica to primary for a quarter of an hour.",
+			Detail: "Promotion with a token waits for the designated primary to replay " +
+				"up to the point the token records; one that stays in this phase is " +
+				"a replica that cannot reach that point, because the source is " +
+				"ahead of what was replicated or the token belongs to another " +
+				"cluster.",
+			When:      diagnose.ClusterPhaseHeld{AnyOf: []string{"Promoting to primary cluster"}, MinAge: promotionHeld},
+			Link:      "/cluster/overview",
+			LinkLabel: "Cluster overview",
 		},
 	}
 }

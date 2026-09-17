@@ -329,6 +329,8 @@ func (o CheckOutcome) String() string {
 type Check struct {
 	// Name is the detector's stable name.
 	Name string
+	// Layer is where in the stack the check looks.
+	Layer Layer
 	// Describes states what the detector looks for, so a reader can tell
 	// what a clear result actually rules out.
 	Describes string
@@ -389,6 +391,10 @@ type Input struct {
 	// could proceed.
 	FailoverQuorum    observe.FailoverQuorumSnapshot
 	HasFailoverQuorum bool
+	// PrimaryLease is the Lease the instances use as their
+	// primary-election gate from CloudNativePG 1.30.
+	PrimaryLease    observe.PrimaryLeaseSnapshot
+	HasPrimaryLease bool
 	// ImageCatalogs are the catalogs the Cluster draws its image from.
 	ImageCatalogs    observe.ImageCatalogsSnapshot
 	HasImageCatalogs bool
@@ -472,6 +478,8 @@ type Result struct {
 type Detector interface {
 	// Name is the detector's stable name.
 	Name() string
+	// Layer is where in the stack the detector looks.
+	Layer() Layer
 	// Describes states what it looks for.
 	Describes() string
 	// Detect returns any findings, and — when it could not run — the
@@ -506,7 +514,7 @@ func Run(in Input, rules ...Rule) Result {
 	detectors := Detectors()
 	result := Result{Checks: make([]Check, 0, len(detectors)+len(rules))}
 	for _, detector := range detectors {
-		check := Check{Name: detector.Name(), Describes: detector.Describes()}
+		check := Check{Name: detector.Name(), Layer: detector.Layer(), Describes: detector.Describes()}
 		findings, unavailable := detector.Detect(in)
 		switch {
 		case unavailable != "":

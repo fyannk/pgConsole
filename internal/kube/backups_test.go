@@ -146,15 +146,60 @@ func TestFetchBackupCatalogObjectStoreForbiddenDegradesOnlyReference(t *testing.
 func TestObjectStoreNameHonorsEnabledPlugin(t *testing.T) {
 	t.Parallel()
 	cluster := rawClusterWithObjectStore("orders-store")
-	name, err := objectStoreName(cluster.Object)
-	if err != nil || name != "orders-store" {
-		t.Fatalf("objectStoreName = %q, %v", name, err)
+	name, serverName, err := objectStoreName(cluster.Object)
+	if err != nil || name != "orders-store" || serverName != "" {
+		t.Fatalf("objectStoreName = %q, %q, %v", name, serverName, err)
 	}
 	plugins := cluster.Object["spec"].(map[string]any)["plugins"].([]any)
+	plugins[0].(map[string]any)["parameters"].(map[string]any)[barmanServerName] = "orders-eu"
+	name, serverName, err = objectStoreName(cluster.Object)
+	if err != nil || name != "orders-store" || serverName != "orders-eu" {
+		t.Fatalf("objectStoreName with serverName = %q, %q, %v", name, serverName, err)
+	}
 	plugins[0].(map[string]any)["enabled"] = false
-	name, err = objectStoreName(cluster.Object)
-	if err != nil || name != "" {
-		t.Fatalf("disabled plugin reference = %q, %v", name, err)
+	name, serverName, err = objectStoreName(cluster.Object)
+	if err != nil || name != "" || serverName != "" {
+		t.Fatalf("disabled plugin reference = %q, %q, %v", name, serverName, err)
+	}
+}
+
+// TestObjectStoreRecoveryWindowIsReadForThisServerOnly proves the
+// plugin's per-server summary is read under the cluster's own server
+// name — the default when the stanza names none — and not under any
+// other cluster's.
+func TestObjectStoreRecoveryWindowIsReadForThisServerOnly(t *testing.T) {
+	t.Parallel()
+	store := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "barmancloud.cnpg.io/v1", "kind": "ObjectStore",
+		"metadata": map[string]any{"name": "orders-store", "namespace": "payments"},
+		"spec": map[string]any{"configuration": map[string]any{
+			"destinationPath": "s3://pgbackups/", "endpointURL": "http://minio.minio.svc:9000"}},
+		"status": map[string]any{"serverRecoveryWindow": map[string]any{
+			"orders": map[string]any{
+				"firstRecoverabilityPoint": "2026-09-01T00:00:00Z",
+				"lastSuccessfulBackupTime": "2026-09-16T02:00:00Z",
+				"lastFailedBackupTime":     "not a time",
+			},
+			"billing": map[string]any{"lastSuccessfulBackupTime": "2026-09-17T02:00:00Z"},
+		}},
+	}}
+	dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		backupGVR: "BackupList", scheduledBackupGVR: "ScheduledBackupList",
+	}, rawClusterWithObjectStore("orders-store"), store)
+	c := &Client{dyn: dyn, opts: Options{Namespace: "payments", ClusterName: "orders", RequestTimeout: time.Second}, logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))}
+	ref := c.fetchObjectStoreReference(context.Background())
+	if ref.State != observe.ObjectStorePresent || ref.ServerName != "orders" || ref.RecoveryWindow == nil {
+		t.Fatalf("reference = %+v", ref)
+	}
+	w := ref.RecoveryWindow
+	if w.FirstRecoverabilityPoint == nil || !w.FirstRecoverabilityPoint.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("FirstRecoverabilityPoint = %v", w.FirstRecoverabilityPoint)
+	}
+	if w.LastSuccessfulBackup == nil || !w.LastSuccessfulBackup.Equal(time.Date(2026, 9, 16, 2, 0, 0, 0, time.UTC)) {
+		t.Errorf("LastSuccessfulBackup = %v", w.LastSuccessfulBackup)
+	}
+	if w.LastFailedBackup != nil {
+		t.Errorf("an unparseable instant became %v", w.LastFailedBackup)
 	}
 }
 

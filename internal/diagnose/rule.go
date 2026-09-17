@@ -45,6 +45,9 @@ type Rule struct {
 	// the catalog files and prefixes nothing: applicability comes only
 	// from Requires.
 	Component Component
+	// Layer is where in the stack the rule looks, for the screen's
+	// per-layer summary. See Layer.
+	Layer Layer
 	// Requires are the version pins, all of which must hold. Empty means
 	// the rule applies to every version the console encounters — a claim
 	// the author makes by leaving it empty, not a default.
@@ -332,10 +335,60 @@ type EventMatch struct {
 	// MessageContains narrows to messages carrying every substring.
 	// Empty accepts any message under a matching reason.
 	MessageContains []string
+	// Kinds are the involved-object kinds accepted; empty means the
+	// Cluster and its pods, the window's original scope. An event on a
+	// Backup, ScheduledBackup or Pooler is admitted only when the
+	// respective catalog lists the object as this cluster's — the
+	// namespace can hold another cluster's — and cannot be judged at
+	// all while that catalog is unreadable.
+	Kinds []string
 }
 
 func (c EventMatch) describe() string {
-	return "an event with reason " + strings.Join(c.Reasons, " or ")
+	described := "an event with reason " + strings.Join(c.Reasons, " or ")
+	if len(c.Kinds) > 0 {
+		described += " on a " + strings.Join(c.Kinds, " or ")
+	}
+	return described
+}
+
+// eventAdmitted decides whether an event of a secondary kind is this
+// cluster's: admitted, or the reason it cannot be told.
+func eventAdmitted(in Input, event observe.EventFacts) (bool, string) {
+	switch event.Kind {
+	case "Backup", "ScheduledBackup":
+		if !in.HasBackups {
+			return false, "the backup catalog has not been observed yet, so events on " + event.Kind + " objects cannot be attributed to this cluster"
+		}
+		if in.Backups.Stale {
+			return false, "the backup catalog is stale, so events on " + event.Kind + " objects cannot be attributed to this cluster"
+		}
+		if event.Kind == "Backup" {
+			for _, backup := range in.Backups.Backups {
+				if backup.Name == event.Object {
+					return true, ""
+				}
+			}
+			return false, ""
+		}
+		for _, schedule := range in.Backups.ScheduledBackups {
+			if schedule.Name == event.Object {
+				return true, ""
+			}
+		}
+		return false, ""
+	case "Pooler":
+		if reason := poolersUnavailable(in); reason != "" {
+			return false, reason + ", so events on Pooler objects cannot be attributed to this cluster"
+		}
+		for _, pooler := range in.Poolers.Poolers {
+			if pooler.Name == event.Object {
+				return true, ""
+			}
+		}
+		return false, ""
+	}
+	return true, ""
 }
 
 func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
@@ -345,6 +398,10 @@ func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 	types := c.Types
 	if len(types) == 0 {
 		types = []string{"Warning"}
+	}
+	kinds := c.Kinds
+	if len(kinds) == 0 {
+		kinds = []string{"Cluster", "Pod"}
 	}
 	// Bounded like warningEvents, so one flapping object cannot fill a
 	// finding with the same line.
@@ -367,6 +424,16 @@ func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 		if !typeAccepted {
 			continue
 		}
+		kindAccepted := false
+		for _, accepted := range kinds {
+			if event.Kind == accepted {
+				kindAccepted = true
+				break
+			}
+		}
+		if !kindAccepted {
+			continue
+		}
 		reasonAccepted := false
 		for _, reason := range c.Reasons {
 			if event.Reason == reason {
@@ -384,7 +451,14 @@ func (c EventMatch) evaluate(_ string, in Input) ([]conditionMatch, string) {
 				break
 			}
 		}
-		if carriesAll {
+		if !carriesAll {
+			continue
+		}
+		admitted, unattributable := eventAdmitted(in, event)
+		if unattributable != "" {
+			return nil, unattributable
+		}
+		if admitted {
 			evidence = append(evidence, eventEvidence(event))
 			if newest == nil {
 				first := event
@@ -476,12 +550,19 @@ type ClusterCondition struct {
 	// for a backup that failed and for one that just started, and only
 	// the reason tells them apart.
 	Reason string
+	// MinAge, when set, requires the condition to have held that long
+	// by the operator's own transition time. A condition the operator
+	// reports without one cannot be judged and says so.
+	MinAge time.Duration
 }
 
 func (c ClusterCondition) describe() string {
 	described := fmt.Sprintf("the operator reporting condition %s as %s", c.Type, c.Status)
 	if c.Reason != "" {
 		described += " with reason " + c.Reason
+	}
+	if c.MinAge > 0 {
+		described += fmt.Sprintf(" for at least %s", c.MinAge)
 	}
 	return described
 }
@@ -500,6 +581,18 @@ func (c ClusterCondition) evaluate(_ string, in Input) ([]conditionMatch, string
 		detail := fmt.Sprintf("status %s, reason %s", condition.Status, condition.Reason)
 		if condition.Message != "" {
 			detail += ": " + condition.Message
+		}
+		if c.MinAge > 0 {
+			if condition.LastTransition == nil {
+				return nil, fmt.Sprintf(
+					"condition %s carries no transition time, so how long it has held is unknown", c.Type)
+			}
+			held := in.Now.Sub(*condition.LastTransition)
+			if held < c.MinAge {
+				return nil, ""
+			}
+			detail += fmt.Sprintf("; last transition %s — %s ago",
+				condition.LastTransition.UTC().Format(time.RFC3339), held.Round(time.Minute))
 		}
 		return []conditionMatch{{subject: clusterSubject, evidence: []Evidence{{
 			Origin: "operator-reported",
@@ -1178,7 +1271,7 @@ func (DeclaredObjectFailed) evaluate(_ string, in Input) ([]conditionMatch, stri
 //     when the rule is pinned, the version facts that made it apply,
 //   - otherwise → clear, scoped by the pins the check row states.
 func evaluateRule(rule Rule, in Input) (Check, []Finding) {
-	check := Check{Name: rule.ID, Describes: ruleDescribes(rule)}
+	check := Check{Name: rule.ID, Layer: rule.Layer, Describes: ruleDescribes(rule)}
 	facts := versionFacts(in)
 
 	var pins []Evidence

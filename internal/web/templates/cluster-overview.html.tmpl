@@ -263,6 +263,14 @@
         {{- if .Destination}}<dt>Destination</dt><dd>{{.Destination}}</dd>{{end}}
         {{- if .Endpoint}}<dt>Endpoint</dt><dd>{{.Endpoint}}</dd>{{end}}
         {{- if .Retention}}<dt>Retention</dt><dd>{{.Retention}}</dd>{{end}}
+        {{- if .WindowReported}}
+        <dt>Server name in store</dt><dd>{{.ServerName}}</dd>
+        <dt>First recoverability point</dt><dd>{{.FirstRecoverabilityPoint}} <span class="origin">(plugin-reported)</span></dd>
+        <dt>Last successful backup</dt><dd>{{.LastSuccessfulBackup}} <span class="origin">(plugin-reported)</span></dd>
+        <dt>Last failed backup</dt><dd>{{.LastFailedBackup}} <span class="origin">(plugin-reported)</span></dd>
+        {{- else if .Observed}}
+        <dt>Recovery window</dt><dd>not reported for server {{.ServerName}} <span class="origin">(plugin-reported)</span></dd>
+        {{- end}}
         {{- end}}
       </dl>
       {{- if .ScheduledRows}}

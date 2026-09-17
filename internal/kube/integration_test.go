@@ -139,6 +139,17 @@ func startEnv(t *testing.T) *integrationEnv {
 				Verbs:     []string{"watch"},
 			},
 			{
+				APIGroups:     []string{"coordination.k8s.io"},
+				Resources:     []string{"leases"},
+				Verbs:         []string{"get"},
+				ResourceNames: []string{"orders"},
+			},
+			{
+				APIGroups: []string{"coordination.k8s.io"},
+				Resources: []string{"leases"},
+				Verbs:     []string{"watch"},
+			},
+			{
 				APIGroups: []string{"postgresql.cnpg.io"},
 				Resources: []string{"imagecatalogs"},
 				Verbs:     []string{"get", "list", "watch"},
@@ -703,6 +714,63 @@ func TestFailoverQuorumAccessShapeAgainstRealRBAC(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("quorum collector did not stop on cancellation")
+	}
+}
+
+// TestPrimaryLeaseAccessShapeAgainstRealRBAC proves the lease's access
+// shape works under the Role the deployment grants: a get pinned by
+// name, a name-scoped watch, and absence read as an observation. The
+// Lease is a core API type, so no CRD is involved.
+func TestPrimaryLeaseAccessShapeAgainstRealRBAC(t *testing.T) {
+	ie := startEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := New(ie.userCfg, Options{
+		Namespace:      "payments",
+		ClusterName:    "orders",
+		RequestTimeout: 10 * time.Second,
+	}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	state, err := client.FetchPrimaryLease(ctx)
+	if err != nil {
+		t.Fatalf("absent lease returned an error: %v", err)
+	}
+	if state.Facts.Present {
+		t.Fatal("an absent lease reported itself present")
+	}
+
+	lease := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "coordination.k8s.io/v1",
+		"kind":       "Lease",
+		"metadata":   map[string]any{"name": "orders", "namespace": "payments"},
+		"spec": map[string]any{
+			"holderIdentity": "orders-1", "leaseDurationSeconds": int64(15),
+			"renewTime": "2026-09-17T08:05:00.000000Z",
+		},
+	}}
+	if _, err := ie.adminDyn.Resource(leaseGVR).Namespace("payments").Create(ctx, lease, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+
+	store := observe.NewPrimaryLeaseStore()
+	collector := observe.NewPrimaryLeaseCollector(client, store, observe.RealClock{}, slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	done := make(chan struct{})
+	go func() { defer close(done); _ = collector.Run(ctx) }()
+
+	waitFor(t, "reported lease", func() bool {
+		snap, ok := store.CurrentPrimaryLease()
+		return ok && snap.Lease.Present && snap.Lease.Holder == "orders-1"
+	})
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("lease collector did not stop on cancellation")
 	}
 }
 

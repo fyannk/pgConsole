@@ -88,6 +88,8 @@ type Deps struct {
 	PoolerPodSource observe.PoolerPodSource
 	// FailoverQuorumSource observes the cluster's FailoverQuorum.
 	FailoverQuorumSource observe.FailoverQuorumSource
+	// PrimaryLeaseSource observes the cluster's primary Lease.
+	PrimaryLeaseSource observe.PrimaryLeaseSource
 	// ImageCatalogSource observes the namespace's ImageCatalog set.
 	ImageCatalogSource observe.ImageCatalogSource
 	// DatabaseObjectsSource observes the cluster's declared databases,
@@ -168,6 +170,7 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		Poolers:         web.EmptySnapshots{},
 		PoolerPods:      web.EmptySnapshots{},
 		FailoverQuorum:  web.EmptySnapshots{},
+		PrimaryLease:    web.EmptySnapshots{},
 		ImageCatalogs:   web.EmptySnapshots{},
 		DatabaseObjects: web.EmptySnapshots{},
 		History:         deps.HistorySource,
@@ -216,6 +219,11 @@ func New(cfg config.Config, deps Deps, logger *slog.Logger) (*App, error) {
 		quorumStore := observe.NewFailoverQuorumStore()
 		sources.FailoverQuorum = quorumStore
 		runners = append(runners, observe.NewFailoverQuorumCollector(deps.FailoverQuorumSource, quorumStore, deps.Clock, logger).Run)
+	}
+	if deps.PrimaryLeaseSource != nil {
+		leaseStore := observe.NewPrimaryLeaseStore()
+		sources.PrimaryLease = leaseStore
+		runners = append(runners, observe.NewPrimaryLeaseCollector(deps.PrimaryLeaseSource, leaseStore, deps.Clock, logger).Run)
 	}
 	if deps.ImageCatalogSource != nil {
 		catalogStore := observe.NewImageCatalogStore()

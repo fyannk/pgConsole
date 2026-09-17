@@ -1874,6 +1874,42 @@ svg.topo { display: block; height: auto; margin-inline: auto; max-width: 58rem; 
   margin-bottom: var(--space-2);
 }
 .finding-head h3 { margin: 0; }
+.layer-tag {
+  color: var(--text-muted);
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-left: auto;
+  text-transform: uppercase;
+}
+
+/* The layer strip: one line per layer of the stack, read top to
+   bottom from the platform up. Each line carries the shared [data-state]
+   glyph so a reader scanning for the red diamond finds the layer before
+   reading a word. */
+.layers-title { font-size: var(--text-sm); margin: var(--space-4) 0 var(--space-2); }
+ol.layers { list-style: none; margin: 0 0 var(--space-2); padding: 0; }
+li.layer {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) 0;
+}
+li.layer:last-child { border-bottom: 1px solid var(--border); }
+li.layer .layer-name { flex: 0 0 12rem; }
+li.layer .layer-summary { color: var(--text-muted); font-weight: 400; }
+li.layer[data-state]::before { margin-right: var(--space-2); }
+.sev[data-severity="critical"] { background: var(--bad-weak); color: var(--bad); }
+.sev[data-severity="warning"] { background: var(--warn-weak); color: var(--warn); }
+.sev[data-severity="note"] { background: var(--surface-2); color: var(--text-muted); }
+
+/* The sequence is the incident's own clock: each dated observation on
+   one line, the instant first, in the order the sources reported. */
+.sequence { margin: 0 0 var(--space-3); }
+ol.sequence-list { margin: 0; padding-left: var(--space-5); }
+ol.sequence-list li { margin: 0 0 var(--space-1); }
+ol.sequence-list time { font-variant-numeric: tabular-nums; font-weight: 600; margin-right: var(--space-2); }
 
 .sev {
   border-radius: 999px;

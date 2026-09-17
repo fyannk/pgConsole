@@ -86,18 +86,27 @@ func (l fixtureLogs) Unread() []logstream.Unread { return nil }
 // to. It is the fixture the consumption test withholds from, one source
 // at a time.
 func everythingObserved() diagnose.Input {
-	major, desired := 17, 3
-	two := int32(2)
+	major, desired, ready, timeline := 17, 3, 2, 4
+	two, fifteen := int32(2), int32(15)
+	staleRenew := now.Add(-time.Hour)
 	applied := false
+	cluster := observe.ClusterFacts{
+		Present: true, PostgresMajorVersion: &major, DesiredInstances: &desired, ReadyInstances: &ready,
+		TimelineID: &timeline, InstanceTimelines: []observe.InstanceTimeline{{Instance: "orders-2", TimelineID: 3}},
+		Phase: "Not enough disk space", CurrentPrimary: "orders-1", TargetPrimary: "orders-1",
+		ImageCatalogRef: &observe.ImageCatalogRef{Kind: "ImageCatalog", Name: "absent"},
+		// The held states carry the store's own clock, as a published
+		// snapshot would.
+		ObservedSince: map[string]time.Time{},
+	}
+	for _, key := range cluster.HeldKeys() {
+		cluster.ObservedSince[key] = now.Add(-time.Hour)
+	}
 	return diagnose.Input{
 		Now:        now,
 		HasCluster: true,
-		Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{
-			Present: true, PostgresMajorVersion: &major, DesiredInstances: &desired,
-			Phase: "Not enough disk space", CurrentPrimary: "orders-1", TargetPrimary: "orders-1",
-			ImageCatalogRef: &observe.ImageCatalogRef{Kind: "ImageCatalog", Name: "absent"},
-		}},
-		HasPods: true,
+		Cluster:    observe.Snapshot{Cluster: cluster},
+		HasPods:    true,
 		Pods: observe.PodsSnapshot{Pods: []observe.PodFacts{{
 			Name: "orders-1",
 			Containers: []observe.ContainerFacts{
@@ -111,11 +120,19 @@ func everythingObserved() diagnose.Input {
 			Kind: "Pod", Object: "orders-2", Type: "Warning", Reason: "Evicted",
 			Message: "The node was low on resource: memory", Count: 1, LastSeen: now}}},
 		HasBackups: true,
-		Backups: observe.BackupsSnapshot{Backups: []observe.BackupFacts{{
-			Name: "orders-20260810", Phase: "failed", CreatedAt: now.Add(-time.Hour)}}},
+		Backups: observe.BackupsSnapshot{
+			Backups: []observe.BackupFacts{{
+				Name: "orders-20260810", Phase: "failed", CreatedAt: now.Add(-time.Hour)}},
+			ScheduledBackups: []observe.ScheduledBackupFacts{{Name: "nightly", CreatedAt: now.Add(-48 * time.Hour)}},
+			ObjectStore: observe.ObjectStoreReference{Name: "orders-store", ServerName: "orders",
+				State: observe.ObjectStorePresent, RecoveryWindow: &observe.RecoveryWindow{}},
+		},
 		HasInfrastructure: true,
 		Infrastructure: observe.InfrastructureSnapshot{Volumes: []observe.VolumeFacts{{
 			Name: "orders-2", Phase: "Pending"}}},
+		HasPrimaryLease: true,
+		PrimaryLease: observe.PrimaryLeaseSnapshot{Lease: observe.PrimaryLeaseFacts{
+			Present: true, Holder: "orders-2", RenewedAt: &staleRenew, DurationSeconds: &fifteen}},
 		HasKubeVersion: true,
 		KubeVersion:    observe.KubeVersionSnapshot{GitVersion: "v1.33.2"},
 		HasQuotas:      true,

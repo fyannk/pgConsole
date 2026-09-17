@@ -16,7 +16,15 @@ Three panels carry the screen:
 - **Cluster state** — the operator's own account first: phase and
   reason, instances ready against declared, the current primary. A
   reader asking "what is wrong" gets "what state is it in" answered
-  before any finding.
+  before any finding. Beneath it, **where**: one line per layer of the
+  stack — Kubernetes, operator, PostgreSQL, replication, backups and
+  archive, poolers, declared objects — folding the run into which side
+  the trouble is on before what it is. Every check declares its layer,
+  so the strip is a count of outcomes, not a guess from names. A layer
+  reads clear only when every check that could run there found
+  nothing; a layer holding a check that could not run says so and
+  rules nothing out; a layer whose checks were all switched off or
+  inapplicable has nothing to say, and says that too.
 - **Findings, grouped into incidents** — what matched, most severe
   first. A finding whose declared cause also matched nests inside that
   cause's card, so a chain like *archiving failed → WAL filled the
@@ -29,6 +37,14 @@ Three panels carry the screen:
   console's guidance, labeled as guidance and rendered apart from the
   evidence, because advice is the one thing on this screen no source
   reported.
+  An incident with two or more dated observations also carries
+  **"Since when"**: those observations in the order they were made,
+  each the instant its own source reported — a log line's last match,
+  an event's last occurrence, a backup's creation — with the cluster's
+  own clocks beside them where they bear on it: how long the current
+  phase has held, when the primary was detected failing, when the
+  current primary move was requested. A finding built on a state that
+  carries no instant is not placed; a time is never invented for it.
 - **What was checked** — every check that ran, with its outcome. This
   is what keeps an empty screen honest: no findings means "none of
   these checks matched", never "the cluster is healthy".
@@ -214,6 +230,37 @@ because its timing is bounded rather than known.
 
 With `HISTORY_ENABLED=false` both checks report "could not run".
 
+## Checks that need a state to hold
+
+Several operator states are ordinary in passing and a fault only when
+they last. Every rollout passes through `Ready=False`; every deleted
+pod leaves its claim dangling for the seconds the recreation takes;
+every new replica sits in *Creating a new replica* while it clones.
+A check that reported these on sight would teach a reader to ignore
+the screen, so a check on such a state names a minimum age, stated in
+its check row, and reads a clock to enforce it.
+
+Two clocks exist, and each check says which it read:
+
+| Clock | Used for | Who keeps it |
+|---|---|---|
+| The condition's `lastTransitionTime` | Conditions such as `Ready`, `ConsistentSystemID`, `cnpg.io/hibernation` | The operator. It is the instant the operator itself recorded the change, so a check reading it knows how long the condition has held without having watched it. A condition reported without one leaves the check unable to run. |
+| The console's own record of first sight | Phases, the operator's PVC lists, the failed-instance list, instance timelines, the ready-instance shortfall, the replica-cluster switch | The console. The operator writes no clock beside these, so the store notes when it first saw the state it now sees and keeps that instant while the state stays identical across publications. |
+
+The console's clock is a **floor**, and the evidence says so: *unchanged
+since at least 09:14:03Z, when the console first saw it*. A console
+started ten minutes into a stuck rollout knows the phase has held ten
+minutes, not how long before that. A state that goes away and comes
+back starts a new clock rather than resuming the old one, and a phase
+that changes to another phase is a different state with its own clock.
+Until the store has published once, no such check can run, and it says
+so rather than guessing.
+
+Two operator states carry their own instant and need neither clock:
+`currentPrimaryFailingSinceTimestamp`, which the operator stamps when
+its status check on the primary starts failing, and the certificate
+expiries it reports per Secret.
+
 ## Thresholds and holding windows
 
 A metric check states the number it applies in its own check row, so
@@ -305,14 +352,19 @@ adding the release to the verified list and letting that check pass.
 | Evidence | Requires |
 |---|---|
 | Operator status: phases, conditions, backup phases, declared database objects, primary-move timing | The cluster collectors (always on). |
-| Events | The event collector (always on). Only events on the `Cluster` object and member pods are observable. |
+| Operator status lists: failed instances, unusable, dangling, resizing and initializing claims, certificate expiries, unreconcilable managed roles, tablespace errors, per-instance timelines, the replica-cluster switch | The cluster collector (always on). The held-state checks additionally need the store to have published once; see [checks that need a state to hold](#checks-that-need-a-state-to-hold). |
+| Events on the `Cluster` and its pods | The event collector (always on). |
+| Events on `Backup`, `ScheduledBackup` and `Pooler` objects | The event collector, plus the catalog that attributes the object to this cluster: the backup catalog for the first two, the pooler collector for the third. While that catalog is unreadable the event check reports that it could not run, because the namespace may hold another cluster's objects of the same kind. |
+| Pooler phases (`failed`, `inactive`) | The pooler collector (always on); the phases exist from CloudNativePG 1.30. |
+| The barman-cloud plugin's recovery window: first recoverability point, last successful and last failed backup | The optional `objectstores` `get` grant, and a Cluster that enables the plugin. The window is read from the `ObjectStore` status under the cluster's server name. A cluster without the plugin leaves these checks clear — there is no store to report — and a referenced store the console cannot read leaves them unable to run. |
 | Resource quotas | The `resourcequotas` grant in the Role (in the shipped example). It is what lets a quota refusal name the quota — ceiling and usage — instead of only the refused object's symptom. |
 | Container states | The pod collectors (always on). |
 | Log messages | `LOG_STREAM_ENABLED`, which defaults to on wherever it is read — diagnostics enabled and `ALLOW_LOGS=true` — and can be switched off explicitly. With following off, every log-backed check reports that it needs a source that is switched off. They are the largest group in the catalog and mostly critical — the checks that quote the server's own words rather than inferring a fault from a phase — so turning following off is a real reduction in what the screen can tell you. What it buys back: a line that matches a rule is retained verbatim as that finding's evidence, and a PostgreSQL error record can carry statement text with literal values. |
-| Metric flags and thresholds | Metrics scraping enabled. |
+| Metric flags and thresholds, including the WAL archive backlog, the archiver's failure rate, deadlocks, waiting backends and extension updates | Metrics scraping enabled. |
 | Pooler instance counts and pooler pod states | The pooler collectors (always on). |
 | Pooler queue depth | Metrics scraping enabled; the PgBouncer exporter's window. |
 | Failover quorum | The failover-quorum collector (always on). Absence of the resource is a clear result: the cluster runs no quorum. |
+| Primary lease | The primary-lease collector, which needs the `coordination.k8s.io` `leases` grant in the Role (`get` pinned by name, and `watch`). CloudNativePG 1.30 keeps a Lease named after the cluster as its primary-election gate; the two lease checks are pinned 1.30-only and compare the Lease's own holder and renewal time against the operator's current primary. Absence of the Lease is a clear result on a 1.30 operator and never arises below it. Without the grant the checks report that they could not run. The Lease is deliberately kept out of the object timeline: its holder renews it every few seconds. |
 | Image catalogs | The image-catalog collector (always on) for namespaced catalogs; a cluster-scoped catalog needs the optional lookup enabled, and reads "could not run" otherwise. |
 | Object timeline | `HISTORY_ENABLED=true` (the default). With history off, the checks that count over time report "could not run". |
 | Repository evidence | The repository-evidence consumer configured, the sidecar answering, and a completed scan. Every way the channel can be silent — not configured, never answered, contact lost, no scan yet, the sidecar's own staleness, an unrecognised report variant — is named as the reason a repository check could not run. |

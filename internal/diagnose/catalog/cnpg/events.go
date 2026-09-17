@@ -25,6 +25,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-primary-status-check",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a Ready primary whose status check the operator cannot pass",
@@ -41,6 +42,7 @@ func eventRules() []diagnose.Rule {
 			// arbitrate the primary through status alone.
 			ID:        "cnpg-primary-lease-conflict",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(only130),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a primary lease owned by something else",
@@ -54,6 +56,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-scale-down-refused",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a scale-down the operator reverted",
@@ -67,6 +70,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-ca-secret-unusable",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a referenced CA secret that is missing or unparseable",
@@ -78,6 +82,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-ca-expiring",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a user-supplied CA approaching expiry",
@@ -93,17 +98,19 @@ func eventRules() []diagnose.Rule {
 			// reconcile without recording it.
 			ID:        "cnpg-service-account-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerKubernetes,
 			Requires:  pin(since129),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a specified ServiceAccount that does not exist",
 			Summary:   "The ServiceAccount named in the spec does not exist, so pods cannot be created.",
-			When:      diagnose.EventMatch{Reasons: []string{"ServiceAccountNotFound"}},
+			When:      diagnose.EventMatch{Reasons: []string{"ServiceAccountNotFound"}, Kinds: []string{"Cluster", "Pooler"}},
 			Link:      "/cluster/pods",
 			LinkLabel: "Pods",
 		},
 		{
 			ID:        "cnpg-bootstrap-backup-missing",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityCritical,
 			Describes: "a bootstrap recovery pointing at a Backup that does not exist",
@@ -115,6 +122,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-manager-upgrade-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerOperator,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "an in-place instance-manager upgrade that failed",
@@ -126,6 +134,7 @@ func eventRules() []diagnose.Rule {
 		{
 			ID:        "cnpg-retention-failed",
 			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
 			Requires:  pin(since128),
 			Severity:  diagnose.SeverityWarning,
 			Describes: "a backup retention policy that failed to prune",
@@ -133,6 +142,146 @@ func eventRules() []diagnose.Rule {
 			When:      diagnose.EventMatch{Reasons: []string{"RetentionPolicyFailed"}},
 			Link:      "/backups",
 			LinkLabel: "Backups",
+		},
+		{
+			// The Backup, ScheduledBackup and Pooler events below are the
+			// operator's own account of why a backup or a pooler is not
+			// happening, recorded on the object rather than on the
+			// Cluster. Each is admitted only for an object the respective
+			// catalog lists as this cluster's.
+			ID:        "cnpg-backup-target-unhealthy",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "the operator refusing to run a backup on an unhealthy target instance",
+			Summary:   "A backup cannot run because the instance it targets is not healthy, and the operator says how.",
+			Detail: "A backup runs on one instance — the primary, or the preferred " +
+				"replica — and the operator checks that instance before starting. " +
+				"The quoted message is the check's own failure. The backup stays " +
+				"pending until the target recovers or another target is chosen.",
+			When:      diagnose.EventMatch{Reasons: []string{"TargetPodNotHealthy"}, Kinds: []string{"Backup"}},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-backup-waiting-for-target",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a backup waiting because its target instance is not ready",
+			Summary:   "A backup is waiting for its target instance to become ready.",
+			Detail: "The operator keeps the backup pending while the instance it would " +
+				"run on is not ready, and retries. A target that never becomes " +
+				"ready is the finding; the pod-level checks say why it is not.",
+			When:      diagnose.EventMatch{Reasons: []string{"BackupPending"}, Kinds: []string{"Backup"}},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-backup-error",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a backup the operator recorded as exiting with an error",
+			Summary:   "A backup exited with an error, and the operator quotes it.",
+			Detail: "The event carries the error the backup command or the snapshot " +
+				"returned, which the Backup object's own status also records. It is " +
+				"the reason behind a failed backup phase.",
+			When:      diagnose.EventMatch{Reasons: []string{"Error"}, Kinds: []string{"Backup"}},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-backup-manager-restarted",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a backup the operator failed because the instance manager restarted under it",
+			Summary:   "A backup failed because the instance manager restarted on its target while it ran.",
+			Detail: "The instance manager runs the backup, so its restart ends the backup " +
+				"mid-way and the operator marks it failed rather than resuming. " +
+				"The restart itself is the thing to explain: a pod restart, a " +
+				"liveness failure, or an in-place manager upgrade.",
+			When:      diagnose.EventMatch{Reasons: []string{"InstanceManagerRestarted"}, Kinds: []string{"Backup"}},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-schedule-cluster-unhealthy",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a schedule the operator holds back because the cluster is not healthy",
+			Summary:   "A backup schedule is not firing because the operator is waiting for the cluster to be healthy.",
+			Detail: "The schedule creates a Backup only while the cluster reports " +
+				"healthy, and the quoted message names the phase it found instead. " +
+				"While this holds, no scheduled backup is taken.",
+			When:      diagnose.EventMatch{Reasons: []string{"ClusterNotHealthy"}, Kinds: []string{"ScheduledBackup"}},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-schedule-invalid",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityCritical,
+			Describes: "a schedule expression no time satisfies",
+			Summary:   "A backup schedule's expression matches no time at all, so it never fires.",
+			Detail: "The operator evaluates the schedule and found no next run. The " +
+				"expression is the six-field cron form with seconds first; a " +
+				"five-field expression or an impossible day is the usual cause.",
+			When:      diagnose.EventMatch{Reasons: []string{"NoSchedule"}, Kinds: []string{"ScheduledBackup"}},
+			NextSteps: "Correct the schedule expression: six fields, seconds first.",
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-schedule-adoption-refused",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a schedule skipping a run because a Backup of that name is not its own",
+			Summary:   "A backup schedule skipped a run: a Backup with the name it would use exists and is not owned by it.",
+			Detail: "The schedule names each Backup after its run time, and refuses to " +
+				"adopt one it did not create. A Backup created by hand or by a " +
+				"previous schedule of the same name blocks that iteration.",
+			When:      diagnose.EventMatch{Reasons: []string{"BackupAdoptionRefused"}, Kinds: []string{"ScheduledBackup"}},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-schedule-creation-failed",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerBackups,
+			Requires:  pin(since128),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a schedule the operator could not create a Backup object for",
+			Summary:   "A backup schedule could not create its Backup object.",
+			Detail: "The API server refused the Backup the schedule tried to create — " +
+				"a quota, an admission policy, or operator RBAC. No backup is taken " +
+				"for that run.",
+			When:      diagnose.EventMatch{Reasons: []string{"BackupCreation"}, Kinds: []string{"ScheduledBackup"}},
+			Link:      "/backups",
+			LinkLabel: "Backups",
+		},
+		{
+			ID:        "cnpg-pooler-image-catalog-error",
+			Component: diagnose.ComponentCNPG,
+			Layer:     diagnose.LayerPoolers,
+			Requires:  pin(only130),
+			Severity:  diagnose.SeverityWarning,
+			Describes: "a Pooler whose image the operator cannot resolve from its catalog",
+			Summary:   "The operator cannot resolve a Pooler's image from the catalog it names.",
+			When:      diagnose.EventMatch{Reasons: []string{"ImageCatalogError"}, Kinds: []string{"Pooler"}},
+			Link:      "/poolers",
+			LinkLabel: "Poolers",
 		},
 	}
 }

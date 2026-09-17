@@ -35,6 +35,8 @@ type quotaExhaustedDetector struct{}
 
 func (quotaExhaustedDetector) Name() string { return "quota-exhausted" }
 
+func (quotaExhaustedDetector) Layer() Layer { return LayerKubernetes }
+
 func (quotaExhaustedDetector) Describes() string {
 	return "a namespace quota whose usage has reached its ceiling"
 }
