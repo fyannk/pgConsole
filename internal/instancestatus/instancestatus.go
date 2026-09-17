@@ -295,29 +295,30 @@ func TLSConfig(clusterName string, caPEM []byte) (*tls.Config, error) {
 				fmt.Errorf("no certificate found in the CA file"))
 		}
 	}
-	verify := func(state tls.ConnectionState) error {
-		if len(state.PeerCertificates) == 0 {
-			return fmt.Errorf("the status port presented no certificate")
-		}
-		leaf := state.PeerCertificates[0]
-		if err := leaf.VerifyHostname(serviceName); err != nil {
-			return fmt.Errorf("the status port's certificate does not name %s: %w", serviceName, err)
-		}
-		if roots == nil {
+	config := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		// The name the certificate must carry: the cluster's read-write
+		// Service. With a CA this is the standard verification's host
+		// check, run against the standard chain check.
+		ServerName: serviceName,
+		RootCAs:    roots,
+	}
+	if roots == nil {
+		// No CA to verify the chain against: the built-in verification
+		// cannot run, and is replaced by the name check below rather
+		// than by nothing.
+		config.InsecureSkipVerify = roots == nil
+		config.VerifyConnection = func(state tls.ConnectionState) error {
+			if len(state.PeerCertificates) == 0 {
+				return fmt.Errorf("the status port presented no certificate")
+			}
+			if err := state.PeerCertificates[0].VerifyHostname(serviceName); err != nil {
+				return fmt.Errorf("the status port's certificate does not name %s: %w", serviceName, err)
+			}
 			return nil
 		}
-		intermediates := x509.NewCertPool()
-		for _, cert := range state.PeerCertificates[1:] {
-			intermediates.AddCert(cert)
-		}
-		_, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, DNSName: serviceName})
-		return err
 	}
-	return &tls.Config{
-		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: true, //nolint:gosec // the default host check cannot apply to a pod IP; VerifyConnection below is the verification
-		VerifyConnection:   verify,
-	}, nil
+	return config, nil
 }
 
 // Run sweeps until ctx is done.
