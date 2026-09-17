@@ -19,11 +19,13 @@ import (
 	"fmt"
 	"html/template"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/fyannk/pgConsole/internal/evidence"
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/observe"
 	"github.com/fyannk/pgConsole/internal/ops"
 )
@@ -912,6 +914,10 @@ type Page struct {
 	// PodHistory is the roster screen's merged recent timeline, set by
 	// its handler only.
 	PodHistory []PodTimelineEntry
+	// InstanceStatus is what each instance manager reports about its
+	// own PostgreSQL, set by the roster screen's handler only; nil when
+	// the sweep is switched off.
+	InstanceStatus *InstanceStatusView
 	// Infrastructure is the observed service, claim and snapshot set;
 	// nil when it was never observed.
 	Infrastructure *InfrastructureView
@@ -2428,4 +2434,92 @@ func formatAge(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 	}
+}
+
+// InstanceStatusView is the instance managers' own reports, one row per
+// instance, attributed as the instance's claim about itself.
+type InstanceStatusView struct {
+	// Swept is whether a sweep has published at all.
+	Swept bool
+	// SweptAt is the last sweep, as text.
+	SweptAt string
+	// Rows are the instances with a report, sorted.
+	Rows []InstanceStatusRow
+	// Failing lists the instances the last sweep could not read, with
+	// the failure's category.
+	Failing []string
+}
+
+// InstanceStatusRow is one instance's report reduced to the roster's
+// columns.
+type InstanceStatusRow struct {
+	Instance       string
+	Role           string
+	Timeline       string
+	CurrentLSN     string
+	Archiving      string
+	ReadyWAL       string
+	PendingRestart string
+	Manager        string
+	Age            string
+	// Stale marks a report older than three sweeps.
+	Stale bool
+}
+
+// buildInstanceStatusView reduces the sweep's snapshot to the roster
+// panel. A report is judged against the sweep cadence the way the
+// checks judge it: older than three sweeps, it is shown but marked.
+func buildInstanceStatusView(snap instancestatus.Snapshot, swept bool, now time.Time) *InstanceStatusView {
+	view := &InstanceStatusView{Swept: swept}
+	if !swept {
+		return view
+	}
+	view.SweptAt = formatTime(&snap.SweptAt)
+	horizon := 3 * snap.Interval
+	if horizon < time.Minute {
+		horizon = time.Minute
+	}
+	for _, name := range snap.Instances() {
+		reading := snap.Readings[name]
+		row := InstanceStatusRow{
+			Instance:       name,
+			Role:           "replica",
+			Timeline:       strconv.Itoa(reading.TimelineID),
+			CurrentLSN:     orUnknown(reading.CurrentLSN),
+			Archiving:      "not this instance",
+			ReadyWAL:       strconv.Itoa(reading.ReadyWALFiles),
+			PendingRestart: "no",
+			Manager:        orUnknown(reading.InstanceManagerVersion),
+			Age:            formatAge(now.Sub(reading.ObservedAt)),
+			Stale:          now.Sub(reading.ObservedAt) > horizon,
+		}
+		if reading.IsPrimary {
+			row.Role = "primary"
+		}
+		if reading.IsArchivingWAL {
+			row.Archiving = "last archived " + orUnknown(reading.LastArchivedWAL)
+			if reading.LastFailedWALTime != nil && (reading.LastArchivedWALTime == nil || reading.LastFailedWALTime.After(*reading.LastArchivedWALTime)) {
+				row.Archiving = "failing — last failed " + orUnknown(reading.LastFailedWAL)
+			}
+		}
+		if reading.PendingRestart {
+			row.PendingRestart = "yes"
+			if reading.PendingRestartForDecrease {
+				row.PendingRestart = "yes (decrease)"
+			}
+		}
+		if reading.TimelineID == 0 {
+			row.Timeline = unknown
+		}
+		view.Rows = append(view.Rows, row)
+	}
+	names := make([]string, 0, len(snap.Failing))
+	for name := range snap.Failing {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		view.Failing = append(view.Failing, name+": "+snap.Failing[name])
+	}
+	return view
 }

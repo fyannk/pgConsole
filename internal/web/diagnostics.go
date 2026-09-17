@@ -267,6 +267,9 @@ func (h *Handler) diagnosticsInput() diagnose.Input {
 	if h.sources.Metrics != nil {
 		in.Metrics = h.sources.Metrics
 	}
+	if h.sources.InstanceStatus != nil {
+		in.InstanceStatus = h.sources.InstanceStatus
+	}
 	if h.sources.PoolerMetrics != nil {
 		in.PoolerMetrics = h.sources.PoolerMetrics
 	}

@@ -18,7 +18,7 @@ none applies everywhere. **Follows from** lists the checks the catalog
 relates this one to as consequences of, with the relation's scope and
 strength where they differ from *same cluster, established*.
 
-135 checks: 129 catalog rules and 6 hand-written detectors.
+142 checks: 136 catalog rules and 6 hand-written detectors.
 
 ## Kubernetes
 
@@ -70,6 +70,7 @@ strength where they differ from *same cluster, established*.
 | `cnpg-major-upgrade-stuck` | warning | a PostgreSQL major upgrade running for two hours | A PostgreSQL major upgrade has been running for two hours. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-managed-role-unreconcilable` | warning | a managed role the operator reports it cannot reconcile | The operator cannot apply a managed role, and quotes PostgreSQL's refusal. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-manager-upgrade-failed` | warning | an in-place instance-manager upgrade that failed | The in-place instance-manager upgrade failed, so pods are still running the old binary. | `CloudNativePG >=1.29 <1.31` |  |
+| `cnpg-manager-version-drift` | note | instances reporting more than one instance-manager version | The instances do not all run the same instance manager: a rollout or in-place upgrade did not reach every one. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-no-system-id` | warning | no instance reporting a system identifier for a quarter of an hour | No instance has reported a PostgreSQL system identifier to the operator for a quarter of an hour. | `CloudNativePG >=1.29 <1.31` | `cnpg-status-unreachable`, `cnpg-bootstrap-stuck` |
 | `cnpg-not-ready` | warning | the operator reporting the cluster not ready for ten minutes | The operator has reported the cluster as not ready for ten minutes. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-plugin-failure` | critical | a CNPG-I plugin interaction failing during reconciliation | The operator cannot talk to a plugin this cluster requires, and reconciliation is stopped. | `CloudNativePG >=1.29 <1.31` |  |
@@ -93,6 +94,8 @@ strength where they differ from *same cluster, established*.
 | Check | Severity | Looks for | Finding | Applies to | Follows from |
 |---|---|---|---|---|---|
 | `cnpg-instance-fenced` | warning | an instance the operator has fenced | An instance is fenced: PostgreSQL is deliberately stopped there and the operator will not restart it. | `CloudNativePG >=1.29 <1.31` |  |
+| `cnpg-instance-might-be-unavailable` | warning | an instance manager doubting its own PostgreSQL is reachable | An instance manager reports that its PostgreSQL may be unavailable, and quotes the error it saw. | `CloudNativePG >=1.29 <1.31` |  |
+| `cnpg-pending-restart` | warning | an instance reporting a configuration change waiting for a restart | An instance has a configuration change that takes effect only after a restart, and has not been restarted. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-pg-control-lost` | critical | a zero-length pg_control with no surviving backup copy | An instance's pg_control file is empty and no backup copy of it survives: that data directory is unusable. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-pg-rewind-failed` | critical | pg_rewind failing on a demoted primary | A former primary cannot rewind to rejoin the cluster. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-postgres-exited` | critical | the postmaster exiting with errors | PostgreSQL exited with errors — this is what a crash-looping instance looks like from inside. | `CloudNativePG >=1.29 <1.31` | `postgres-panic` (same pod, within 1h0m0s), `cnpg-wal-disk-full` (same pod) |
@@ -123,11 +126,13 @@ strength where they differ from *same cluster, established*.
 | `cnpg-primary-move-stuck` | critical | a switchover or failover still unfinished after ten minutes | A primary move has been in flight for over ten minutes: the cluster is between primaries and stuck there. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-promotion-stuck` | critical | a replica cluster's promotion running for a quarter of an hour | The cluster has been promoting itself from replica to primary for a quarter of an hour. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-quorum-standbys-short` | critical | a failover quorum with fewer potentially synchronous standbys than transactions wait for | Fewer standbys are potentially synchronous than transactions wait for. | `CloudNativePG >=1.29 <1.31` |  |
+| `cnpg-replay-paused` | warning | a replica reporting its WAL replay paused | A replica's WAL replay is paused: it receives WAL and applies none of it. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-replica-lagging` | warning | a replica exceeding the configured maximum lag | A replica exceeds the configured maximum lag and has been taken out of read traffic. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-replica-not-receiving` | critical | a replica in recovery with no WAL receiver and a lag that is not closing | A replica has stopped streaming and is not catching up. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-replica-not-streaming` | warning | the streaming readiness probe finding no replication connection | A replica is not connected via streaming replication, and the readiness probe is holding it out of service. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-replica-switch-stuck` | warning | a switch to replica cluster in progress for a quarter of an hour | The cluster has been switching to a replica cluster for a quarter of an hour: the demotion is not completing. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-replication-lag-high` | warning | a replica whose lag has stayed past the threshold | A replica's lag has stayed past the threshold across the retained window. | `CloudNativePG >=1.29 <1.31` | `cnpg-replica-not-receiving` (same pod) |
+| `cnpg-replication-slot-inactive` | warning | an inactive replication slot the operator does not manage | A replication slot the operator does not manage is inactive: its consumer is gone, and the slot keeps WAL for it. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-slot-retaining-wal` | warning | a replication slot holding back WAL past the threshold | A replication slot is holding back more WAL than the threshold, and not releasing it. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-slot-sync-failing` | warning | replication slot synchronization failing on a replica | Replication slot synchronization is failing, so a failover may not be able to resume replication cleanly. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-sync-replicas-short` | critical | an instance reporting fewer synchronous replicas than it expects | An instance has fewer synchronous replicas than it expects. | `CloudNativePG >=1.29 <1.31` |  |
@@ -152,6 +157,7 @@ strength where they differ from *same cluster, established*.
 | `cnpg-backup-target-unhealthy` | warning | the operator refusing to run a backup on an unhealthy target instance | A backup cannot run because the instance it targets is not healthy, and the operator says how. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-backup-waiting-for-target` | warning | a backup waiting because its target instance is not ready or not found | A backup is waiting for its target instance to become ready. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-backup-wal-archiving` | critical | a Backup blocked by failing WAL archiving | A backup is blocked because WAL archiving is not working. | `CloudNativePG >=1.29 <1.31` |  |
+| `cnpg-instance-archive-failing` | warning | an instance whose last archive failure is more recent than its last success | An instance's last WAL archive attempt failed, more recently than its last success. | `CloudNativePG >=1.29 <1.31` | `cnpg-wal-archiving-failing` |
 | `cnpg-last-backup-failed` | warning | the last backup having failed | The most recent backup failed, and the quoted message says why. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-retention-failed` | warning | a backup retention policy that failed to prune | The backup retention policy failed, so the object store keeps growing. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-schedule-adoption-refused` | warning | a schedule skipping a run because a Backup of that name is not its own | A backup schedule skipped a run: a Backup with the name it would use exists and is not owned by it. | `CloudNativePG >=1.29 <1.31` |  |
@@ -164,6 +170,7 @@ strength where they differ from *same cluster, established*.
 | `cnpg-wal-archive-command-failed` | critical | the archive_command wrapper failing | The WAL archive command is failing, so WAL is accumulating on the instance. | `CloudNativePG >=1.29 <1.31` | `cnpg-wal-archiving-failing` |
 | `cnpg-wal-archive-plugin-missing` | critical | a WAL-archive plugin whose socket is absent from the pod | The configured WAL-archive plugin is not available in this pod, so nothing is being archived. | `CloudNativePG >=1.29 <1.31` |  |
 | `cnpg-wal-archiving-failing` | critical | the instance manager reporting continuous archiving as failing | WAL archiving is failing, so WAL is accumulating and no new recovery points are being made. | `CloudNativePG >=1.29 <1.31` | `wal-archive-not-empty`, `object-store-denied`, `object-store-forbidden`, `object-store-unreachable`, `backup-destination-conflict`, `cnpg-wal-archive-plugin-missing` |
+| `cnpg-wal-files-waiting` | warning | an instance counting at least 32 WAL segments waiting to be archived | WAL segments are piling up unarchived on an instance, by its own count. | `CloudNativePG >=1.29 <1.31` | `cnpg-wal-archiving-failing`, `cnpg-instance-archive-failing` |
 | `object-store-denied` | critical | the object store refusing the configured credentials | The object store refused the operator's credentials for the configured destination. | every version |  |
 | `object-store-forbidden` | critical | the object store answering 403 Forbidden | The object store answered 403 Forbidden, so the configured credentials do not grant this destination. | every version |  |
 | `object-store-unreachable` | critical | an unreachable object store endpoint | The operator could not reach the configured object store endpoint. | every version |  |

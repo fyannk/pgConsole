@@ -36,6 +36,7 @@ import (
 	"github.com/fyannk/pgConsole/internal/evidence"
 	"github.com/fyannk/pgConsole/internal/history"
 	"github.com/fyannk/pgConsole/internal/identity"
+	"github.com/fyannk/pgConsole/internal/instancestatus"
 	"github.com/fyannk/pgConsole/internal/logstream"
 	"github.com/fyannk/pgConsole/internal/metrics"
 	"github.com/fyannk/pgConsole/internal/observe"
@@ -94,6 +95,13 @@ type PoolerPodsSource interface {
 type FailoverQuorumSource interface {
 	// CurrentFailoverQuorum returns the snapshot and whether one exists.
 	CurrentFailoverQuorum() (observe.FailoverQuorumSnapshot, bool)
+}
+
+// InstanceStatusSource supplies the current instance-status snapshot.
+type InstanceStatusSource interface {
+	// CurrentInstanceStatus returns the snapshot and whether a sweep
+	// has published one.
+	CurrentInstanceStatus() (instancestatus.Snapshot, bool)
 }
 
 // PrimaryLeaseSource supplies the current primary-lease snapshot.
@@ -205,6 +213,9 @@ type Sources struct {
 	// Metrics supplies the bounded instance-metrics window. Nil means
 	// metrics are disabled and no metrics route is registered.
 	Metrics MetricsSource
+	// InstanceStatus supplies the instance managers' own status reports;
+	// nil when the sweep is switched off.
+	InstanceStatus InstanceStatusSource
 	// PoolerMetrics supplies the same for the poolers' own exporter.
 	// Nil means no pooler-metrics route.
 	PoolerMetrics MetricsSource
@@ -588,6 +599,10 @@ func (h *Handler) handleClusterOverview(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) handleClusterPods(w http.ResponseWriter, r *http.Request) {
 	page := h.assemble(r, "cluster-pods")
 	page.PodHistory, _ = h.buildPodTimeline("", h.rosterMembers(h.sources.Pods.CurrentPods), recentPodHistoryBound, h.now())
+	if h.sources.InstanceStatus != nil {
+		snap, swept := h.sources.InstanceStatus.CurrentInstanceStatus()
+		page.InstanceStatus = buildInstanceStatusView(snap, swept, h.now())
+	}
 	h.renderPage(w, "cluster-pods", "cluster-pods.html.tmpl", page)
 }
 

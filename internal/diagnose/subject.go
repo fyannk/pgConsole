@@ -66,6 +66,9 @@ func PodSubjectOf(when Condition) PodSubject {
 	case PrimaryFailing, TimelineDivergence, PrimaryLeaseExpired, PrimaryLeaseHolderMismatch:
 		// The instance the operator's status or the lease names.
 		return PodSubjectAlways
+	case InstanceFlagSet, InstanceArchiveFailing, InstanceReadyWAL, InstanceSlotInactive:
+		// The instance whose own report matched.
+		return PodSubjectAlways
 	case StatusListed:
 		// The failed-instances list names pods; the claim lists name
 		// claims.

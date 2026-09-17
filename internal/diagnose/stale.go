@@ -61,13 +61,14 @@ const (
 	reasonLogsOff          = "log following is off, so nothing in the logs has been read"
 	reasonMetricsOff       = "instance metrics are not scraped"
 	reasonPoolerMetricsOff = "pooler metrics are not scraped"
+	reasonStatusOff        = "the instance managers' status reports are not read"
 )
 
 // sourceOff reports whether a reason names a source that is switched off
 // rather than one that is on and not answering.
 func sourceOff(reason string) bool {
 	switch reason {
-	case reasonEvidenceOff, reasonHistoryOff, reasonLogsOff, reasonMetricsOff, reasonPoolerMetricsOff:
+	case reasonEvidenceOff, reasonHistoryOff, reasonLogsOff, reasonMetricsOff, reasonPoolerMetricsOff, reasonStatusOff:
 		return true
 	}
 	return false
