@@ -101,6 +101,7 @@ func convertPrimaryLease(content map[string]any) (observe.PrimaryLeaseFacts, err
 	}
 	facts := observe.PrimaryLeaseFacts{
 		Present:         true,
+		Name:            lease.Name,
 		DurationSeconds: lease.Spec.LeaseDurationSeconds,
 		Transitions:     lease.Spec.LeaseTransitions,
 	}

@@ -248,14 +248,20 @@ type eventMembership struct {
 func membershipOf(s snapshots) eventMembership {
 	m := eventMembership{
 		pods: map[string]bool{}, backups: map[string]bool{}, schedules: map[string]bool{}, poolers: map[string]bool{},
-		podsOK: s.podsOK, backupsOK: s.backupsOK, schedulesOK: s.backupsOK, poolersOK: s.poolersOK,
+		podsOK: s.podsOK,
+		// A stale catalog is not current membership: its set is the last
+		// good one, and an event on an object that joined or left since
+		// would be admitted or withheld on a guess. Stale reads as
+		// unavailable here, as it does for the checks.
+		backupsOK: s.backupsOK && !s.backups.Stale, schedulesOK: s.backupsOK && !s.backups.Stale,
+		poolersOK: s.poolersOK && !s.poolers.Stale,
 	}
 	if s.podsOK {
 		for _, p := range s.pods.Pods {
 			m.pods[p.Name] = true
 		}
 	}
-	if s.backupsOK {
+	if m.backupsOK {
 		for _, b := range s.backups.Backups {
 			m.backups[b.Name] = true
 		}
@@ -263,7 +269,7 @@ func membershipOf(s snapshots) eventMembership {
 			m.schedules[sb.Name] = true
 		}
 	}
-	if s.poolersOK {
+	if m.poolersOK {
 		for _, p := range s.poolers.Poolers {
 			m.poolers[p.Name] = true
 		}
