@@ -91,8 +91,11 @@ type Slot struct {
 // A string the instance did not report is empty; a time it did not
 // report is nil.
 type Reading struct {
-	// Instance is the pod the report came from.
+	// Instance is the pod the report came from, and PodUID that pod's
+	// identity: a recreated pod of the same name is another pod, and a
+	// retained report never speaks for it.
 	Instance string
+	PodUID   string
 	// ObservedAt is when the sweep read it.
 	ObservedAt time.Time
 	// IsPrimary is the instance's own claim to the primary role.
@@ -196,11 +199,17 @@ func (s *Store) CurrentInstanceStatus() (Snapshot, bool) {
 	return s.snap, s.has
 }
 
+// member is one roster entry the sweep accounts for: the pod's name
+// and identity.
+type member struct {
+	name, uid string
+}
+
 // publish replaces the snapshot with the sweep's outcome: fresh
 // readings for the instances reached, the previous reading kept beside
-// the failure for the ones not reached, and instances no longer on the
-// roster dropped.
-func (s *Store) publish(at time.Time, roster []string, fresh map[string]Reading, failing map[string]string) {
+// the failure for the ones not reached when it came from the same pod,
+// and instances no longer on the roster dropped.
+func (s *Store) publish(at time.Time, roster []member, fresh map[string]Reading, failing map[string]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := Snapshot{
@@ -210,15 +219,20 @@ func (s *Store) publish(at time.Time, roster []string, fresh map[string]Reading,
 		Readings:   make(map[string]Reading, len(roster)),
 		Failing:    make(map[string]string, len(failing)),
 	}
-	for _, name := range roster {
-		if reading, ok := fresh[name]; ok {
-			next.Readings[name] = reading
+	for _, m := range roster {
+		if reading, ok := fresh[m.name]; ok {
+			next.Readings[m.name] = reading
 			continue
 		}
-		if previous, ok := s.snap.Readings[name]; ok {
-			next.Readings[name] = previous
+		if previous, ok := s.snap.Readings[m.name]; ok && previous.PodUID == m.uid {
+			next.Readings[m.name] = previous
 		}
-		if category, ok := failing[name]; ok {
+		if category, ok := failing[m.name]; ok {
+			next.Failing[m.name] = category
+		}
+	}
+	for name, category := range failing {
+		if _, listed := next.Failing[name]; !listed {
 			next.Failing[name] = category
 		}
 	}
@@ -331,22 +345,38 @@ func (c *Collector) Run(ctx context.Context) error {
 	}
 }
 
-// sweep reads every instance pod with an IP once. A pod without an IP
-// has not started and is not a failure; a deleting pod is not read.
+// sweep reads every instance pod once, inside one sweep interval. A
+// stale roster is not swept: its IPs are the last good ones, and a
+// report read from them could be another pod's; the retained reports
+// age into refusal instead. A pod without an IP has not started and a
+// deleting pod is not read; both are recorded as unread rather than
+// left out, so an incomplete sweep never reads as a complete one. A
+// pod the deadline leaves unread, and a roster cut at its bound, are
+// recorded the same way.
 func (c *Collector) sweep(ctx context.Context) {
 	snap, ok := c.source.CurrentPods()
-	if !ok {
+	if !ok || snap.Stale {
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.interval)
+	defer cancel()
 	at := c.clock.Now()
-	var roster []string
+	var roster []member
 	fresh := map[string]Reading{}
 	failing := map[string]string{}
 	for _, pod := range snap.Pods {
-		if pod.IP == "" || pod.Deleting {
+		roster = append(roster, member{name: pod.Name, uid: pod.UID})
+		switch {
+		case pod.Deleting:
+			failing[pod.Name] = "deleting"
+			continue
+		case pod.IP == "":
+			failing[pod.Name] = "not started"
+			continue
+		case ctx.Err() != nil:
+			failing[pod.Name] = "sweep deadline"
 			continue
 		}
-		roster = append(roster, pod.Name)
 		reading, err := c.readOne(ctx, pod.IP)
 		if err != nil {
 			category := redact.Safe(err)
@@ -364,8 +394,12 @@ func (c *Collector) sweep(ctx context.Context) {
 			c.logger.Info("instance status read recovered", slog.String("instance", pod.Name))
 		}
 		reading.Instance = pod.Name
+		reading.PodUID = pod.UID
 		reading.ObservedAt = at
 		fresh[pod.Name] = reading
+	}
+	if snap.Truncated {
+		failing["(roster)"] = "more pods than the roster bound, so the sweep is incomplete"
 	}
 	c.store.publish(at, roster, fresh, failing)
 }

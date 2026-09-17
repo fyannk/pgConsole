@@ -149,7 +149,11 @@ func versionFacts(in Input) VersionFacts {
 	// are all gone — leaves the last image an instance pod carried. It
 	// is retained by the pod store and labelled as such: the version is
 	// what it was, not what a pod says now.
-	if _, known := facts[ComponentCNPG]; !known && in.HasPods && in.Pods.LastOperatorImage != "" {
+	// It is used only for the Cluster it was seen on: a recreated
+	// Cluster of the same name is another cluster, and inherits nothing.
+	if _, known := facts[ComponentCNPG]; !known && in.HasPods && in.Pods.LastOperatorImage != "" &&
+		in.HasCluster && in.Cluster.Cluster.Present && in.Cluster.Cluster.UID != "" &&
+		in.Pods.LastOperatorImageOwner == in.Cluster.Cluster.UID {
 		if version, ok := imageTagVersion(in.Pods.LastOperatorImage); ok {
 			facts[ComponentCNPG] = ComponentVersion{
 				Version: version,

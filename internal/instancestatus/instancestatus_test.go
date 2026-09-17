@@ -130,9 +130,9 @@ func TestCollectorKeepsTheLastReportBesideAFailure(t *testing.T) {
 	host, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
 
 	source := &staticPods{snap: observe.PodsSnapshot{Pods: []observe.PodFacts{
-		{Name: "orders-1", IP: host},
-		{Name: "orders-2", IP: "203.0.113.1"},
-		{Name: "orders-3"},
+		{Name: "orders-1", UID: "u1", IP: host},
+		{Name: "orders-2", UID: "u2", IP: "203.0.113.1"},
+		{Name: "orders-3", UID: "u3"},
 	}}}
 	store := NewStore(10 * time.Second)
 	var logs bytes.Buffer
@@ -148,24 +148,39 @@ func TestCollectorKeepsTheLastReportBesideAFailure(t *testing.T) {
 	if snap.Failing["orders-2"] == "" {
 		t.Errorf("the unreachable instance carries no failure: %+v", snap.Failing)
 	}
-	if _, listed := snap.Failing["orders-3"]; listed {
-		t.Error("a pod without an IP was treated as a failure")
+	if snap.Failing["orders-3"] != "not started" {
+		t.Errorf("a pod without an IP is not recorded as unread: %+v", snap.Failing)
 	}
 	if got := strings.Count(logs.String(), "instance status read failed"); got != 1 {
-		t.Errorf("failure logged %d times across two sweeps, want once", got)
+		t.Errorf("failure logged %d times across two sweeps, want once (a pod without an IP is not a failed read)", got)
 	}
 
 	// The reachable pod stops answering: its last report stays, with
-	// the failure beside it; a pod gone from the roster is forgotten.
+	// the failure beside it, for as long as it is the same pod; a
+	// recreated pod of the same name gets no report of another's; a pod
+	// gone from the roster is forgotten.
 	srv.Close()
-	source.snap.Pods = source.snap.Pods[:1]
-	store.publish(time.Unix(1700000100, 0), []string{"orders-1"}, nil, map[string]string{"orders-1": "unavailable"})
+	store.publish(time.Unix(1700000100, 0), []member{{"orders-1", "u1"}}, nil, map[string]string{"orders-1": "unavailable"})
 	snap, _ = store.CurrentInstanceStatus()
 	if snap.Readings["orders-1"].Instance != "orders-1" || snap.Failing["orders-1"] != "unavailable" {
 		t.Errorf("last report not kept beside the failure: %+v", snap)
 	}
 	if _, kept := snap.Readings["orders-2"]; kept {
 		t.Error("an instance that left the roster is still listed")
+	}
+	store.publish(time.Unix(1700000200, 0), []member{{"orders-1", "u1-recreated"}}, nil, map[string]string{"orders-1": "unavailable"})
+	snap, _ = store.CurrentInstanceStatus()
+	if _, kept := snap.Readings["orders-1"]; kept {
+		t.Error("a recreated pod inherited the previous pod's report")
+	}
+
+	// A stale roster is not swept at all.
+	stale := &staticPods{snap: observe.PodsSnapshot{Stale: true, Pods: []observe.PodFacts{{Name: "orders-1", UID: "u1", IP: host}}}}
+	before, _ := store.CurrentInstanceStatus()
+	New(stale, store, port, nil, &sweepClock{sweeps: 1, now: time.Unix(1700000300, 0)}, slog.New(slog.NewJSONHandler(&logs, nil))).sweep(context.Background())
+	after, _ := store.CurrentInstanceStatus()
+	if after.Generation != before.Generation {
+		t.Error("a stale roster was swept")
 	}
 }
 

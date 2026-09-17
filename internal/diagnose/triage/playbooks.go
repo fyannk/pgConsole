@@ -208,6 +208,7 @@ func Playbooks() []Playbook {
 			Steps: []Step{
 				{
 					Question: "Has the operator refused the definition, or stopped before starting?",
+					Fact:     ClusterAbsent{},
 					Checks: []string{"cnpg-invalid-definition", "cnpg-unrecoverable", "cnpg-cannot-create-objects",
 						"cnpg-unknown-plugin", "cnpg-plugin-failure", "cnpg-image-catalog-unusable",
 						"cnpg-image-catalog-missing", "cnpg-image-catalog-lacks-major", "cnpg-service-account-missing"},

@@ -61,7 +61,9 @@ func (NoPrimaryNamed) Answer(in diagnose.Input) (bool, []diagnose.Evidence, stri
 	case in.Cluster.Stale:
 		return false, nil, "the Cluster snapshot is stale"
 	case !in.Cluster.Cluster.Present:
-		return false, nil, "the API server reports no Cluster object"
+		// No Cluster at all is the strongest form of no primary named.
+		return true, []diagnose.Evidence{{Origin: "Kubernetes-observed", Object: "Cluster",
+			Detail: "the pinned get returned not found"}}, ""
 	}
 	cluster := in.Cluster.Cluster
 	if cluster.CurrentPrimary != "" {
@@ -91,6 +93,8 @@ func (NoReadyInstance) Answer(in diagnose.Input) (bool, []diagnose.Evidence, str
 		return false, nil, "the pod roster has not been observed yet"
 	case in.Pods.Stale:
 		return false, nil, "the pod roster is stale"
+	case in.Pods.Truncated:
+		return false, nil, "the pod roster is bounded, so a ready pod may have been cut from it"
 	}
 	ready := 0
 	for _, pod := range in.Pods.Pods {
@@ -118,6 +122,8 @@ func (NoWriteService) Answer(in diagnose.Input) (bool, []diagnose.Evidence, stri
 		return false, nil, "the cluster's Services have not been observed yet"
 	case in.Infrastructure.Stale:
 		return false, nil, "the cluster's Services are stale"
+	case in.Infrastructure.Truncated:
+		return false, nil, "the cluster's objects are bounded, so the Service may have been cut from the list"
 	}
 	for _, service := range in.Infrastructure.Services {
 		// The adapter names the role from the operator's -rw suffix.
@@ -142,6 +148,8 @@ func (NoBackupSchedule) Answer(in diagnose.Input) (bool, []diagnose.Evidence, st
 		return false, nil, "the backup catalog has not been observed yet"
 	case in.Backups.Stale:
 		return false, nil, "the backup catalog is stale"
+	case in.Backups.SchedulesTruncated:
+		return false, nil, "the schedule list is bounded, so a schedule may have been cut from it"
 	}
 	if len(in.Backups.ScheduledBackups) > 0 {
 		return false, nil, ""

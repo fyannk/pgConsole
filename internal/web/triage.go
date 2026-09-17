@@ -129,9 +129,12 @@ func playbookView(walk triage.Walk) PlaybookView {
 		case triage.OutcomeAsk:
 			one.State = "na"
 			one.YourselfNote = "the console observes nothing that answers this step"
+		case triage.OutcomeOff:
+			one.State = "na"
+			one.YourselfNote = "every check behind this step needs a source this deployment has switched off"
 		default:
 			one.State = "na"
-			one.YourselfNote = "the checks behind this step did not run here"
+			one.YourselfNote = "the checks behind this step are pinned to versions other than the observed ones"
 		}
 		for _, finding := range step.Findings {
 			one.Findings = append(one.Findings, FindingRefView{

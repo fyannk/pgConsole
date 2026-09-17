@@ -211,6 +211,12 @@ func answer(step Step, in diagnose.Input, checks map[string]diagnose.Check, find
 	case len(unavailable) > 0:
 		out.Outcome = OutcomeUnknown
 		because = append(because, "could not run — "+strings.Join(unavailable, "; "))
+	case len(clear) > 0 && len(off) > 0:
+		// A clear beside a switched-off check is not every check having
+		// run: the step rules out only what the clear ones describe, and
+		// says so rather than reading as settled.
+		out.Outcome = OutcomeUnknown
+		because = append(because, "clear: "+strings.Join(clear, ", "))
 	case len(clear) > 0:
 		out.Outcome = OutcomeRuledOut
 		because = append(because, "clear: "+strings.Join(clear, ", "))
@@ -220,7 +226,7 @@ func answer(step Step, in diagnose.Input, checks map[string]diagnose.Check, find
 		out.Outcome = OutcomeNotApplicable
 	}
 	if len(off) > 0 && out.Outcome != OutcomeOff {
-		because = append(because, "switched off: "+strings.Join(off, ", "))
+		because = append(because, "could not be judged in full — switched off: "+strings.Join(off, ", "))
 	} else if len(off) > 0 {
 		because = append(because, "every check here needs a switched-off source: "+strings.Join(off, ", "))
 	}

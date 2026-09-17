@@ -57,6 +57,9 @@ type PodFacts struct {
 	Started *time.Time
 	// Image is the PostgreSQL container image.
 	Image string
+	// OwnerUID is the UID of the Cluster that controls this pod, from
+	// its owner reference; empty when the pod carries none.
+	OwnerUID string
 	// Deleting reports a set deletion timestamp.
 	Deleting bool
 	// Containers is every container the pod declares, init containers
@@ -166,6 +169,10 @@ type PodsSnapshot struct {
 	LastOperatorImage       string
 	LastOperatorImagePod    string
 	LastOperatorImageSeenAt time.Time
+	// LastOperatorImageOwner is the UID of the Cluster that owned the
+	// pod the image was seen on, so a recreated Cluster of the same
+	// name never inherits it.
+	LastOperatorImageOwner string
 }
 
 // BootstrapControllerContainer is the init container the operator
@@ -206,11 +213,13 @@ func (s *PodStore) publish(pods []PodFacts, observedAt time.Time) {
 		LastOperatorImage:       s.snap.LastOperatorImage,
 		LastOperatorImagePod:    s.snap.LastOperatorImagePod,
 		LastOperatorImageSeenAt: s.snap.LastOperatorImageSeenAt,
+		LastOperatorImageOwner:  s.snap.LastOperatorImageOwner,
 	}
 	for _, pod := range sorted {
 		for _, container := range pod.Containers {
 			if container.Init && container.Name == BootstrapControllerContainer && container.Image != "" {
-				next.LastOperatorImage, next.LastOperatorImagePod, next.LastOperatorImageSeenAt = container.Image, pod.Name, observedAt
+				next.LastOperatorImage, next.LastOperatorImagePod = container.Image, pod.Name
+				next.LastOperatorImageSeenAt, next.LastOperatorImageOwner = observedAt, pod.OwnerUID
 			}
 		}
 	}

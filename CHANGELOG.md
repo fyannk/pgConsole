@@ -153,7 +153,7 @@ period. Pin an exact image tag and read the notes before upgrading.
   not apply", as it always has on any release outside the verified
   span.
 
-- **The catalog grew from 86 to 129 rules, 135 checks with the six
+- **The catalog grew from 86 to 136 rules, 142 checks with the six
   hand-written detectors.** The additions are related where the
   evidence supports it: a stuck bootstrap nests under the bootstrap log
   line that explains it, a failed backup phase under the Backup's own

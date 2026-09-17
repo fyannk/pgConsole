@@ -56,7 +56,7 @@ var signalPatterns = []struct {
 }
 
 // TestEveryUpstreamSignalIsDecided fails on a signal in any verified
-// release's tree that no rule listens for and no entry in Undeclined
+// release's tree that no rule listens for and no entry in Undiagnosed
 // declines.
 func TestEveryUpstreamSignalIsDecided(t *testing.T) {
 	listened := map[upstreamSignal]bool{}

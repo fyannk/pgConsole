@@ -152,6 +152,7 @@ func (c *Client) convertPod(content map[string]any) (observe.PodFacts, bool, err
 		Name:     pod.Name,
 		UID:      string(pod.UID),
 		Role:     pod.Labels[roleLabel],
+		OwnerUID: controllingClusterUID(pod.OwnerReferences),
 		Phase:    string(pod.Status.Phase),
 		Node:     pod.Spec.NodeName,
 		IP:       pod.Status.PodIP,
@@ -298,4 +299,16 @@ func (c *Client) logExcludedContainer(pod, container string) {
 		slog.String("reason", "not declared by the pod"),
 		slog.String("pod", pod),
 		slog.String("container", container))
+}
+
+// controllingClusterUID is the UID of the Cluster that controls the
+// object, from its owner references; empty when none does.
+func controllingClusterUID(refs []metav1.OwnerReference) string {
+	for i := range refs {
+		ref := &refs[i]
+		if ref.Controller != nil && *ref.Controller && ref.Kind == "Cluster" {
+			return string(ref.UID)
+		}
+	}
+	return ""
 }

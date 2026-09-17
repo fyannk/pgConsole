@@ -180,14 +180,15 @@ func TestAStepAnswersHonestly(t *testing.T) {
 		{Question: "ruled out", Checks: []string{"b"}},
 		{Question: "unknown", Checks: []string{"b", "c"}},
 		{Question: "off", Checks: []string{"d"}},
+		{Question: "clear beside off", Checks: []string{"b", "d"}},
 		{Question: "na", Checks: []string{"e"}},
 		{Question: "ask", Yourself: "kubectl get something"},
 		{Question: "fact yes", Fact: ClusterAbsent{}},
-		{Question: "fact unknown", Fact: NoPrimaryNamed{}, Checks: []string{"b"}},
+		{Question: "fact absent cluster", Fact: NoPrimaryNamed{}, Checks: []string{"b"}},
 	}}
 	in := diagnose.Input{Now: now, HasCluster: true, Cluster: observe.Snapshot{Cluster: observe.ClusterFacts{Present: false}}}
 	walk := Evaluate(playbook, in, result)
-	want := []Outcome{OutcomeFound, OutcomeRuledOut, OutcomeUnknown, OutcomeOff, OutcomeNotApplicable, OutcomeAsk, OutcomeFound, OutcomeUnknown}
+	want := []Outcome{OutcomeFound, OutcomeRuledOut, OutcomeUnknown, OutcomeOff, OutcomeUnknown, OutcomeNotApplicable, OutcomeAsk, OutcomeFound, OutcomeFound}
 	for i, step := range walk.Steps {
 		if step.Outcome != want[i] {
 			t.Errorf("%s: %v, want %v (%s)", step.Question, step.Outcome, want[i], step.Because)
@@ -199,11 +200,11 @@ func TestAStepAnswersHonestly(t *testing.T) {
 	if !strings.Contains(walk.Steps[2].Because, "the roster is stale") {
 		t.Errorf("unknown step does not carry the check's own reason: %q", walk.Steps[2].Because)
 	}
-	if len(walk.Steps[6].Evidence) != 1 {
-		t.Errorf("a found fact carries no evidence: %+v", walk.Steps[6])
+	if len(walk.Steps[7].Evidence) != 1 {
+		t.Errorf("a found fact carries no evidence: %+v", walk.Steps[7])
 	}
-	if !strings.Contains(walk.Steps[7].Because, "no Cluster object") {
-		t.Errorf("a fact that cannot answer does not say why: %q", walk.Steps[7].Because)
+	if walk.Steps[8].Outcome != OutcomeFound || !strings.Contains(walk.Steps[4].Because, "switched off") {
+		t.Errorf("absent cluster = %v; clear beside off says %q", walk.Steps[8].Outcome, walk.Steps[4].Because)
 	}
 }
 
