@@ -1,0 +1,72 @@
+{{- /*
+  Triage. Renders web.TriageView: the same run the diagnostics screen
+  renders, walked from the symptom an operator arrives with rather
+  than from whatever matched. One playbook per symptom, its steps in
+  the order the upstream troubleshooting guide asks them, and every
+  step answered by the checks that already ran — never by a check of
+  its own.
+
+  The honesty rules carry through: a step is found when a check behind
+  it matched, ruled out when every check behind it ran and cleared,
+  and could-not-be-judged when one could not run. A step nothing here
+  can observe says so and hands the reader the command that would
+  answer it.
+*/ -}}
+{{template "page-head" "triage"}}
+{{template "shell-open" .Shell}}
+  <header>
+    <div class="header-bar">
+      <h1>Triage</h1>
+    <dl class="target">
+      <dt>Cluster</dt><dd>{{.ClusterName}}</dd>
+    </dl>
+    </div>
+    <p class="lede">Start from what you are seeing. Each step is answered by the checks the diagnostics screen already ran, in the order the upstream guide asks; nothing here observes anything on its own.</p>
+  </header>
+
+  {{- range .Playbooks}}
+  {{- $start := .StartAt}}
+  <section class="panel playbook" id="{{.ID}}">
+    <div class="panel-head">
+      <h2>{{.Symptom}}</h2>
+      <p class="playbook-summary"><span data-state="{{.State}}">{{.Summary}}</span></p>
+    </div>
+    <p class="finding-detail">{{.Describes}}. Order follows the <a href="{{.Upstream}}" rel="noopener">upstream troubleshooting guide</a>.</p>
+    <ol class="steps">
+      {{- range .Steps}}
+      <li class="step" data-state="{{.State}}"{{if eq .Number $start}} data-start="true"{{end}}>
+        <div class="step-head">
+          <span class="step-number">{{.Number}}</span>
+          <h3>{{.Question}}</h3>
+          <span class="step-outcome" data-state="{{.State}}">{{.Outcome}}</span>
+        </div>
+        {{- if .Findings}}
+        <ul class="step-findings">
+          {{- range .Findings}}
+          <li><span class="sev" data-severity="{{.Severity}}">{{.Severity}}</span> <a href="{{.Anchor}}">{{.Summary}}</a></li>
+          {{- end}}
+        </ul>
+        {{- end}}
+        {{- range .Evidence}}
+        <div class="evidence">
+          <p class="evidence-meta"><strong>{{.Object}}</strong> <span class="origin-tag">{{.Origin}}</span></p>
+          <pre>{{.Detail}}</pre>
+        </div>
+        {{- end}}
+        <p class="step-explain">{{.Explain}}</p>
+        {{- if .Because}}
+        <p class="step-because"><span class="origin-tag">{{.Because}}</span></p>
+        {{- end}}
+        {{- if .Yourself}}
+        <div class="step-yourself">
+          <p class="next-steps-label">Look yourself <span class="origin-tag">{{.YourselfNote}}</span></p>
+          <pre>{{.Yourself}}</pre>
+        </div>
+        {{- end}}
+      </li>
+      {{- end}}
+    </ol>
+  </section>
+  {{- end}}
+  <p class="origin">source: application-derived from the same run as the diagnostics screen; each step names the checks it rests on, and a step that could not be judged rules nothing out.</p>
+{{template "shell-close"}}

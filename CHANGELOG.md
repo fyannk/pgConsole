@@ -85,6 +85,18 @@ period. Pin an exact image tag and read the notes before upgrading.
   them in the order they were made, with the cluster's own clocks
   beside them; a state with no instant is never given one.
 
+- **Triage: start from the symptom.** A new screen (`/triage`, same
+  flag and level as diagnostics) reads the same run in the other
+  direction. Seven playbooks — clients cannot connect, writes refused,
+  backups not happening, the cluster will not come up, a replica
+  behind, an operation stuck, the operator silent — each walk an
+  ordered list of questions in the order the upstream troubleshooting
+  guide asks them, every question answered by the checks that already
+  ran and the first found one marked as where to start. A playbook adds
+  no check; it is a reading order written as data, and the tests refuse
+  a step naming a check the catalog does not declare. A step the
+  console cannot observe hands the reader the guide's own command.
+
 ### Changed
 
 - **The catalog grew from 86 to 127 rules, 133 checks with the six

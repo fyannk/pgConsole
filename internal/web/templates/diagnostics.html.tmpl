@@ -68,7 +68,7 @@
     <h2>Findings</h2>
     {{- if .Findings}}
     {{- range .Findings}}
-    <article class="finding" data-severity="{{.Severity}}">
+    <article class="finding" id="finding-{{.ID}}" data-severity="{{.Severity}}">
       <div class="finding-head">
         <span class="sev">{{.Severity}}</span>
         <h3>{{.Summary}}</h3>
@@ -103,7 +103,7 @@
       <div class="finding-chain">
         <p class="chain-label">In consequence — the catalog relates these to the finding above; each keeps its own evidence:</p>
         {{- range .Consequences}}
-        <details class="chained" data-severity="{{.Severity}}">
+        <details class="chained" id="finding-{{.ID}}" data-severity="{{.Severity}}">
           <summary><span class="sev">{{.Severity}}</span> {{.Summary}}{{if .Via}} <span class="origin-tag">{{.Via}}</span>{{end}}</summary>
           {{- if .Detail}}
           <p class="finding-detail">{{.Detail}}</p>
