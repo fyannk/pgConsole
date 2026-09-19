@@ -166,6 +166,7 @@ jobs:
         with:
           name: ui-results
           path: artifacts/ui/
+          retention-days: 7
 
   container:
     name: Restricted container profiles
@@ -194,6 +195,7 @@ jobs:
         with:
           name: e2e-results
           path: artifacts/e2e/
+          retention-days: 7
 
   release-artifacts:
     name: Release binaries and supply chain
@@ -218,3 +220,4 @@ jobs:
           path: |
             dist/
             artifacts/release/
+          retention-days: 14
