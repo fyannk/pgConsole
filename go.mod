@@ -13,9 +13,9 @@ require (
 	github.com/cloudnative-pg/api v1.30.0
 	github.com/fyannk/pgObjectStoreViewer/api v0.1.2
 	go.etcd.io/bbolt v1.5.0
-	k8s.io/api v0.37.0
-	k8s.io/apimachinery v0.37.0
-	k8s.io/client-go v0.37.0
+	k8s.io/api v0.37.1
+	k8s.io/apimachinery v0.37.1
+	k8s.io/client-go v0.37.1
 	sigs.k8s.io/controller-runtime v0.25.1
 )
 
